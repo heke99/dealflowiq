@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { DealForm } from '@/components/deals/DealForm'
 import { updateDealAction } from '@/app/deals/actions'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { getOrganizationUnderwritingDefaults } from '@/lib/underwriting/defaults'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export default async function EditDealPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
@@ -10,6 +11,7 @@ export default async function EditDealPage({ params, searchParams }: { params: P
   const query = await searchParams
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
+  const assumptionDefaults = await getOrganizationUnderwritingDefaults(workspace.organization?.id)
 
   const { data: deal } = workspace.organization?.id
     ? await supabase
@@ -40,7 +42,7 @@ export default async function EditDealPage({ params, searchParams }: { params: P
           <h1 className="mt-2 text-3xl font-bold">{(deal as any).title}</h1>
           <p className="mt-3 max-w-3xl text-slate-300">Update property, rent, price and expense assumptions.</p>
         </section>
-        <DealForm action={updateDealAction} submitLabel="Save Changes" deal={deal as any} property={property as any} error={query?.error ? String(query.error) : null} />
+        <DealForm action={updateDealAction} submitLabel="Save Changes" deal={deal as any} property={property as any} error={query?.error ? String(query.error) : null} assumptionDefaults={assumptionDefaults} />
       </div>
     </AppShell>
   )

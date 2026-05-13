@@ -1,4 +1,5 @@
 import type { createDealAction, updateDealAction } from '@/app/deals/actions'
+import type { UnderwritingDefaults } from '@/lib/underwriting/defaults'
 
 type Action = typeof createDealAction | typeof updateDealAction
 
@@ -8,6 +9,7 @@ type DealFormProps = {
   deal?: Record<string, any> | null
   property?: Record<string, any> | null
   error?: string | null
+  assumptionDefaults?: UnderwritingDefaults | null
 }
 
 const statuses = [
@@ -72,7 +74,8 @@ function Section({ title, description, children }: { title: string; description:
   )
 }
 
-export function DealForm({ action, submitLabel, deal, property, error }: DealFormProps) {
+export function DealForm({ action, submitLabel, deal, property, error, assumptionDefaults }: DealFormProps) {
+  const defaults = assumptionDefaults
   return (
     <form action={action} className="space-y-6">
       {deal?.id ? <input type="hidden" name="deal_id" value={deal.id} /> : null}
@@ -132,22 +135,22 @@ export function DealForm({ action, submitLabel, deal, property, error }: DealFor
         <Field label="Annual insurance" name="insurance_annual" type="number" defaultValue={value(deal, 'insurance_annual')} />
         <Field label="Monthly HOA" name="hoa_monthly" type="number" defaultValue={value(deal, 'hoa_monthly')} />
         <Field label="Monthly utilities" name="utilities_monthly" type="number" defaultValue={value(deal, 'utilities_monthly')} />
-        <Field label="Vacancy %" name="vacancy_percent" type="number" defaultValue={value(deal, 'vacancy_percent')} />
-        <Field label="Management %" name="management_percent" type="number" defaultValue={value(deal, 'management_percent')} />
-        <Field label="Monthly CapEx reserve" name="capex_monthly" type="number" defaultValue={value(deal, 'capex_monthly')} />
+        <Field label="Vacancy %" name="vacancy_percent" type="number" defaultValue={value(deal, 'vacancy_percent') || String(defaults?.vacancy_percent ?? '')} />
+        <Field label="Management %" name="management_percent" type="number" defaultValue={value(deal, 'management_percent') || String(defaults?.management_percent ?? '')} />
+        <Field label="Monthly CapEx reserve" name="capex_monthly" type="number" defaultValue={value(deal, 'capex_monthly') || String(defaults?.capex_monthly ?? '')} />
       </Section>
 
       <Section title="Financing and strategy assumptions" description="Every major formula uses editable assumptions. Change these when lender terms, market rules or your model differs.">
-        <Field label="Down payment %" name="down_payment_percent" type="number" defaultValue={value(deal, 'down_payment_percent') || '20'} help="Used when down payment amount is blank." />
+        <Field label="Down payment %" name="down_payment_percent" type="number" defaultValue={value(deal, 'down_payment_percent') || String(defaults?.down_payment_percent ?? 20)} help="Used when down payment amount is blank." />
         <Field label="Down payment amount" name="down_payment_amount" type="number" defaultValue={value(deal, 'down_payment_amount')} help="Overrides down payment %." />
         <Field label="Loan amount" name="loan_amount" type="number" defaultValue={value(deal, 'loan_amount')} help="Overrides purchase price minus down payment." />
-        <Field label="Interest rate %" name="interest_rate_percent" type="number" defaultValue={value(deal, 'interest_rate_percent') || '7'} help="Used in the mortgage payment and DSCR formulas." />
+        <Field label="Interest rate %" name="interest_rate_percent" type="number" defaultValue={value(deal, 'interest_rate_percent') || String(defaults?.interest_rate_percent ?? 7)} help="Used in the mortgage payment and DSCR formulas." />
         <Field label="Loan term years" name="loan_term_years" type="number" defaultValue={value(deal, 'loan_term_years') || '30'} help="Reference term shown in the UI." />
-        <Field label="Number of monthly payments" name="loan_term_months" type="number" defaultValue={value(deal, 'loan_term_months') || '360'} help="Actual amortization input. Example: 360 for 30 years, 180 for 15 years." />
-        <Field label="DSCR minimum threshold" name="dscr_min_threshold" type="number" defaultValue={value(deal, 'dscr_min_threshold') || '1.20'} help="Editable per lender/program. Example: 1.20, 1.25 or 1.30." />
+        <Field label="Number of monthly payments" name="loan_term_months" type="number" defaultValue={value(deal, 'loan_term_months') || String(defaults?.loan_term_months ?? 360)} help="Actual amortization input. Example: 360 for 30 years, 180 for 15 years." />
+        <Field label="DSCR minimum threshold" name="dscr_min_threshold" type="number" defaultValue={value(deal, 'dscr_min_threshold') || String(defaults?.dscr_min_threshold ?? 1.2)} help="Editable per lender/program. Example: 1.20, 1.25 or 1.30." />
         <label className="block">
           <span className="text-sm font-medium text-slate-300">Cap rate basis</span>
-          <select name="cap_rate_basis" defaultValue={value(deal, 'cap_rate_basis') || 'purchase_price'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+          <select name="cap_rate_basis" defaultValue={value(deal, 'cap_rate_basis') || defaults?.cap_rate_basis || 'purchase_price'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
             <option value="purchase_price">Purchase price</option>
             <option value="arv">ARV</option>
             <option value="custom_value">Custom value</option>
@@ -156,11 +159,11 @@ export function DealForm({ action, submitLabel, deal, property, error }: DealFor
         </label>
         <Field label="Custom cap rate value" name="cap_rate_custom_value" type="number" defaultValue={value(deal, 'cap_rate_custom_value')} help="Used only if cap rate basis is custom value." />
         <Field label="Closing costs" name="closing_costs" type="number" defaultValue={value(deal, 'closing_costs')} />
-        <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || '8'} help="Used in flip profit preview." />
-        <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly')} help="Used in flip profit preview." />
-        <Field label="MAO %" name="mao_percentage" type="number" defaultValue={value(deal, 'mao_percentage') || '70'} help="Editable wholesale rule. 70% is only a common default, not a law." />
-        <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || '10000'} />
-        <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || '75'} help="Used in BRRRR refi loan preview." />
+        <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || String(defaults?.selling_costs_percent ?? 8)} help="Used in flip profit preview." />
+        <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly') || String(defaults?.holding_costs_monthly ?? '')} help="Used in flip profit preview." />
+        <Field label="MAO %" name="mao_percentage" type="number" defaultValue={value(deal, 'mao_percentage') || String(defaults?.mao_percentage ?? 70)} help="Editable wholesale rule. 70% is only a common default, not a law." />
+        <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || String(defaults?.desired_wholesale_fee ?? 10000)} />
+        <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || String(defaults?.refinance_ltv_percent ?? 75)} help="Used in BRRRR refi loan preview." />
       </Section>
 
       <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

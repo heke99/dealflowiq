@@ -57,6 +57,7 @@ export function AppShell({
     { href: '/calculators', label: 'Calculators', visible: true, feature: 'calculators', core: true },
     { href: '/buyers', label: 'Buyers', visible: true, feature: 'buyers' },
     { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
+    { href: '/settings/underwriting', label: 'Underwriting Defaults', visible: true, core: true },
     { href: '/settings', label: 'Settings', visible: true, core: true },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },

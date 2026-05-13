@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { HUDUSER_DEFAULT_YEAR, lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
+import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
 import { importZillowRentalByUrl } from '@/lib/integrations/zillow/zillowClient'
 import { summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
 
@@ -195,7 +195,8 @@ export async function lookupHudRentAction(formData: FormData) {
   const { workspace, supabase, property } = await requireDeal(dealId)
   const zipCode = text(formData, 'zip_code') || property?.zip_code || ''
   const bedrooms = numberValue(formData, 'bedrooms') ?? property?.bedrooms ?? null
-  const hudYear = HUDUSER_DEFAULT_YEAR
+  const hudYearRaw = String(formData.get('hud_year') || 'auto').trim().toLowerCase()
+  const hudYear = hudYearRaw && hudYearRaw !== 'auto' ? Number(hudYearRaw) : 'auto'
 
   try {
     const result = await lookupHudFmrByZip({ zipCode, bedrooms, hudYear })
@@ -212,9 +213,9 @@ export async function lookupHudRentAction(formData: FormData) {
       rent_2br: result.rents[2],
       rent_3br: result.rents[3],
       rent_4br: result.rents[4],
-      source: 'HUDUSER',
+      source: result.hudYearMode === 'auto' ? 'HUDUSER_AUTO_LATEST' : 'HUDUSER_MANUAL_YEAR',
       source_url: result.sourceUrl,
-      raw_response: result.raw as any,
+      raw_response: { ...(result.raw as any), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears } } as any,
       fetched_at: new Date().toISOString(),
     }, { onConflict: 'zip_code,hud_year' })
 
@@ -230,7 +231,9 @@ export async function lookupHudRentAction(formData: FormData) {
       bedrooms,
       hud_year: result.hudYear,
       status: 'success',
-      message: rent ? `Applied ${rent} HUD/FMR benchmark to deal.` : 'HUD lookup succeeded but no selected bedroom rent was found.',
+      message: rent
+        ? `Applied ${rent} HUD/FMR benchmark from HUD year ${result.hudYear}. Attempted years: ${result.attemptedYears.join(', ')}.`
+        : `HUD lookup succeeded for HUD year ${result.hudYear}, but no selected bedroom rent was found.`,
       source_url: result.sourceUrl,
     })
 
@@ -244,7 +247,7 @@ export async function lookupHudRentAction(formData: FormData) {
       created_by: workspace.user.id,
       zip_code: zipCode || 'missing',
       bedrooms,
-      hud_year: hudYear,
+      hud_year: typeof hudYear === 'number' && Number.isFinite(hudYear) ? hudYear : new Date().getFullYear(),
       status: 'failed',
       message: error instanceof Error ? error.message : 'HUD lookup failed',
     })

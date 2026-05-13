@@ -1,6 +1,10 @@
+export type HudYearMode = 'auto' | 'manual'
+
 export type HudFmrResult = {
   zipCode: string
   hudYear: number
+  hudYearMode: HudYearMode
+  attemptedYears: number[]
   state?: string | null
   county?: string | null
   metroArea?: string | null
@@ -19,14 +23,37 @@ export type HudFmrResult = {
 type LookupParams = {
   zipCode: string
   bedrooms?: number | null
-  hudYear?: number | null
+  hudYear?: number | 'auto' | null
 }
 
-export const HUDUSER_DEFAULT_YEAR = 2026
+export const HUDUSER_MIN_LOOKBACK_YEAR = 2020
 
-function currentHudYear() {
-  const envYear = Number(process.env.HUDUSER_DEFAULT_YEAR || HUDUSER_DEFAULT_YEAR)
-  return Number.isFinite(envYear) && envYear > 0 ? Math.round(envYear) : HUDUSER_DEFAULT_YEAR
+export function getHudConfiguredDefaultYear(): number | null {
+  const forced = Number(process.env.HUDUSER_FORCE_YEAR || '')
+  if (Number.isFinite(forced) && forced >= HUDUSER_MIN_LOOKBACK_YEAR) return Math.round(forced)
+
+  const configured = String(process.env.HUDUSER_DEFAULT_YEAR || 'auto').trim().toLowerCase()
+  if (!configured || configured === 'auto' || configured === 'latest') return null
+
+  const parsed = Number(configured)
+  return Number.isFinite(parsed) && parsed >= HUDUSER_MIN_LOOKBACK_YEAR ? Math.round(parsed) : null
+}
+
+export function getHudCandidateYears(explicitYear?: number | 'auto' | null) {
+  if (typeof explicitYear === 'number' && Number.isFinite(explicitYear) && explicitYear >= HUDUSER_MIN_LOOKBACK_YEAR) {
+    return [Math.round(explicitYear)]
+  }
+
+  const configured = getHudConfiguredDefaultYear()
+  if (configured) return [configured]
+
+  // HUD/FMR fiscal-year data can be released ahead of or behind the calendar year.
+  // Try next year first, then walk backward until a published year responds.
+  const currentYear = new Date().getFullYear()
+  const firstCandidate = currentYear + 1
+  const years: number[] = []
+  for (let year = firstCandidate; year >= HUDUSER_MIN_LOOKBACK_YEAR; year -= 1) years.push(year)
+  return years
 }
 
 function envTemplate() {
@@ -44,7 +71,7 @@ function buildUrl(zipCode: string, hudYear: number) {
 
 function headers(): Record<string, string> {
   const token = process.env.HUDUSER_API_TOKEN || process.env.HUD_USER_API_TOKEN
-  const result: Record<string, string> = {}
+  const result: Record<string, string> = { Accept: 'application/json' }
   if (token) result.Authorization = `Bearer ${token}`
   return result
 }
@@ -87,44 +114,68 @@ function bedroomKey(bedrooms?: number | null): 0 | 1 | 2 | 3 | 4 {
   return rounded as 1 | 2 | 3
 }
 
-export async function lookupHudFmrByZip(params: LookupParams): Promise<HudFmrResult> {
-  const zipCode = params.zipCode.trim()
-  if (!/^\d{5}$/.test(zipCode)) throw new Error('Enter a valid 5-digit ZIP code before running HUD lookup.')
-
-  // DealFlowIQ intentionally defaults HUD lookups to the latest configured HUD year.
-  // For the current product cycle that is FY 2026; override only with HUDUSER_DEFAULT_YEAR if needed.
-  const hudYear = currentHudYear()
-  const sourceUrl = buildUrl(zipCode, hudYear)
-  const response = await fetch(sourceUrl, { headers: headers(), cache: 'no-store' })
-
-  if (!response.ok) {
-    throw new Error(`HUD USER lookup failed (${response.status}). Check HUDUSER_API_TOKEN or HUDUSER_FMR_LOOKUP_URL_TEMPLATE.`)
-  }
-
-  const raw = await response.json()
-  const rents = {
+function normalizeRents(raw: unknown) {
+  return {
     0: rentForBedroom(raw, 0),
     1: rentForBedroom(raw, 1),
     2: rentForBedroom(raw, 2),
     3: rentForBedroom(raw, 3),
     4: rentForBedroom(raw, 4),
   }
+}
 
-  const selectedBedroom = bedroomKey(params.bedrooms)
-  const selectedBedroomRent = rents[selectedBedroom]
-  if (!selectedBedroomRent && !Object.values(rents).some(Boolean)) {
-    throw new Error('HUD response was received but no FMR rent fields could be normalized. Adjust the endpoint/template mapping or enter HUD rent manually.')
+function hasAnyRent(rents: ReturnType<typeof normalizeRents>) {
+  return Object.values(rents).some((value) => typeof value === 'number' && value > 0)
+}
+
+export async function lookupHudFmrByZip(params: LookupParams): Promise<HudFmrResult> {
+  const zipCode = params.zipCode.trim()
+  if (!/^\d{5}$/.test(zipCode)) throw new Error('Enter a valid 5-digit ZIP code before running HUD lookup.')
+
+  const candidateYears = getHudCandidateYears(params.hudYear)
+  const attemptedYears: number[] = []
+  let lastError: string | null = null
+
+  for (const hudYear of candidateYears) {
+    attemptedYears.push(hudYear)
+    const sourceUrl = buildUrl(zipCode, hudYear)
+
+    try {
+      const response = await fetch(sourceUrl, { headers: headers(), cache: 'no-store' })
+      if (!response.ok) {
+        lastError = `HUD USER lookup failed for ${hudYear} (${response.status}).`
+        continue
+      }
+
+      const raw = await response.json()
+      const rents = normalizeRents(raw)
+      if (!hasAnyRent(rents)) {
+        lastError = `HUD response for ${hudYear} did not include usable FMR rent fields.`
+        continue
+      }
+
+      const selectedBedroom = bedroomKey(params.bedrooms)
+      const selectedBedroomRent = rents[selectedBedroom]
+
+      return {
+        zipCode,
+        hudYear,
+        hudYearMode: typeof params.hudYear === 'number' ? 'manual' : 'auto',
+        attemptedYears,
+        state: (findFirst(raw, ['state', 'State']) as string | undefined) || null,
+        county: (findFirst(raw, ['county', 'County', 'county_name']) as string | undefined) || null,
+        metroArea: (findFirst(raw, ['metro_area', 'metroArea', 'area_name', 'metro']) as string | undefined) || null,
+        rents,
+        selectedBedroomRent,
+        sourceUrl,
+        raw,
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : `HUD USER lookup failed for ${hudYear}.`
+    }
   }
 
-  return {
-    zipCode,
-    hudYear,
-    state: (findFirst(raw, ['state', 'State']) as string | undefined) || null,
-    county: (findFirst(raw, ['county', 'County', 'county_name']) as string | undefined) || null,
-    metroArea: (findFirst(raw, ['metro_area', 'metroArea', 'area_name', 'metro']) as string | undefined) || null,
-    rents,
-    selectedBedroomRent,
-    sourceUrl,
-    raw,
-  }
+  throw new Error(
+    `${lastError || 'HUD USER lookup failed.'} Tried HUD/FMR years: ${attemptedYears.join(', ')}. Check HUDUSER_API_TOKEN and endpoint settings.`,
+  )
 }

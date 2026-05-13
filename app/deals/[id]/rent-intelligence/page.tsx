@@ -91,7 +91,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
             <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Batch 6</div>
             <h1 className="mt-2 text-3xl font-bold">Rent Intelligence</h1>
             <p className="mt-3 max-w-3xl text-slate-300">
-              Build market rent from comparable listings and pull Section 8/HUD FMR benchmarks by ZIP. Zillow and similar URLs are stored as source references unless a licensed API is connected.
+              Build market rent from comparable listings and pull Section 8/HUD FMR benchmarks by ZIP. HUD lookups default to the latest available HUD year with fallback, and you can manually select a historical year for audit/comparison.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -170,16 +170,23 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
               <input type="hidden" name="deal_id" value={id} />
               <h2 className="text-xl font-bold">HUD / Section 8 lookup</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                Uses official HUD USER benchmark data by ZIP. DealFlowIQ defaults this lookup to FY 2026 for the current product cycle. Configure <code>HUDUSER_API_TOKEN</code> and optionally <code>HUDUSER_FMR_LOOKUP_URL_TEMPLATE</code> in environment variables.
+                Uses official HUD USER benchmark data by ZIP. DealFlowIQ defaults to Auto, which tries the newest likely HUD/FMR year first and falls back year-by-year until a published dataset responds. Configure <code>HUDUSER_API_TOKEN</code> and optionally <code>HUDUSER_FMR_LOOKUP_URL_TEMPLATE</code> in environment variables.
               </p>
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <Field label="ZIP code" name="zip_code" defaultValue={property?.zip_code || ''} />
                 <Field label="Bedrooms" name="bedrooms" type="number" defaultValue={property?.bedrooms || ''} />
-                <div className="rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3">
-                  <div className="text-sm font-medium text-slate-300">HUD year</div>
-                  <div className="mt-2 text-lg font-bold text-slate-100">2026</div>
-                  <div className="mt-1 text-xs leading-5 text-slate-500">Locked to FY 2026 unless the server env changes.</div>
-                </div>
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-300">HUD year</span>
+                  <select name="hud_year" defaultValue="auto" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                    <option value="auto">Auto / Latest available</option>
+                    <option value="2027">2027</option>
+                    <option value="2026">2026</option>
+                    <option value="2025">2025</option>
+                    <option value="2024">2024</option>
+                    <option value="2023">2023</option>
+                  </select>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">Auto tries newest available HUD/FMR year and falls back if not published yet.</span>
+                </label>
               </div>
               <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
                 HUD/FMR is a benchmark, not guaranteed contract rent. Final Section 8 rent depends on local PHA payment standards, voucher size, tenant income, utility allowance and inspection approval.

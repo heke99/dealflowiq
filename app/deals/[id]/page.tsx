@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
+import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -74,7 +75,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href={`/deals/${id}/edit`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">Edit Deal</Link>
+            <Link href={`/deals/${id}/analyzer`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">Analyze</Link>
+            <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Edit Deal</Link>
             <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Back</Link>
           </div>
         </section>
@@ -122,12 +124,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </div>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-          <h2 className="text-xl font-bold">Next calculation layer</h2>
-          <p className="mt-2 max-w-3xl text-sm text-slate-400">
-            Batch 4 will calculate NOI, cap rate, DSCR, cashflow, per-unit metrics and rent gap directly from this saved deal data.
-          </p>
-        </section>
+        <FinancialSnapshot deal={deal as any} property={property as any} />
       </div>
     </AppShell>
   )

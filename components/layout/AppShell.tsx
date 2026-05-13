@@ -59,6 +59,7 @@ export function AppShell({
     { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
     { href: '/settings', label: 'Settings', visible: true, core: true },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
+    { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
   ]
   const nav = rawNav.filter((item) => item.visible)
 

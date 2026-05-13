@@ -126,7 +126,7 @@ export function DealForm({ action, submitLabel, deal, property, error }: DealFor
         <Field label="Target monthly rent" name="target_rent" type="number" defaultValue={value(deal, 'target_rent')} />
       </Section>
 
-      <Section title="Expenses" description="Batch 4 will turn these into NOI, cap rate, DSCR and cashflow.">
+      <Section title="Expenses" description="These inputs feed NOI, cap rate, DSCR, cashflow and break-even rent.">
         <Field label="Annual taxes" name="taxes_annual" type="number" defaultValue={value(deal, 'taxes_annual')} />
         <Field label="Annual insurance" name="insurance_annual" type="number" defaultValue={value(deal, 'insurance_annual')} />
         <Field label="Monthly HOA" name="hoa_monthly" type="number" defaultValue={value(deal, 'hoa_monthly')} />
@@ -134,6 +134,19 @@ export function DealForm({ action, submitLabel, deal, property, error }: DealFor
         <Field label="Vacancy %" name="vacancy_percent" type="number" defaultValue={value(deal, 'vacancy_percent')} />
         <Field label="Management %" name="management_percent" type="number" defaultValue={value(deal, 'management_percent')} />
         <Field label="Monthly CapEx reserve" name="capex_monthly" type="number" defaultValue={value(deal, 'capex_monthly')} />
+      </Section>
+
+      <Section title="Financing and strategy assumptions" description="Used by mortgage payment, DSCR, cash-on-cash, flip, wholesale and BRRRR previews.">
+        <Field label="Down payment %" name="down_payment_percent" type="number" defaultValue={value(deal, 'down_payment_percent') || '20'} />
+        <Field label="Down payment amount" name="down_payment_amount" type="number" defaultValue={value(deal, 'down_payment_amount')} />
+        <Field label="Loan amount" name="loan_amount" type="number" defaultValue={value(deal, 'loan_amount')} />
+        <Field label="Interest rate %" name="interest_rate_percent" type="number" defaultValue={value(deal, 'interest_rate_percent') || '7'} />
+        <Field label="Loan term years" name="loan_term_years" type="number" defaultValue={value(deal, 'loan_term_years') || '30'} />
+        <Field label="Closing costs" name="closing_costs" type="number" defaultValue={value(deal, 'closing_costs')} />
+        <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || '8'} />
+        <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly')} />
+        <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || '10000'} />
+        <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || '75'} />
       </Section>
 
       <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

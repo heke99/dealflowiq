@@ -38,6 +38,12 @@ export const CORE_FEATURES: FeatureMap = {
   calculators: true,
 }
 
+
+export const ALL_FEATURES: FeatureMap = FEATURE_KEYS.reduce<FeatureMap>((acc, feature) => {
+  acc[feature] = true
+  return acc
+}, {})
+
 export const PREMIUM_FEATURES: FeatureKey[] = [
   'section8_hud',
   'brrrr',

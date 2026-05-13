@@ -65,6 +65,16 @@ function buildDealPayload(formData: FormData) {
     vacancy_percent: numberValue(formData, 'vacancy_percent'),
     management_percent: numberValue(formData, 'management_percent'),
     capex_monthly: numberValue(formData, 'capex_monthly'),
+    down_payment_percent: numberValue(formData, 'down_payment_percent'),
+    down_payment_amount: numberValue(formData, 'down_payment_amount'),
+    loan_amount: numberValue(formData, 'loan_amount'),
+    interest_rate_percent: numberValue(formData, 'interest_rate_percent'),
+    loan_term_years: integerValue(formData, 'loan_term_years'),
+    closing_costs: numberValue(formData, 'closing_costs'),
+    selling_costs_percent: numberValue(formData, 'selling_costs_percent'),
+    holding_costs_monthly: numberValue(formData, 'holding_costs_monthly'),
+    desired_wholesale_fee: numberValue(formData, 'desired_wholesale_fee'),
+    refinance_ltv_percent: numberValue(formData, 'refinance_ltv_percent'),
     notes: text(formData, 'notes'),
   }
 }

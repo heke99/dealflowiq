@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isCurrentUserPlatformAdmin } from '@/lib/auth/admin'
 import { normalizeAccountType, type AccountType } from '@/lib/product/accountTypes'
-import { CORE_FEATURES, accountTypeDefaultFeatures, mergeFeatures, type FeatureMap, type LimitMap } from '@/lib/billing/features'
+import { ALL_FEATURES, CORE_FEATURES, accountTypeDefaultFeatures, mergeFeatures, type FeatureMap, type LimitMap } from '@/lib/billing/features'
 
 export type BillingPlan = {
   id: string
@@ -68,8 +68,8 @@ export async function getWorkspaceAccess(params: {
       status: 'missing_organization',
       trialEndsAt: null,
       isTrialActive: false,
-      features: defaultFeatures,
-      limits: {},
+      features: isPlatformAdmin ? ALL_FEATURES : defaultFeatures,
+      limits: isPlatformAdmin ? { unlimited: null } : {},
     }
   }
 
@@ -122,8 +122,12 @@ export async function getWorkspaceAccess(params: {
   const status = subscription?.status || 'trialing'
   const trialEndsAt = subscription?.trial_end_at || null
   const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
-  const features = mergeFeatures(CORE_FEATURES, defaultFeatures, plan?.features, subscription?.features_override, isPlatformAdmin ? { admin_plan_management: true } : null)
-  const limits = { ...(plan?.limits || {}), ...(subscription?.limits_override || {}) } as LimitMap
+  const features = isPlatformAdmin
+    ? ALL_FEATURES
+    : mergeFeatures(CORE_FEATURES, defaultFeatures, plan?.features, subscription?.features_override)
+  const limits = isPlatformAdmin
+    ? ({ unlimited: null } as LimitMap)
+    : ({ ...(plan?.limits || {}), ...(subscription?.limits_override || {}) } as LimitMap)
 
   return {
     accountType,

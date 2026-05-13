@@ -16,8 +16,21 @@ const nextBatches = [
   'Batch 5: BRRRR, flip, wholesale and strategy comparison.',
 ]
 
+const accountTypeLabels: Record<string, string> = {
+  solo_investor: 'Solo Investor',
+  wholesaler: 'Wholesaler',
+  landlord: 'Landlord',
+  section_8_landlord: 'Section 8 Landlord',
+  brrrr_investor: 'BRRRR Investor',
+  fix_and_flip_investor: 'Fix & Flip Investor',
+  community_guru_owner: 'Community / Guru Owner',
+  team_company: 'Team / Company',
+}
+
 export default async function DashboardPage() {
   const workspace = await getCurrentWorkspace()
+  const accountType = workspace.organization?.account_type || workspace.organization?.organization_type || workspace.profile?.account_type || 'solo_investor'
+  const accountLabel = accountTypeLabels[accountType] || 'Workspace'
 
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email}>
@@ -25,10 +38,10 @@ export default async function DashboardPage() {
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Batch 1 Foundation</div>
+              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">DealFlowIQ Workspace</div>
               <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Welcome to DealFlowIQ</h1>
               <p className="mt-3 max-w-3xl text-slate-300">
-                Your SaaS foundation is now ready: authentication, organizations, member roles, protected routes and a clean app shell.
+                Your foundation is ready. This workspace is set up as <span className="font-semibold text-white">{accountLabel}</span>, so upcoming deals, buyers and calculations can be tailored to your use case.
               </p>
               {workspace.error ? (
                 <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
@@ -59,6 +72,10 @@ export default async function DashboardPage() {
               <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
                 <dt className="text-slate-400">Organization</dt>
                 <dd className="font-medium">{workspace.organization?.name || 'Not created'}</dd>
+              </div>
+              <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
+                <dt className="text-slate-400">Account type</dt>
+                <dd className="font-medium">{accountLabel}</dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
                 <dt className="text-slate-400">Your role</dt>

@@ -1,11 +1,22 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/session'
 
+export type WorkspaceProfile = {
+  id: string
+  email: string | null
+  full_name: string | null
+  account_type: string | null
+  organization_name: string | null
+  onboarding_completed: boolean
+}
+
 export type WorkspaceOrganization = {
   id: string
   name: string
   slug: string | null
   owner_id: string
+  organization_type?: string | null
+  account_type?: string | null
 }
 
 export type WorkspaceMembership = {
@@ -24,6 +35,7 @@ export async function getCurrentWorkspace() {
   if (rpcError) {
     return {
       user,
+      profile: null,
       organization: null,
       membership: null,
       memberships: [],
@@ -31,9 +43,15 @@ export async function getCurrentWorkspace() {
     }
   }
 
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, email, full_name, account_type, organization_name, onboarding_completed')
+    .eq('id', user.id)
+    .maybeSingle()
+
   const { data, error } = await supabase
     .from('organization_members')
-    .select('id, role, status, organizations(id, name, slug, owner_id)')
+    .select('id, role, status, organizations(id, name, slug, owner_id, organization_type, account_type)')
     .eq('user_id', user.id)
     .eq('status', 'active')
     .order('created_at', { ascending: true })
@@ -41,6 +59,7 @@ export async function getCurrentWorkspace() {
   if (error) {
     return {
       user,
+      profile: (profile as WorkspaceProfile | null) || null,
       organization: null,
       membership: null,
       memberships: [],
@@ -61,6 +80,7 @@ export async function getCurrentWorkspace() {
 
   return {
     user,
+    profile: (profile as WorkspaceProfile | null) || null,
     organization: membership?.organization || null,
     membership,
     memberships,

@@ -3,6 +3,19 @@
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
+const ACCOUNT_TYPES = [
+  'solo_investor',
+  'wholesaler',
+  'landlord',
+  'section_8_landlord',
+  'brrrr_investor',
+  'fix_and_flip_investor',
+  'community_guru_owner',
+  'team_company',
+] as const
+
+type AccountType = (typeof ACCOUNT_TYPES)[number]
+
 function getSafeRedirect(path: FormDataEntryValue | null) {
   const value = typeof path === 'string' ? path : ''
   if (!value || !value.startsWith('/') || value.startsWith('//')) return '/dashboard'
@@ -11,6 +24,12 @@ function getSafeRedirect(path: FormDataEntryValue | null) {
 
 function toMessage(value: string) {
   return encodeURIComponent(value)
+}
+
+function getAccountType(value: FormDataEntryValue | null): AccountType {
+  const stringValue = typeof value === 'string' ? value : ''
+  if (ACCOUNT_TYPES.includes(stringValue as AccountType)) return stringValue as AccountType
+  return 'solo_investor'
 }
 
 export async function signInAction(formData: FormData) {
@@ -36,6 +55,8 @@ export async function signUpAction(formData: FormData) {
   const fullName = String(formData.get('full_name') || '').trim()
   const email = String(formData.get('email') || '').trim().toLowerCase()
   const password = String(formData.get('password') || '')
+  const accountType = getAccountType(formData.get('account_type'))
+  const organizationName = String(formData.get('organization_name') || '').trim()
 
   if (!email || !password) {
     redirect(`/signup?error=${toMessage('Email and password are required.')}`)
@@ -45,6 +66,10 @@ export async function signUpAction(formData: FormData) {
     redirect(`/signup?error=${toMessage('Password must be at least 6 characters.')}`)
   }
 
+  if ((accountType === 'community_guru_owner' || accountType === 'team_company') && organizationName.length < 2) {
+    redirect(`/signup?error=${toMessage('Workspace name is required for community and team accounts.')}`)
+  }
+
   const supabase = await createSupabaseServerClient()
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -52,6 +77,8 @@ export async function signUpAction(formData: FormData) {
     options: {
       data: {
         full_name: fullName || null,
+        account_type: accountType,
+        organization_name: organizationName || null,
       },
     },
   })
@@ -62,6 +89,11 @@ export async function signUpAction(formData: FormData) {
 
   if (!data.session) {
     redirect(`/login?message=${toMessage('Account created. Check your email to confirm your account, then log in.')}`)
+  }
+
+  const { error: workspaceError } = await supabase.rpc('create_default_organization')
+  if (workspaceError) {
+    redirect(`/dashboard?error=${toMessage(workspaceError.message)}`)
   }
 
   redirect('/dashboard')

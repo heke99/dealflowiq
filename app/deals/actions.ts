@@ -86,6 +86,9 @@ function buildDealPayload(formData: FormData) {
     mao_percentage: numberValue(formData, 'mao_percentage'),
     desired_wholesale_fee: numberValue(formData, 'desired_wholesale_fee'),
     refinance_ltv_percent: numberValue(formData, 'refinance_ltv_percent'),
+    rent_growth_percent: numberValue(formData, 'rent_growth_percent'),
+    expense_growth_percent: numberValue(formData, 'expense_growth_percent'),
+    exit_cap_rate_percent: numberValue(formData, 'exit_cap_rate_percent'),
     notes: text(formData, 'notes'),
   }
 }

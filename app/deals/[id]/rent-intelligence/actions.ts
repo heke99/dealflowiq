@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
+import { HUDUSER_DEFAULT_YEAR, lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
+import { importZillowRentalByUrl } from '@/lib/integrations/zillow/zillowClient'
 import { summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
 
 function text(formData: FormData, key: string) {
@@ -110,6 +111,74 @@ export async function addMarketRentCompAction(formData: FormData) {
   redirect(`/deals/${dealId}/rent-intelligence?saved=comp`)
 }
 
+
+export async function importZillowMarketRentCompAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const { workspace, supabase, property } = await requireDeal(dealId)
+  const sourceUrl = text(formData, 'zillow_url') || ''
+  const manualRentOverride = numberValue(formData, 'monthly_rent_override')
+
+  try {
+    const imported = await importZillowRentalByUrl(sourceUrl)
+    const monthlyRent = manualRentOverride ?? imported.monthlyRent
+    if (!monthlyRent) throw new Error('Zillow import succeeded but rent was missing. Enter a manual rent override.')
+
+    const { error } = await supabase.from('market_rent_comps').insert({
+      organization_id: workspace.organization!.id,
+      deal_id: dealId,
+      created_by: workspace.user.id,
+      source_type: 'zillow_url',
+      source_name: imported.sourceName,
+      source_url: imported.sourceUrl,
+      external_listing_id: imported.externalListingId,
+      comp_address: imported.compAddress,
+      city: imported.city || property?.city || null,
+      state: imported.state || property?.state || null,
+      zip_code: imported.zipCode || property?.zip_code || null,
+      bedrooms: imported.bedrooms ?? property?.bedrooms ?? null,
+      bathrooms: imported.bathrooms ?? property?.bathrooms ?? null,
+      square_feet: imported.squareFeet,
+      monthly_rent: monthlyRent,
+      listing_date: imported.listingDate,
+      notes: imported.notes,
+      confidence_score: manualRentOverride ? 80 : 70,
+      import_status: 'imported',
+      raw_payload: imported.raw as any,
+    })
+
+    if (error) redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error.message)}`)
+
+    if (formData.get('apply_to_deal') === 'on') {
+      await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
+    }
+
+    await supabase.from('audit_logs').insert({
+      organization_id: workspace.organization!.id,
+      actor_id: workspace.user.id,
+      event_type: 'market_rent_comp.zillow_imported',
+      entity_type: 'deal',
+      entity_id: dealId,
+      metadata: { source_url: imported.sourceUrl, monthly_rent: monthlyRent, external_listing_id: imported.externalListingId },
+    })
+
+    revalidatePath(`/deals/${dealId}`)
+    revalidatePath(`/deals/${dealId}/rent-intelligence`)
+    redirect(`/deals/${dealId}/rent-intelligence?saved=zillow`)
+  } catch (error) {
+    await supabase.from('audit_logs').insert({
+      organization_id: workspace.organization!.id,
+      actor_id: workspace.user.id,
+      event_type: 'market_rent_comp.zillow_import_failed',
+      entity_type: 'deal',
+      entity_id: dealId,
+      metadata: { source_url: sourceUrl, error: error instanceof Error ? error.message : 'Unknown Zillow import error' },
+    })
+    redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error instanceof Error ? error.message : 'Zillow import failed')}`)
+  }
+}
+
 export async function applyMarketRentSummaryAction(formData: FormData) {
   const dealId = String(formData.get('deal_id') || '').trim()
   if (!dealId) redirect('/deals?error=Missing deal id')
@@ -126,7 +195,7 @@ export async function lookupHudRentAction(formData: FormData) {
   const { workspace, supabase, property } = await requireDeal(dealId)
   const zipCode = text(formData, 'zip_code') || property?.zip_code || ''
   const bedrooms = numberValue(formData, 'bedrooms') ?? property?.bedrooms ?? null
-  const hudYear = intValue(formData, 'hud_year') || new Date().getFullYear()
+  const hudYear = HUDUSER_DEFAULT_YEAR
 
   try {
     const result = await lookupHudFmrByZip({ zipCode, bedrooms, hudYear })

@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
-import { addMarketRentCompAction, applyMarketRentSummaryAction, lookupHudRentAction } from '@/app/deals/[id]/rent-intelligence/actions'
+import { addMarketRentCompAction, applyMarketRentSummaryAction, importZillowMarketRentCompAction, lookupHudRentAction } from '@/app/deals/[id]/rent-intelligence/actions'
 
 function money(value: unknown) {
   const num = Number(value || 0)
@@ -115,7 +115,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
             <input type="hidden" name="deal_id" value={id} />
             <h2 className="text-xl font-bold">Add market rent comp</h2>
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              Paste a Zillow/listing URL as source evidence, then enter the observed rent. This keeps DealFlowIQ compliant and auditable until licensed market-data APIs are added.
+              Add a manual comparable rent. You can also use the direct Zillow importer below when you have authorization for that source.
             </p>
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <label className="block">
@@ -148,16 +148,38 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
           </form>
 
           <div className="space-y-6">
+
+            <form action={importZillowMarketRentCompAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <input type="hidden" name="deal_id" value={id} />
+              <h2 className="text-xl font-bold">Import Zillow comp</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Use this only for Zillow access you are authorized to use. DealFlowIQ fetches the page server-side, extracts rent/address/beds/baths/sqft when available, then stores the URL and raw import metadata for auditability.
+              </p>
+              <div className="mt-6 grid gap-5 md:grid-cols-2">
+                <Field label="Zillow URL" name="zillow_url" placeholder="https://www.zillow.com/..." />
+                <Field label="Manual rent override" name="monthly_rent_override" type="number" help="Optional. Use this if Zillow blocks or does not expose the rent clearly." />
+              </div>
+              <label className="mt-5 flex items-center gap-3 text-sm text-slate-300">
+                <input type="checkbox" name="apply_to_deal" className="h-4 w-4" defaultChecked />
+                Apply updated recommended market rent to the deal after import.
+              </label>
+              <button className="mt-6 rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Import Zillow Comp</button>
+            </form>
+
             <form action={lookupHudRentAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <input type="hidden" name="deal_id" value={id} />
               <h2 className="text-xl font-bold">HUD / Section 8 lookup</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                Uses HUD USER FMR/SAFMR-style benchmark data by ZIP/year. Configure <code>HUDUSER_API_TOKEN</code> and optionally <code>HUDUSER_FMR_LOOKUP_URL_TEMPLATE</code> in environment variables.
+                Uses official HUD USER benchmark data by ZIP. DealFlowIQ defaults this lookup to FY 2026 for the current product cycle. Configure <code>HUDUSER_API_TOKEN</code> and optionally <code>HUDUSER_FMR_LOOKUP_URL_TEMPLATE</code> in environment variables.
               </p>
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <Field label="ZIP code" name="zip_code" defaultValue={property?.zip_code || ''} />
                 <Field label="Bedrooms" name="bedrooms" type="number" defaultValue={property?.bedrooms || ''} />
-                <Field label="HUD year" name="hud_year" type="number" defaultValue={new Date().getFullYear()} />
+                <div className="rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3">
+                  <div className="text-sm font-medium text-slate-300">HUD year</div>
+                  <div className="mt-2 text-lg font-bold text-slate-100">2026</div>
+                  <div className="mt-1 text-xs leading-5 text-slate-500">Locked to FY 2026 unless the server env changes.</div>
+                </div>
               </div>
               <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
                 HUD/FMR is a benchmark, not guaranteed contract rent. Final Section 8 rent depends on local PHA payment standards, voucher size, tenant income, utility allowance and inspection approval.

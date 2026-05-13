@@ -164,6 +164,9 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
         <Field label="MAO %" name="mao_percentage" type="number" defaultValue={value(deal, 'mao_percentage') || String(defaults?.mao_percentage ?? 70)} help="Editable wholesale rule. 70% is only a common default, not a law." />
         <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || String(defaults?.desired_wholesale_fee ?? 10000)} />
         <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || String(defaults?.refinance_ltv_percent ?? 75)} help="Used in BRRRR refi loan preview." />
+        <Field label="Rent growth %" name="rent_growth_percent" type="number" defaultValue={value(deal, 'rent_growth_percent') || String(defaults?.rent_growth_percent ?? 3)} help="Per-deal annual rent-growth assumption for projections/scenarios." />
+        <Field label="Expense growth %" name="expense_growth_percent" type="number" defaultValue={value(deal, 'expense_growth_percent') || String(defaults?.expense_growth_percent ?? 3)} help="Per-deal annual expense-growth assumption for projections/scenarios." />
+        <Field label="Exit cap rate %" name="exit_cap_rate_percent" type="number" defaultValue={value(deal, 'exit_cap_rate_percent') || String(defaults?.exit_cap_rate_percent ?? 7)} help="Per-deal assumption for future value/projection modules." />
       </Section>
 
       <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

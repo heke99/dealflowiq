@@ -22,8 +22,11 @@ type LookupParams = {
   hudYear?: number | null
 }
 
+export const HUDUSER_DEFAULT_YEAR = 2026
+
 function currentHudYear() {
-  return new Date().getFullYear()
+  const envYear = Number(process.env.HUDUSER_DEFAULT_YEAR || HUDUSER_DEFAULT_YEAR)
+  return Number.isFinite(envYear) && envYear > 0 ? Math.round(envYear) : HUDUSER_DEFAULT_YEAR
 }
 
 function envTemplate() {
@@ -88,7 +91,9 @@ export async function lookupHudFmrByZip(params: LookupParams): Promise<HudFmrRes
   const zipCode = params.zipCode.trim()
   if (!/^\d{5}$/.test(zipCode)) throw new Error('Enter a valid 5-digit ZIP code before running HUD lookup.')
 
-  const hudYear = params.hudYear || currentHudYear()
+  // DealFlowIQ intentionally defaults HUD lookups to the latest configured HUD year.
+  // For the current product cycle that is FY 2026; override only with HUDUSER_DEFAULT_YEAR if needed.
+  const hudYear = currentHudYear()
   const sourceUrl = buildUrl(zipCode, hudYear)
   const response = await fetch(sourceUrl, { headers: headers(), cache: 'no-store' })
 

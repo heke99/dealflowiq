@@ -41,6 +41,12 @@ export type UnderwritingAssumptions = {
     refinanceLtvPercent: number
     source: string
   }
+  projection: {
+    rentGrowthPercent: number
+    expenseGrowthPercent: number
+    exitCapRatePercent: number
+    source: string
+  }
 }
 
 export type FormulaExplanation = {
@@ -189,6 +195,13 @@ export const FORMULA_EXPLANATIONS: FormulaExplanation[] = [
     formula: 'Refi loan = ARV × refinance LTV; cash left = total project cost - refi loan',
     source: 'Standard BRRRR preview comparing project cost to refinance proceeds.',
     editableAssumptions: ['ARV', 'Refinance LTV %', 'Purchase price', 'Rehab estimate', 'Closing costs'],
+  },
+  {
+    key: 'projection_assumptions',
+    label: 'Projection assumptions',
+    formula: 'Future rent/expenses/value use editable rent growth %, expense growth % and exit cap rate %',
+    source: 'DealFlowIQ projection assumptions. They are saved on each deal so every user can override organization defaults for that specific analysis.',
+    editableAssumptions: ['Rent growth %', 'Expense growth %', 'Exit cap rate %'],
   },
 ]
 
@@ -353,6 +366,12 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
     brrrr: {
       refinanceLtvPercent: positive(deal.refinance_ltv_percent, 75),
       source: 'BRRRR preview based on ARV × refinance LTV compared with project cost.',
+    },
+    projection: {
+      rentGrowthPercent: n(deal.rent_growth_percent, 3),
+      expenseGrowthPercent: n(deal.expense_growth_percent, 3),
+      exitCapRatePercent: positive(deal.exit_cap_rate_percent, 7),
+      source: 'Per-deal projection assumptions. Organization defaults only prefill new deals; each user can override these on the deal.',
     },
   }
 

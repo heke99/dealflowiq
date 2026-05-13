@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/session'
+import { getWorkspaceAccess, type WorkspaceAccess } from '@/lib/billing/access'
 
 export type WorkspaceProfile = {
   id: string
@@ -26,22 +27,22 @@ export type WorkspaceMembership = {
   organization: WorkspaceOrganization
 }
 
-export async function getCurrentWorkspace() {
+
+export type CurrentWorkspace = {
+  user: Awaited<ReturnType<typeof requireUser>>
+  profile: WorkspaceProfile | null
+  organization: WorkspaceOrganization | null
+  membership: WorkspaceMembership | null
+  memberships: WorkspaceMembership[]
+  access: WorkspaceAccess
+  error: string | null
+}
+
+export async function getCurrentWorkspace(): Promise<CurrentWorkspace> {
   const user = await requireUser()
   const supabase = await createSupabaseServerClient()
 
   const { error: rpcError } = await supabase.rpc('create_default_organization')
-
-  if (rpcError) {
-    return {
-      user,
-      profile: null,
-      organization: null,
-      membership: null,
-      memberships: [],
-      error: rpcError.message,
-    }
-  }
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -56,17 +57,6 @@ export async function getCurrentWorkspace() {
     .eq('status', 'active')
     .order('created_at', { ascending: true })
 
-  if (error) {
-    return {
-      user,
-      profile: (profile as WorkspaceProfile | null) || null,
-      organization: null,
-      membership: null,
-      memberships: [],
-      error: error.message,
-    }
-  }
-
   const memberships = (data || [])
     .map((row: any) => ({
       id: row.id,
@@ -77,13 +67,17 @@ export async function getCurrentWorkspace() {
     .filter((row) => Boolean(row.organization)) as WorkspaceMembership[]
 
   const membership = memberships[0] || null
+  const organization = membership?.organization || null
+  const accountType = organization?.account_type || organization?.organization_type || (profile as WorkspaceProfile | null)?.account_type || 'solo_investor'
+  const access = await getWorkspaceAccess({ organizationId: organization?.id, accountType })
 
   return {
     user,
     profile: (profile as WorkspaceProfile | null) || null,
-    organization: membership?.organization || null,
+    organization,
     membership,
     memberships,
-    error: null,
+    access,
+    error: rpcError?.message || error?.message || null,
   }
 }

@@ -2,19 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-
-const ACCOUNT_TYPES = [
-  'solo_investor',
-  'wholesaler',
-  'landlord',
-  'section_8_landlord',
-  'brrrr_investor',
-  'fix_and_flip_investor',
-  'community_guru_owner',
-  'team_company',
-] as const
-
-type AccountType = (typeof ACCOUNT_TYPES)[number]
+import { ACCOUNT_TYPES, type AccountType } from '@/lib/product/accountTypes'
 
 function getSafeRedirect(path: FormDataEntryValue | null) {
   const value = typeof path === 'string' ? path : ''

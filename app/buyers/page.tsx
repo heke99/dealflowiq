@@ -22,11 +22,11 @@ export default async function BuyersPage() {
         <h1 className="mt-2 text-3xl font-bold">Buyers</h1>
         {isEnabled ? (
           <p className="mt-3 max-w-2xl text-slate-300">
-            Buyer CRM, buy boxes, buyer matching and buyer demand scoring are enabled for this workspace. The actual buyer tables/UI come later.
+            Buyer CRM, buy boxes, buyer matching and buyer demand scoring are enabled for this workspace. The actual buyer tables/UI come in a later batch.
           </p>
         ) : (
           <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-amber-100">
-            Buyers are not part of this account type or current plan. This is expected for many landlord-only workspaces.
+            Buyers are visible to every workspace as a preview. Saving buyers, buy boxes and buyer matching are unlocked by plan or admin override.
           </div>
         )}
       </div>

@@ -1,7 +1,16 @@
 import Link from 'next/link'
 import { signOutAction } from '@/lib/auth/actions'
-import { canUseFeature, type FeatureMap } from '@/lib/billing/features'
+import type { FeatureMap, FeatureKey } from '@/lib/billing/features'
+import { canUseFeature, featureLabels } from '@/lib/billing/features'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
+
+type NavItem = {
+  href: string
+  label: string
+  visible: boolean
+  feature?: FeatureKey
+  core?: boolean
+}
 
 type AppShellProps = {
   children: React.ReactNode
@@ -20,6 +29,14 @@ function formatTrialDate(value?: string | null) {
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }
 
+function LockedPill({ feature }: { feature: FeatureKey }) {
+  return (
+    <span title={`${featureLabels[feature]} is available on higher plans or admin override.`} className="rounded-full border border-amber-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200">
+      Upgrade
+    </span>
+  )
+}
+
 export function AppShell({
   children,
   organizationName,
@@ -32,14 +49,18 @@ export function AppShell({
   isPlatformAdmin,
 }: AppShellProps) {
   const config = getAccountTypeConfig(accountType)
-  const nav = [
-    { href: '/dashboard', label: 'Dashboard', visible: true },
-    { href: '/deals', label: config.primaryNavLabel, visible: canUseFeature(features, 'deals') },
-    { href: '/buyers', label: 'Buyers', visible: canUseFeature(features, 'buyers') || canUseFeature(features, 'buyer_matching') },
-    { href: '/settings/billing', label: 'Plan & Billing', visible: true },
-    { href: '/settings', label: 'Settings', visible: true },
-    { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin) },
-  ].filter((item) => item.visible)
+  const rawNav: NavItem[] = [
+    { href: '/dashboard', label: 'Dashboard', visible: true, core: true },
+    { href: '/deals', label: 'Deals', visible: true, feature: 'deals', core: true },
+    { href: '/market-search', label: 'Market Search', visible: true, feature: 'market_search', core: true },
+    { href: '/rent-analysis', label: 'Rent Analysis', visible: true, feature: 'rent_analysis', core: true },
+    { href: '/calculators', label: 'Calculators', visible: true, feature: 'calculators', core: true },
+    { href: '/buyers', label: 'Buyers', visible: true, feature: 'buyers' },
+    { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
+    { href: '/settings', label: 'Settings', visible: true, core: true },
+    { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
+  ]
+  const nav = rawNav.filter((item) => item.visible)
 
   const trialDate = formatTrialDate(trialEndsAt)
 
@@ -64,15 +85,19 @@ export function AppShell({
         </div>
 
         <nav className="mt-8 space-y-1">
-          {nav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="block rounded-xl px-4 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
-            >
-              {item.label}
-            </Link>
-          ))}
+          {nav.map((item) => {
+            const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
+              >
+                <span>{item.label}</span>
+                {locked && item.feature ? <LockedPill feature={item.feature} /> : null}
+              </Link>
+            )
+          })}
         </nav>
 
         <form action={signOutAction} className="absolute bottom-6 left-6 right-6">
@@ -91,11 +116,15 @@ export function AppShell({
             </form>
           </div>
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
-            {nav.map((item) => (
-              <Link key={item.href} href={item.href} className="rounded-lg bg-white/5 px-3 py-2 text-sm text-slate-300">
-                {item.label}
-              </Link>
-            ))}
+            {nav.map((item) => {
+              const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
+              return (
+                <Link key={item.href} href={item.href} className="flex shrink-0 items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-sm text-slate-300">
+                  <span>{item.label}</span>
+                  {locked ? <span className="text-amber-200">•</span> : null}
+                </Link>
+              )
+            })}
           </nav>
         </header>
 

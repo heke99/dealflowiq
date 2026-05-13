@@ -5,10 +5,10 @@ import { canUseFeature, featureLabels, type FeatureKey } from '@/lib/billing/fea
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
 
 const featureGroups: Record<string, FeatureKey[]> = {
-  landlord: ['deals', 'rent_analysis', 'market_rent', 'section8_hud', 'five_year_projection', 'lender_view'],
-  wholesaler: ['deals', 'wholesale', 'buyers', 'buyer_matching', 'deal_distribution', 'csv_export'],
-  community: ['deals', 'community_members', 'buyers', 'buyer_matching', 'deal_distribution', 'white_label'],
-  investor: ['deals', 'rent_analysis', 'brrrr', 'flip', 'wholesale', 'five_year_projection'],
+  landlord: ['deals', 'market_search', 'rent_analysis', 'market_rent', 'section8_hud', 'lender_view'],
+  wholesaler: ['deals', 'market_search', 'calculators', 'wholesale', 'buyers', 'buyer_matching'],
+  community: ['deals', 'market_search', 'community_members', 'buyers', 'buyer_matching', 'white_label'],
+  investor: ['deals', 'market_search', 'rent_analysis', 'calculators', 'brrrr', 'five_year_projection'],
 }
 
 function getDashboardFeatures(accountType: string, availableFeatures: Record<string, boolean | undefined>) {
@@ -69,7 +69,7 @@ export default async function DashboardPage() {
               <div className="text-sm font-medium uppercase tracking-wide text-slate-500">DealFlowIQ Workspace</div>
               <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{config.title} dashboard</h1>
               <p className="mt-3 max-w-3xl text-slate-300">
-                This workspace is now configured around your account type. Navigation and features are controlled by account type, plan, trial status and admin overrides.
+                Your account type personalizes the dashboard and recommendations. Core modules are available to everyone; subscription plans control premium access and usage limits.
               </p>
               {workspace.error ? (
                 <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
@@ -78,11 +78,9 @@ export default async function DashboardPage() {
               ) : null}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
-              {canUseFeature(workspace.access.features, 'deals') ? (
-                <Link href="/deals" className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">
-                  Open {config.primaryNavLabel}
-                </Link>
-              ) : null}
+              <Link href="/deals" className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">
+                Open Deals
+              </Link>
               <Link href="/settings/billing" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">
                 View Plan
               </Link>
@@ -102,14 +100,14 @@ export default async function DashboardPage() {
 
         <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-            <h2 className="text-xl font-bold">Your enabled modules</h2>
-            <p className="mt-2 text-sm text-slate-400">These are controlled by account type + plan + trial/admin overrides.</p>
+            <h2 className="text-xl font-bold">Recommended modules</h2>
+            <p className="mt-2 text-sm text-slate-400">Account type changes the recommendation order. Plans decide which premium modules are unlocked.</p>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {dashboardFeatures.map((item) => (
                 <div key={item.feature} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
                   <div className="text-sm font-semibold">{item.label}</div>
                   <div className={item.enabled ? 'mt-2 text-xs text-emerald-300' : 'mt-2 text-xs text-slate-500'}>
-                    {item.enabled ? 'Enabled in current access' : 'Locked by current access'}
+                    {item.enabled ? 'Enabled' : 'Premium / upgrade'}
                   </div>
                 </div>
               ))}

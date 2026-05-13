@@ -67,7 +67,7 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-white/10 bg-slate-950/95 p-6 lg:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r border-white/10 bg-slate-950/95 p-6 lg:flex lg:flex-col">
         <Link href="/dashboard" className="block">
           <div className="text-2xl font-bold tracking-tight">DealFlowIQ</div>
           <div className="mt-1 text-sm text-slate-400">Real estate underwriting OS</div>
@@ -85,7 +85,7 @@ export function AppShell({
           </div>
         </div>
 
-        <nav className="mt-8 space-y-1">
+        <nav className="mt-8 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1 pb-4">
           {nav.map((item) => {
             const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
             return (
@@ -101,11 +101,13 @@ export function AppShell({
           })}
         </nav>
 
-        <form action={signOutAction} className="absolute bottom-6 left-6 right-6">
-          <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10">
-            Sign out
-          </button>
-        </form>
+        <div className="mt-4 border-t border-white/10 pt-4">
+          <form action={signOutAction}>
+            <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10">
+              Sign out
+            </button>
+          </form>
+        </div>
       </aside>
 
       <div className="lg:pl-72">

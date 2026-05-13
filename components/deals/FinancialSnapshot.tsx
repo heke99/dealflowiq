@@ -97,6 +97,23 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true }: F
         {metric('Break-even rent', `${formatMoney(primary.breakEvenRent)}/mo`, 'Rent needed to cover expenses and debt')}
       </div>
 
+
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+        <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Calculation methodology</div>
+        <h3 className="mt-2 text-xl font-bold">Standard underwriting formulas, not custom guesses</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-400">
+          These are conventional real estate underwriting formulas using the assumptions saved on this deal. Market Rent, Section 8 / HUD Rent and Target Rent are treated as separate rent scenarios so you can compare outcomes side by side. HUD/FMR values are benchmarks, not guaranteed contract rents.
+        </p>
+        <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">NOI:</span> Effective gross income minus operating expenses, before debt service.</div>
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">Cap rate:</span> annual NOI divided by purchase price.</div>
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">DSCR:</span> annual NOI divided by annual debt service.</div>
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">Cashflow:</span> NOI minus debt service.</div>
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">Cash-on-cash:</span> annual pre-tax cashflow divided by cash invested.</div>
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">MAO preview:</span> ARV × 70% minus rehab and desired wholesale fee. This is a common wholesaler rule-of-thumb, not a law.</div>
+        </div>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-[1fr_0.85fr]">
         <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
           <h3 className="text-xl font-bold">Rent scenario comparison</h3>

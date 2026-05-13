@@ -5,8 +5,9 @@ import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
-export default async function DealAnalyzerPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DealAnalyzerPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params
+  const query = await searchParams
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
 
@@ -20,6 +21,16 @@ export default async function DealAnalyzerPage({ params }: { params: Promise<{ i
     : { data: null }
 
   if (!deal) notFound()
+
+  const { data: snapshots } = workspace.organization?.id
+    ? await supabase
+        .from('deal_calculation_snapshots')
+        .select('id, snapshot_name, formula_version, created_at, results')
+        .eq('deal_id', id)
+        .eq('organization_id', workspace.organization.id)
+        .order('created_at', { ascending: false })
+        .limit(10)
+    : { data: [] }
 
   const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
 
@@ -49,7 +60,15 @@ export default async function DealAnalyzerPage({ params }: { params: Promise<{ i
           </div>
         </section>
 
-        <FinancialSnapshot deal={deal as any} property={property as any} showAnalyzerLink={false} />
+        <FinancialSnapshot
+          deal={deal as any}
+          property={property as any}
+          showAnalyzerLink={false}
+          showSnapshotTools
+          snapshots={(snapshots || []) as any}
+          message={query?.snapshot === 'saved' ? 'Calculation snapshot saved. Future assumption changes will not alter that saved analysis.' : null}
+          error={query?.error ? String(query.error) : null}
+        />
       </div>
     </AppShell>
   )

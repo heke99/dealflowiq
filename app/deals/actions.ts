@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { buildCalculationSnapshotPayload, calculateDealUnderwriting } from '@/lib/calculations/underwriting'
 
 const VALID_STATUSES = new Set([
   'draft',
@@ -42,6 +43,11 @@ function statusValue(formData: FormData) {
   return VALID_STATUSES.has(value) ? value : 'draft'
 }
 
+function capRateBasisValue(formData: FormData) {
+  const value = String(formData.get('cap_rate_basis') || 'purchase_price')
+  return value === 'arv' || value === 'custom_value' ? value : 'purchase_price'
+}
+
 function buildDealPayload(formData: FormData) {
   return {
     title: text(formData, 'title') || 'Untitled Deal',
@@ -70,9 +76,14 @@ function buildDealPayload(formData: FormData) {
     loan_amount: numberValue(formData, 'loan_amount'),
     interest_rate_percent: numberValue(formData, 'interest_rate_percent'),
     loan_term_years: integerValue(formData, 'loan_term_years'),
+    loan_term_months: integerValue(formData, 'loan_term_months'),
+    dscr_min_threshold: numberValue(formData, 'dscr_min_threshold'),
+    cap_rate_basis: capRateBasisValue(formData),
+    cap_rate_custom_value: numberValue(formData, 'cap_rate_custom_value'),
     closing_costs: numberValue(formData, 'closing_costs'),
     selling_costs_percent: numberValue(formData, 'selling_costs_percent'),
     holding_costs_monthly: numberValue(formData, 'holding_costs_monthly'),
+    mao_percentage: numberValue(formData, 'mao_percentage'),
     desired_wholesale_fee: numberValue(formData, 'desired_wholesale_fee'),
     refinance_ltv_percent: numberValue(formData, 'refinance_ltv_percent'),
     notes: text(formData, 'notes'),
@@ -185,4 +196,59 @@ export async function updateDealAction(formData: FormData) {
   revalidatePath('/deals')
   revalidatePath(`/deals/${dealId}`)
   redirect(`/deals/${dealId}`)
+}
+
+export async function createCalculationSnapshotAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  const snapshotName = String(formData.get('snapshot_name') || '').trim() || 'Underwriting snapshot'
+  const redirectTo = String(formData.get('redirect_to') || `/deals/${dealId}/analyzer`)
+
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const supabase = await createSupabaseServerClient()
+  const { data: deal, error: dealError } = await supabase
+    .from('deals')
+    .select('*, properties(*)')
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+
+  if (dealError || !deal) {
+    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
+  }
+
+  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
+  const summary = calculateDealUnderwriting(deal as any, property as any)
+  const snapshot = buildCalculationSnapshotPayload(summary)
+
+  const { error: snapshotError } = await supabase.from('deal_calculation_snapshots').insert({
+    organization_id: workspace.organization.id,
+    deal_id: dealId,
+    created_by: workspace.user.id,
+    snapshot_name: snapshotName,
+    formula_version: snapshot.formula_version,
+    assumptions: snapshot.assumptions,
+    results: snapshot.results,
+    formula_sources: snapshot.formula_sources,
+  })
+
+  if (snapshotError) {
+    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(snapshotError.message)}`)
+  }
+
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization.id,
+    actor_id: workspace.user.id,
+    event_type: 'deal.calculation_snapshot.created',
+    entity_type: 'deal',
+    entity_id: dealId,
+    metadata: { formula_version: snapshot.formula_version, snapshot_name: snapshotName },
+  })
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/deals/${dealId}/analyzer`)
+  redirect(redirectTo.startsWith('/deals/') ? `${redirectTo}?snapshot=saved` : `/deals/${dealId}/analyzer?snapshot=saved`)
 }

@@ -43,7 +43,7 @@ function value(row: Record<string, any> | null | undefined, key: string) {
   return current === null || current === undefined ? '' : String(current)
 }
 
-function Field({ label, name, type = 'text', placeholder, defaultValue }: { label: string; name: string; type?: string; placeholder?: string; defaultValue?: string }) {
+function Field({ label, name, type = 'text', placeholder, defaultValue, help }: { label: string; name: string; type?: string; placeholder?: string; defaultValue?: string; help?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-300">{label}</span>
@@ -55,6 +55,7 @@ function Field({ label, name, type = 'text', placeholder, defaultValue }: { labe
         placeholder={placeholder}
         className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-white/30"
       />
+      {help ? <span className="mt-1 block text-xs leading-5 text-slate-500">{help}</span> : null}
     </label>
   )
 }
@@ -136,17 +137,30 @@ export function DealForm({ action, submitLabel, deal, property, error }: DealFor
         <Field label="Monthly CapEx reserve" name="capex_monthly" type="number" defaultValue={value(deal, 'capex_monthly')} />
       </Section>
 
-      <Section title="Financing and strategy assumptions" description="Used by mortgage payment, DSCR, cash-on-cash, flip, wholesale and BRRRR previews.">
-        <Field label="Down payment %" name="down_payment_percent" type="number" defaultValue={value(deal, 'down_payment_percent') || '20'} />
-        <Field label="Down payment amount" name="down_payment_amount" type="number" defaultValue={value(deal, 'down_payment_amount')} />
-        <Field label="Loan amount" name="loan_amount" type="number" defaultValue={value(deal, 'loan_amount')} />
-        <Field label="Interest rate %" name="interest_rate_percent" type="number" defaultValue={value(deal, 'interest_rate_percent') || '7'} />
-        <Field label="Loan term years" name="loan_term_years" type="number" defaultValue={value(deal, 'loan_term_years') || '30'} />
+      <Section title="Financing and strategy assumptions" description="Every major formula uses editable assumptions. Change these when lender terms, market rules or your model differs.">
+        <Field label="Down payment %" name="down_payment_percent" type="number" defaultValue={value(deal, 'down_payment_percent') || '20'} help="Used when down payment amount is blank." />
+        <Field label="Down payment amount" name="down_payment_amount" type="number" defaultValue={value(deal, 'down_payment_amount')} help="Overrides down payment %." />
+        <Field label="Loan amount" name="loan_amount" type="number" defaultValue={value(deal, 'loan_amount')} help="Overrides purchase price minus down payment." />
+        <Field label="Interest rate %" name="interest_rate_percent" type="number" defaultValue={value(deal, 'interest_rate_percent') || '7'} help="Used in the mortgage payment and DSCR formulas." />
+        <Field label="Loan term years" name="loan_term_years" type="number" defaultValue={value(deal, 'loan_term_years') || '30'} help="Reference term shown in the UI." />
+        <Field label="Number of monthly payments" name="loan_term_months" type="number" defaultValue={value(deal, 'loan_term_months') || '360'} help="Actual amortization input. Example: 360 for 30 years, 180 for 15 years." />
+        <Field label="DSCR minimum threshold" name="dscr_min_threshold" type="number" defaultValue={value(deal, 'dscr_min_threshold') || '1.20'} help="Editable per lender/program. Example: 1.20, 1.25 or 1.30." />
+        <label className="block">
+          <span className="text-sm font-medium text-slate-300">Cap rate basis</span>
+          <select name="cap_rate_basis" defaultValue={value(deal, 'cap_rate_basis') || 'purchase_price'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+            <option value="purchase_price">Purchase price</option>
+            <option value="arv">ARV</option>
+            <option value="custom_value">Custom value</option>
+          </select>
+          <span className="mt-1 block text-xs leading-5 text-slate-500">Controls the denominator in the cap rate formula.</span>
+        </label>
+        <Field label="Custom cap rate value" name="cap_rate_custom_value" type="number" defaultValue={value(deal, 'cap_rate_custom_value')} help="Used only if cap rate basis is custom value." />
         <Field label="Closing costs" name="closing_costs" type="number" defaultValue={value(deal, 'closing_costs')} />
-        <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || '8'} />
-        <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly')} />
+        <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || '8'} help="Used in flip profit preview." />
+        <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly')} help="Used in flip profit preview." />
+        <Field label="MAO %" name="mao_percentage" type="number" defaultValue={value(deal, 'mao_percentage') || '70'} help="Editable wholesale rule. 70% is only a common default, not a law." />
         <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || '10000'} />
-        <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || '75'} />
+        <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || '75'} help="Used in BRRRR refi loan preview." />
       </Section>
 
       <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

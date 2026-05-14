@@ -91,6 +91,18 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
         </label>
         <Field label="Source URL" name="source_url" placeholder="https://..." defaultValue={value(deal, 'source_url')} />
         <Field label="Source platform" name="source_platform" placeholder="Zillow, InvestorLift, manual, PDF..." defaultValue={value(deal, 'source_platform')} />
+        <Field label="Primary image URL" name="primary_image_url" placeholder="https://.../property-photo.jpg" defaultValue={value(deal, 'primary_image_url')} help="Used on Market, Opportunities and deal cards. Use images you have the right to display." />
+        <Field label="Additional image URLs" name="image_urls" placeholder="One or more image URLs, separated by commas or new lines" defaultValue={Array.isArray(deal?.image_urls) ? deal?.image_urls.join('\n') : value(deal, 'image_urls')} help="Optional gallery images for Market cards and future deal pages." />
+        <label className="block">
+          <span className="text-sm font-medium text-slate-300">Market visibility</span>
+          <select name="visibility" defaultValue={value(deal, 'visibility') || 'private'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+            <option value="private">Private / My Deals only</option>
+            <option value="team">Team Market</option>
+            <option value="community">Community Deals</option>
+            <option value="public">Public Deals</option>
+          </select>
+          <span className="mt-1 block text-xs leading-5 text-slate-500">Controls whether this deal can appear in Market/public/community views. You can keep underwriting private.</span>
+        </label>
       </Section>
 
       <Section title="Property information" description="This is the property profile used for market rent, HUD and per-unit analysis.">

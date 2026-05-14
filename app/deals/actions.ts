@@ -46,6 +46,23 @@ function integerValue(formData: FormData, key: string) {
   return value === null ? null : Math.round(value)
 }
 
+
+function urlListValue(formData: FormData, key: string) {
+  const raw = String(formData.get(key) || '').trim()
+  if (!raw) return []
+  return raw
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.startsWith('http://') || item.startsWith('https://'))
+    .slice(0, 12)
+}
+
+
+function visibilityValue(formData: FormData) {
+  const value = String(formData.get('visibility') || 'private')
+  return value === 'team' || value === 'community' || value === 'public' ? value : 'private'
+}
+
 function statusValue(formData: FormData) {
   const value = String(formData.get('status') || 'draft')
   return VALID_STATUSES.has(value) ? value : 'draft'
@@ -75,6 +92,9 @@ function buildDealPayload(formData: FormData) {
     status: statusValue(formData),
     source_url: text(formData, 'source_url'),
     source_platform: text(formData, 'source_platform'),
+    primary_image_url: text(formData, 'primary_image_url'),
+    image_urls: urlListValue(formData, 'image_urls'),
+    visibility: visibilityValue(formData),
     property_type: text(formData, 'property_type'),
     asking_price: numberValue(formData, 'asking_price'),
     contract_price: numberValue(formData, 'contract_price'),

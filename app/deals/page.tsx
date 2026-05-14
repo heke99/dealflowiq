@@ -21,7 +21,7 @@ export default async function DealsPage({ searchParams }: { searchParams?: Promi
   const { data: deals, error } = workspace.organization?.id
     ? await supabase
         .from('deals')
-        .select('id, title, status, property_type, purchase_price, arv, current_rent, market_rent, section8_rent, created_at, properties(address, city, state, zip_code, number_of_units)')
+        .select('id, title, status, property_type, purchase_price, arv, current_rent, market_rent, section8_rent, primary_image_url, visibility, created_at, properties(address, city, state, zip_code, number_of_units)')
         .eq('organization_id', workspace.organization.id)
         .order('created_at', { ascending: false })
     : { data: [], error: null }
@@ -67,9 +67,12 @@ export default async function DealsPage({ searchParams }: { searchParams?: Promi
               const rentGap = Number(deal.market_rent || 0) - Number(deal.current_rent || 0)
               return (
                 <Link key={deal.id} href={`/deals/${deal.id}`} className="grid gap-3 border-b border-white/10 px-5 py-4 transition last:border-b-0 hover:bg-white/[0.04] md:grid-cols-[1.4fr_0.9fr_0.8fr_0.8fr_0.8fr] md:items-center">
-                  <div>
+                  <div className="flex items-center gap-3">
+                    {deal.primary_image_url ? <div className="h-12 w-16 shrink-0 rounded-xl bg-cover bg-center" style={{ backgroundImage: `url(${deal.primary_image_url})` }} /> : <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-xs text-slate-500">IMG</div>}
+                    <div>
                     <div className="font-semibold">{deal.title}</div>
                     <div className="mt-1 text-sm text-slate-500">{deal.property_type || 'Property type pending'} · {property?.number_of_units || 1} unit(s)</div>
+                    </div>
                   </div>
                   <div className="text-sm text-slate-300">{[property?.city, property?.state, property?.zip_code].filter(Boolean).join(', ') || property?.address || 'Location pending'}</div>
                   <div className="text-sm text-slate-300">{money(deal.purchase_price)}</div>

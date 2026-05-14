@@ -24,6 +24,8 @@ export const FEATURE_KEYS = [
   'lender_view',
   'admin_plan_management',
   'market_source_imports',
+  'market_opportunities',
+  'public_community_deals',
 ] as const
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number]
@@ -37,6 +39,7 @@ export const CORE_FEATURES: FeatureMap = {
   rent_analysis: true,
   market_rent: true,
   calculators: true,
+  market_opportunities: true,
 }
 
 
@@ -62,6 +65,8 @@ export const PREMIUM_FEATURES: FeatureKey[] = [
   'ai_review',
   'lender_view',
   'market_source_imports',
+  'market_opportunities',
+  'public_community_deals',
 ]
 
 export const featureLabels: Record<FeatureKey, string> = {
@@ -88,6 +93,8 @@ export const featureLabels: Record<FeatureKey, string> = {
   lender_view: 'Bank / Lender View',
   admin_plan_management: 'Admin Plan Management',
   market_source_imports: 'Premium Market Source Imports',
+  market_opportunities: 'Market Opportunities',
+  public_community_deals: 'Public / Community Deals',
 }
 
 export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
@@ -154,6 +161,8 @@ export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
     white_label: true,
     lender_view: true,
     market_source_imports: true,
+    market_opportunities: true,
+    public_community_deals: true,
   },
   team_company: {
     ...CORE_FEATURES,
@@ -169,6 +178,8 @@ export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
     deal_distribution: true,
     lender_view: true,
     market_source_imports: true,
+    market_opportunities: true,
+    public_community_deals: true,
   },
 }
 

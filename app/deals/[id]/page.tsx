@@ -5,6 +5,7 @@ import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
+import { publishDealToMarketAction } from '@/app/market/actions'
 
 function money(value: number | string | null | undefined) {
   const numberValue = Number(value || 0)
@@ -16,6 +17,22 @@ function percent(value: number | string | null | undefined) {
   const numberValue = Number(value || 0)
   if (!numberValue) return '—'
   return `${numberValue}%`
+}
+
+
+function DealHeroImage({ deal }: { deal: Record<string, any> }) {
+  const imageUrl = String(deal.primary_image_url || '')
+  if (imageUrl) {
+    return <div className="h-64 rounded-3xl border border-white/10 bg-cover bg-center" style={{ backgroundImage: `url(${imageUrl})` }} />
+  }
+  return (
+    <div className="flex h-64 items-center justify-center rounded-3xl border border-dashed border-white/15 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950">
+      <div className="text-center">
+        <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Property image pending</div>
+        <div className="mt-2 text-sm text-slate-400">Add an image URL when editing the deal so it looks right in Market.</div>
+      </div>
+    </div>
+  )
 }
 
 function row(label: string, value: React.ReactNode) {
@@ -72,7 +89,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
       isPlatformAdmin={workspace.access.isPlatformAdmin}
     >
       <div className="space-y-6">
-        <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:flex-row lg:items-start lg:justify-between">
+        <section className="grid gap-6 rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:grid-cols-[1fr_360px] lg:items-start">
           <div>
             <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Deal Detail</div>
             <h1 className="mt-2 text-3xl font-bold">{(deal as any).title}</h1>
@@ -84,13 +101,28 @@ export default async function DealDetailPage({ params, searchParams }: { params:
               <span className="rounded-full border border-white/10 px-3 py-1">{(deal as any).property_type || 'Property type pending'}</span>
               <span className="rounded-full border border-white/10 px-3 py-1">{property?.number_of_units || 1} unit(s)</span>
             </div>
-          </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-wrap gap-3">
             <Link href={`/deals/${id}/analyzer`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">Analyze</Link>
             <Link href={`/deals/${id}/rent-intelligence`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Rent Intelligence</Link>
             <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Edit Deal</Link>
+            <Link href="/market" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Market</Link>
             <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Back</Link>
           </div>
+          <form action={publishDealToMarketAction} className="mt-5 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <input type="hidden" name="deal_id" value={id} />
+            <div className="text-sm font-semibold text-slate-100">Publish to Market</div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <select name="visibility" defaultValue={(deal as any).visibility === 'public' || (deal as any).visibility === 'community' || (deal as any).visibility === 'team' ? (deal as any).visibility : 'team'} className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
+                <option value="team">Team Market</option>
+                <option value="community">Community Deals</option>
+                <option value="public">Public Deals</option>
+              </select>
+              <input name="assignment_fee" type="number" placeholder="Assignment fee, optional" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+            </div>
+            <button className="mt-3 w-full rounded-xl bg-emerald-300 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Publish / update Market post</button>
+          </form>
+        </div>
+        <DealHeroImage deal={deal as any} />
         </section>
 
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}

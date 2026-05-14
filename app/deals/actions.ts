@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { buildCalculationSnapshotPayload, calculateDealUnderwriting } from '@/lib/calculations/underwriting'
+import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
 const VALID_STATUSES = new Set([
   'draft',
@@ -27,10 +28,17 @@ function text(formData: FormData, key: string) {
 }
 
 function numberValue(formData: FormData, key: string) {
-  const raw = String(formData.get(key) || '').trim().replace(',', '.')
+  const raw = String(formData.get(key) || '').trim()
   if (!raw) return null
-  const parsed = Number(raw)
+  const cleaned = raw.replace(/[$\s]/g, '').replace(/,/g, '')
+  const parsed = Number(cleaned)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function rentValue(formData: FormData, key: string) {
+  const value = numberValue(formData, key)
+  if (value === null) return null
+  return isReasonableMonthlyRent(value) ? value : null
 }
 
 function integerValue(formData: FormData, key: string) {
@@ -60,10 +68,10 @@ function buildDealPayload(formData: FormData) {
     purchase_price: numberValue(formData, 'purchase_price'),
     arv: numberValue(formData, 'arv'),
     rehab_estimate: numberValue(formData, 'rehab_estimate'),
-    current_rent: numberValue(formData, 'current_rent'),
-    market_rent: numberValue(formData, 'market_rent'),
-    section8_rent: numberValue(formData, 'section8_rent'),
-    target_rent: numberValue(formData, 'target_rent'),
+    current_rent: rentValue(formData, 'current_rent'),
+    market_rent: rentValue(formData, 'market_rent'),
+    section8_rent: rentValue(formData, 'section8_rent'),
+    target_rent: rentValue(formData, 'target_rent'),
     taxes_annual: numberValue(formData, 'taxes_annual'),
     insurance_annual: numberValue(formData, 'insurance_annual'),
     hoa_monthly: numberValue(formData, 'hoa_monthly'),

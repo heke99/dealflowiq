@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
+import { isReasonableMonthlyRent, summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
 import { addMarketRentCompAction, applyMarketRentSummaryAction, importZillowMarketRentCompAction, lookupHudRentAction } from '@/app/deals/[id]/rent-intelligence/actions'
 
 function money(value: unknown) {
@@ -71,7 +71,8 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
 
   const summary = summarizeMarketRentComps((comps || []) as any)
   const currentRent = Number((deal as any).current_rent || 0)
-  const marketRent = Number((deal as any).market_rent || 0)
+  const rawMarketRent = Number((deal as any).market_rent || 0)
+  const marketRent = isReasonableMonthlyRent(rawMarketRent) ? rawMarketRent : 0
   const hudRent = Number((deal as any).section8_rent || 0)
 
   return (
@@ -102,10 +103,20 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
 
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
         {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {summary.warnings.length ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+            {summary.warnings.map((warning) => <div key={warning}>{warning}</div>)}
+          </div>
+        ) : null}
+        {rawMarketRent > 0 && !marketRent ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+            The saved market rent looks unrealistic and is being ignored by the analyzer: {money(rawMarketRent)}. Add verified rent comps or edit the deal and enter a realistic monthly market rent.
+          </div>
+        ) : null}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Stat label="Current Rent" value={money(currentRent)} />
-          <Stat label="Market Rent" value={money(marketRent)} help={summary.count ? `Based on ${summary.count} saved comp(s)` : 'No saved comps yet'} />
+          <Stat label="Market Rent" value={money(marketRent)} help={summary.count ? `Based on ${summary.validCount}/${summary.count} valid comp(s)` : 'No saved comps yet'} />
           <Stat label="HUD / Section 8 Benchmark" value={money(hudRent)} help={hudCache ? `HUD year ${hudCache.hud_year}` : 'Run HUD lookup'} />
           <Stat label="Rent Confidence" value={`${summary.confidenceScore}/100`} help="Based on comps count, sqft data and manual confidence." />
         </section>
@@ -170,7 +181,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
               <input type="hidden" name="deal_id" value={id} />
               <h2 className="text-xl font-bold">HUD / Section 8 lookup</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                Uses official HUD USER benchmark data by ZIP. DealFlowIQ defaults to Auto, which tries the newest likely HUD/FMR year first and falls back year-by-year until a published dataset responds. Configure <code>HUDUSER_API_TOKEN</code> and optionally <code>HUDUSER_FMR_LOOKUP_URL_TEMPLATE</code> in environment variables.
+                Uses official HUD USER benchmark data by ZIP. DealFlowIQ defaults to Auto, which tries the newest likely HUD/FMR year first and falls back year-by-year until a published dataset responds. Configure <code>HUDUSER_API_TOKEN</code>, <code>HUDUSER_FMR_API_BASE_URL</code> and <code>HUDUSER_USPS_API_BASE_URL</code> in environment variables. ZIP lookup resolves the ZIP through HUD USPS Crosswalk first, then calls the official HUD FMR entity endpoint.
               </p>
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <Field label="ZIP code" name="zip_code" defaultValue={property?.zip_code || ''} />
@@ -223,7 +234,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
                 <div className="text-sm text-slate-300">{comp.bedrooms || '—'} bd · {comp.square_feet || '—'} sqft</div>
                 <div className="text-sm text-slate-400">Confidence {comp.confidence_score || '—'}</div>
               </div>
-            )) : <div className="p-6 text-sm text-slate-500">No comps yet. Add at least three good comps for a more useful market rent confidence score.</div>}
+            )) : <div className="p-6 text-sm text-slate-500">No valid comps yet. Add at least three verified monthly-rent comps for a more useful market rent confidence score.</div>}
           </div>
         </section>
       </div>

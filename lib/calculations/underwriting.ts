@@ -1,3 +1,5 @@
+import { MAX_REASONABLE_MONTHLY_RENT, MIN_REASONABLE_MONTHLY_RENT, isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
+
 export type DealLike = Record<string, unknown>
 export type PropertyLike = Record<string, unknown> | null | undefined
 
@@ -116,7 +118,7 @@ export type DealUnderwritingSummary = {
   warnings: string[]
 }
 
-const FORMULA_VERSION = 'dealflowiq-underwriting-v1.1'
+const FORMULA_VERSION = 'dealflowiq-underwriting-v1.2'
 
 const RENT_SCENARIOS: Array<{ key: RentScenarioKey; label: string; field: string }> = [
   { key: 'current', label: 'Current Rent', field: 'current_rent' },
@@ -302,7 +304,8 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
   const arv = positive(deal.arv)
   const rehabEstimate = positive(deal.rehab_estimate)
   const units = Math.max(1, Math.round(positive(property?.number_of_units, 1) || 1))
-  const currentRent = positive(deal.current_rent)
+  const rawCurrentRent = positive(deal.current_rent)
+  const currentRent = isReasonableMonthlyRent(rawCurrentRent) ? rawCurrentRent : 0
 
   const downPaymentPercent = positive(deal.down_payment_percent, 20)
   const explicitDownPayment = positive(deal.down_payment_amount)
@@ -376,7 +379,8 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
   }
 
   const scenarios = RENT_SCENARIOS.reduce<Record<RentScenarioKey, RentScenarioResult>>((acc, item) => {
-    const monthlyRent = positive(deal[item.field]) || (item.key === 'current' ? currentRent : 0)
+    const rawMonthlyRent = positive(deal[item.field])
+    const monthlyRent = isReasonableMonthlyRent(rawMonthlyRent) ? rawMonthlyRent : (item.key === 'current' ? currentRent : 0)
     acc[item.key] = calculateScenario({
       key: item.key,
       label: item.label,
@@ -419,6 +423,12 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
   const brrrrCashLeftInDeal = brrrrRefiLoanAmount !== null ? totalProjectCost - brrrrRefiLoanAmount : null
 
   const warnings: string[] = []
+  for (const item of RENT_SCENARIOS) {
+    const rawMonthlyRent = positive(deal[item.field])
+    if (rawMonthlyRent > 0 && !isReasonableMonthlyRent(rawMonthlyRent)) {
+      warnings.push(`${item.label} was ignored because ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(rawMonthlyRent)} is outside the reasonable monthly rent range $${MIN_REASONABLE_MONTHLY_RENT.toLocaleString()}–$${MAX_REASONABLE_MONTHLY_RENT.toLocaleString()}.`)
+    }
+  }
   if (!purchasePrice) warnings.push('Purchase price is missing. Cap rate, financing and offer metrics will be incomplete.')
   if (basis === 'custom_value' && !customCapValue) warnings.push('Cap rate basis is custom value, but no custom cap rate value is entered.')
   if (!currentRent && !primaryScenario.monthlyRent) warnings.push('Rent assumptions are missing. Add current, market or target rent to calculate cashflow.')

@@ -6,7 +6,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
 import { importZillowRentalByUrl } from '@/lib/integrations/zillow/zillowClient'
-import { summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
+import { MAX_REASONABLE_MONTHLY_RENT, MIN_REASONABLE_MONTHLY_RENT, isReasonableMonthlyRent, summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -14,10 +14,21 @@ function text(formData: FormData, key: string) {
 }
 
 function numberValue(formData: FormData, key: string) {
-  const raw = String(formData.get(key) || '').trim().replace(',', '.')
+  const raw = String(formData.get(key) || '').trim()
   if (!raw) return null
-  const parsed = Number(raw)
+  // Accept common money formatting such as 1,750 or $1,750.50.
+  const cleaned = raw.replace(/[$\s]/g, '').replace(/,/g, '')
+  const parsed = Number(cleaned)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function rentValue(formData: FormData, key: string) {
+  const value = numberValue(formData, key)
+  return value !== null && isReasonableMonthlyRent(value) ? value : null
+}
+
+function invalidRentRedirect(dealId: string, label: string) {
+  redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(`${label} must be a realistic monthly rent between $${MIN_REASONABLE_MONTHLY_RENT.toLocaleString()} and $${MAX_REASONABLE_MONTHLY_RENT.toLocaleString()}. If this is a sale price, do not use it as monthly rent.`)}`)
 }
 
 function intValue(formData: FormData, key: string) {
@@ -67,8 +78,10 @@ export async function addMarketRentCompAction(formData: FormData) {
   if (!dealId) redirect('/deals?error=Missing deal id')
 
   const { workspace, supabase, property } = await requireDeal(dealId)
-  const monthlyRent = numberValue(formData, 'monthly_rent')
-  if (monthlyRent === null || monthlyRent < 0) redirect(`/deals/${dealId}/rent-intelligence?error=Monthly rent is required`)
+  const rawMonthlyRent = numberValue(formData, 'monthly_rent')
+  const monthlyRent = rentValue(formData, 'monthly_rent')
+  if (rawMonthlyRent === null) redirect(`/deals/${dealId}/rent-intelligence?error=Monthly rent is required`)
+  if (monthlyRent === null) invalidRentRedirect(dealId, 'Monthly rent')
 
   const { error } = await supabase.from('market_rent_comps').insert({
     organization_id: workspace.organization!.id,
@@ -118,12 +131,14 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
 
   const { workspace, supabase, property } = await requireDeal(dealId)
   const sourceUrl = text(formData, 'zillow_url') || ''
-  const manualRentOverride = numberValue(formData, 'monthly_rent_override')
+  const rawManualRentOverride = numberValue(formData, 'monthly_rent_override')
+  const manualRentOverride = rawManualRentOverride === null ? null : rentValue(formData, 'monthly_rent_override')
+  if (rawManualRentOverride !== null && manualRentOverride === null) invalidRentRedirect(dealId, 'Manual rent override')
 
   try {
     const imported = await importZillowRentalByUrl(sourceUrl)
     const monthlyRent = manualRentOverride ?? imported.monthlyRent
-    if (!monthlyRent) throw new Error('Zillow import succeeded but rent was missing. Enter a manual rent override.')
+    if (!monthlyRent || !isReasonableMonthlyRent(monthlyRent)) throw new Error(`Zillow import did not produce a realistic monthly rent. Enter a manual rent override between $${MIN_REASONABLE_MONTHLY_RENT.toLocaleString()} and $${MAX_REASONABLE_MONTHLY_RENT.toLocaleString()}.`)
 
     const { error } = await supabase.from('market_rent_comps').insert({
       organization_id: workspace.organization!.id,
@@ -184,7 +199,7 @@ export async function applyMarketRentSummaryAction(formData: FormData) {
   if (!dealId) redirect('/deals?error=Missing deal id')
   const { workspace, supabase } = await requireDeal(dealId)
   const summary = await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
-  if (!summary.recommendedRent) redirect(`/deals/${dealId}/rent-intelligence?error=Add at least one market rent comp first`)
+  if (!summary.recommendedRent) redirect(`/deals/${dealId}/rent-intelligence?error=Add at least one valid market rent comp first. DealFlowIQ ignores unrealistic rents and outliers.`)
   revalidatePath(`/deals/${dealId}`)
   redirect(`/deals/${dealId}/rent-intelligence?saved=market_rent`)
 }
@@ -215,7 +230,7 @@ export async function lookupHudRentAction(formData: FormData) {
       rent_4br: result.rents[4],
       source: result.hudYearMode === 'auto' ? 'HUDUSER_AUTO_LATEST' : 'HUDUSER_MANUAL_YEAR',
       source_url: result.sourceUrl,
-      raw_response: { ...(result.raw as any), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears } } as any,
+      raw_response: { ...(result.raw as any), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears, entityId: result.entityId, entitySource: result.entitySource } } as any,
       fetched_at: new Date().toISOString(),
     }, { onConflict: 'zip_code,hud_year' })
 
@@ -232,7 +247,7 @@ export async function lookupHudRentAction(formData: FormData) {
       hud_year: result.hudYear,
       status: 'success',
       message: rent
-        ? `Applied ${rent} HUD/FMR benchmark from HUD year ${result.hudYear}. Attempted years: ${result.attemptedYears.join(', ')}.`
+        ? `Applied ${rent} HUD/FMR benchmark from HUD year ${result.hudYear}. Entity: ${result.entityId || 'n/a'} (${result.entitySource || 'n/a'}). Attempted years: ${result.attemptedYears.join(', ')}.`
         : `HUD lookup succeeded for HUD year ${result.hudYear}, but no selected bedroom rent was found.`,
       source_url: result.sourceUrl,
     })

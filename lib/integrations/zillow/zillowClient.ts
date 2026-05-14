@@ -25,6 +25,11 @@ function toNumber(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
+function isReasonableMonthlyRent(value: unknown): value is number {
+  const num = typeof value === 'number' ? value : toNumber(value)
+  return typeof num === 'number' && Number.isFinite(num) && num >= 250 && num <= 50000
+}
+
 function clean(value: unknown): string | null {
   if (value === null || value === undefined) return null
   const normalized = String(value).replace(/\s+/g, ' ').trim()
@@ -103,13 +108,18 @@ function normalizeFromPayload(sourceUrl: string, payloads: unknown[], html: stri
   const combined = payloads.length === 1 ? payloads[0] : { payloads }
   const address = normalizeAddressFromObject(combined)
 
-  const priceCandidate = first(
-    findKey(combined, ['price', 'unformattedPrice', 'rentZestimate', 'zestimate', 'monthlyRent', 'rent']),
+  // Only use rent-specific signals. Do not use generic `price` or sale values as monthly rent.
+  const explicitRentText = first(
     textMatch(html, /\$([0-9][0-9,]*)\s*(?:\/mo|per month|mo)/i),
-    textMatch(html, /"price"\s*:\s*"?\$?([0-9][0-9,]*)/i)
+    textMatch(html, /"(?:monthlyRent|rent|rentZestimate)"\s*:\s*"?\$?([0-9][0-9,]*)/i)
+  )
+  const rentCandidate = first(
+    findKey(combined, ['monthlyRent', 'rent', 'rentZestimate']),
+    explicitRentText
   )
 
-  const rent = toNumber(priceCandidate)
+  const parsedRent = toNumber(rentCandidate)
+  const rent = isReasonableMonthlyRent(parsedRent) ? parsedRent : null
   const beds = first(findKey(combined, ['bedrooms', 'beds']), numericTextMatch(html, /([0-9]+(?:\.[0-9]+)?)\s*(?:bd|beds?|bedrooms?)/i))
   const baths = first(findKey(combined, ['bathrooms', 'baths']), numericTextMatch(html, /([0-9]+(?:\.[0-9]+)?)\s*(?:ba|baths?|bathrooms?)/i))
   const sqft = first(findKey(combined, ['livingArea', 'livingAreaValue', 'floorSize', 'sqft']), numericTextMatch(html, /([0-9][0-9,]*)\s*(?:sqft|sq\.\s*ft\.)/i))
@@ -127,7 +137,7 @@ function normalizeFromPayload(sourceUrl: string, payloads: unknown[], html: stri
     squareFeet: toNumber(sqft) ? Math.round(toNumber(sqft) as number) : null,
     monthlyRent: rent,
     listingDate: clean(findKey(combined, ['datePosted', 'listingDate', 'postingDate'])),
-    notes: 'Imported directly from Zillow page HTML using authorized DealFlowIQ integration. Verify all values before underwriting.',
+    notes: 'Imported directly from Zillow page HTML using authorized DealFlowIQ integration. Generic sale/list price is intentionally ignored; verify monthly rent before underwriting.',
     raw: {
       extractedAt: new Date().toISOString(),
       payloadCount: payloads.length,
@@ -167,7 +177,7 @@ export async function importZillowRentalByUrl(sourceUrl: string): Promise<Zillow
 
   const imported = normalizeFromPayload(url.toString(), payloads, html)
   if (!imported.monthlyRent) {
-    throw new Error('Zillow page was fetched, but monthly rent could not be extracted. Add the rent manually and keep the Zillow URL as source evidence.')
+    throw new Error('Zillow page was fetched, but a reasonable monthly rent could not be extracted. Add the rent manually and keep the Zillow URL as source evidence. DealFlowIQ ignores generic sale/list prices to avoid bad market-rent calculations.')
   }
   return imported
 }

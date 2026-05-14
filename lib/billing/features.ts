@@ -25,6 +25,7 @@ export const FEATURE_KEYS = [
   'admin_plan_management',
   'market_source_imports',
   'market_opportunities',
+  'scheduled_market_imports',
   'public_community_deals',
 ] as const
 
@@ -66,6 +67,7 @@ export const PREMIUM_FEATURES: FeatureKey[] = [
   'lender_view',
   'market_source_imports',
   'market_opportunities',
+  'scheduled_market_imports',
   'public_community_deals',
 ]
 
@@ -94,6 +96,7 @@ export const featureLabels: Record<FeatureKey, string> = {
   admin_plan_management: 'Admin Plan Management',
   market_source_imports: 'Premium Market Source Imports',
   market_opportunities: 'Market Opportunities',
+  scheduled_market_imports: 'Scheduled Market Imports',
   public_community_deals: 'Public / Community Deals',
 }
 
@@ -162,6 +165,7 @@ export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
     lender_view: true,
     market_source_imports: true,
     market_opportunities: true,
+    scheduled_market_imports: true,
     public_community_deals: true,
   },
   team_company: {
@@ -179,6 +183,7 @@ export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
     lender_view: true,
     market_source_imports: true,
     market_opportunities: true,
+    scheduled_market_imports: true,
     public_community_deals: true,
   },
 }

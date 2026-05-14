@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { canUseFeature, featureLabels, type FeatureKey } from '@/lib/billing/features'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
 
 const featureGroups: Record<string, FeatureKey[]> = {
@@ -43,12 +44,25 @@ export default async function DashboardPage() {
   const config = getAccountTypeConfig(accountType)
   const dashboardFeatures = getDashboardFeatures(accountType, workspace.access.features)
   const plan = workspace.access.plan
+  const supabase = await createSupabaseServerClient()
+
+  const [{ count: dealsCount }, { count: marketCount }, { data: topScores }, { data: latestJobs }] = workspace.organization?.id
+    ? await Promise.all([
+        supabase.from('deals').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id),
+        supabase.from('market_listings').select('id', { count: 'exact', head: true }).or(`organization_id.eq.${workspace.organization.id},visibility.eq.public`),
+        supabase.from('market_listing_scores').select('deal_score, risk_level, market_listings!inner(id, organization_id, visibility)').or(`market_listings.organization_id.eq.${workspace.organization.id},market_listings.visibility.eq.public`).order('deal_score', { ascending: false }).limit(8),
+        supabase.from('market_import_jobs').select('status, items_created, items_updated, items_failed, created_at, error_message').eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5),
+      ])
+    : [{ count: 0 }, { count: 0 }, { data: [] }, { data: [] }]
+
+  const opportunityCount = (topScores || []).filter((row: any) => Number(row.deal_score || 0) >= 80).length
+  const latestFailedJob = (latestJobs || []).find((job: any) => job.status === 'failed')
 
   const stats = [
-    { label: accountType === 'landlord' || accountType === 'section_8_landlord' ? 'Properties' : 'Total Deals', value: '0', hint: 'Deal creation comes next.' },
+    { label: accountType === 'landlord' || accountType === 'section_8_landlord' ? 'Properties' : 'My Deals', value: String(dealsCount || 0), hint: 'Private/team deals in your workspace.' },
+    { label: 'Market Listings', value: String(marketCount || 0), hint: 'Imported, public and team-visible listings.' },
+    { label: 'Opportunities 80+', value: String(opportunityCount || 0), hint: 'High-rated listings ready for review.' },
     { label: 'Current Plan', value: plan?.name || 'Trial', hint: workspace.access.status },
-    { label: 'Trial Ends', value: formatTrialDate(workspace.access.trialEndsAt), hint: workspace.access.isTrialActive ? 'Trial is active' : 'Trial not active' },
-    { label: 'Monthly Price', value: formatMoney(plan?.monthly_price_cents, plan?.currency), hint: 'Stripe billing comes later.' },
   ]
 
   return (
@@ -78,11 +92,14 @@ export default async function DashboardPage() {
               ) : null}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
-              <Link href="/deals" className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">
-                Open Deals
+              <Link href="/market?tab=opportunities" className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">
+                Open Opportunities
               </Link>
-              <Link href="/settings/billing" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">
-                View Plan
+              <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">
+                Manage Sources
+              </Link>
+              <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">
+                My Deals
               </Link>
             </div>
           </div>
@@ -112,6 +129,25 @@ export default async function DashboardPage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Market engine</h2>
+            <p className="mt-2 text-sm text-slate-400">Track automated source imports and the strongest scored opportunities.</p>
+            <div className="mt-5 space-y-3">
+              {(topScores || []).slice(0, 3).map((score: any, index: number) => (
+                <div key={`${score.deal_score}-${index}`} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-100">Opportunity #{index + 1}</div>
+                    <div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-100">{Math.round(Number(score.deal_score || 0))}</div>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">Risk: {String(score.risk_level || 'medium')}</div>
+                </div>
+              ))}
+              {!(topScores || []).length ? <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No scored opportunities yet. Add a Market source or publish a deal.</div> : null}
+              {latestFailedJob ? <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-100">Latest import issue: {latestFailedJob.error_message || 'Import failed'}</div> : null}
+            </div>
+            <Link href="/market" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Go to Market</Link>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

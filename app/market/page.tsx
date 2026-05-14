@@ -3,7 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
-import { convertListingToDealAction, createMarketListingAction, createMarketSourceAction, importMarketCsvAction, importMarketUrlAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
+import { convertListingToDealAction, createMarketListingAction, createMarketSourceAction, importMarketCsvAction, importMarketUrlAction, rescoreMarketListingAction, runMarketSourceAction, saveOpportunityAction } from '@/app/market/actions'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -57,6 +57,11 @@ function numberText(value: number | string | null | undefined) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return parsed.toLocaleString()
+}
+
+function dateText(value: string | null | undefined) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
 function initials(title: string) {
@@ -262,6 +267,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   let visibleListings = [...((listings || []) as Listing[])]
   if (activeTab === 'opportunities') {
     visibleListings = visibleListings
+      .filter((item) => Number(scoreFor(item, latestScoreByListingId)?.deal_score || 0) >= 80)
       .filter((item) => !['ignored', 'passed'].includes(String(watchByListingId.get(String(item.id))?.status || '')))
       .sort((a, b) => Number(scoreFor(b, latestScoreByListingId)?.deal_score || 0) - Number(scoreFor(a, latestScoreByListingId)?.deal_score || 0))
       .slice(0, 48)
@@ -291,13 +297,13 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Market Intelligence</div>
               <h1 className="mt-2 text-3xl font-bold">Market</h1>
               <p className="mt-3 max-w-4xl text-slate-300">
-                Browse listings, public/community deals and imported opportunities. DealFlowIQ scores every listing so the best opportunities rise to the top.
+                Browse imported listings, public/community deals, and automatically ranked opportunities. Listings scoring 80+ are promoted into Opportunities.
               </p>
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-2xl font-bold">{totalVisible}</div><div className="text-xs uppercase tracking-wide text-slate-500">Visible</div></div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-2xl font-bold">{totalVisible}</div><div className="text-xs uppercase tracking-wide text-slate-500">Listings</div></div>
               <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-2xl font-bold">{avgScore || '—'}</div><div className="text-xs uppercase tracking-wide text-slate-500">Avg score</div></div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-2xl font-bold">{topHudGap ? money(topHudGap, true) : '—'}</div><div className="text-xs uppercase tracking-wide text-slate-500">Top HUD gap</div></div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-2xl font-bold">{topHudGap ? money(topHudGap, true) : '—'}</div><div className="text-xs uppercase tracking-wide text-slate-500">Best HUD gap</div></div>
             </div>
           </div>
           {params?.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
@@ -403,7 +409,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             <div className="space-y-6">
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <h2 className="text-xl font-bold">Source connectors</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-400">Create a source profile so imports can be tracked by source, access mode and rate limit.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">Create a source profile, paste authorized listing/search URLs, and let the scheduled worker keep Market fresh.</p>
                 <form action={createMarketSourceAction} className="mt-5 grid gap-3">
                   <Field label="Source name" name="source_name" placeholder="Zillow Tucson buy box" />
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -432,15 +438,57 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                       </select>
                     </label>
                   </div>
-                  <Field label="Source URL / search URL" name="source_url" placeholder="https://..." />
                   <Field label="Daily limit" name="rate_limit_per_day" type="number" placeholder="25" />
+                  <Field label="Max URLs / run" name="max_urls_per_run" type="number" placeholder="5" />
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">Schedule</span>
+                    <select name="schedule_frequency" defaultValue="daily" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                      <option value="hourly">Hourly</option>
+                      <option value="twice_daily">Twice daily</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                    </select>
+                  </label>
+                  <Field label="Opportunity threshold" name="opportunity_score_threshold" type="number" placeholder="80" />
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">Default visibility</span>
+                    <select name="visibility" defaultValue="private" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                      <option value="private">Private Market</option>
+                      <option value="team">Team Market</option>
+                      <option value="community" disabled={!canPostPublic}>Community Deals</option>
+                      <option value="public" disabled={!canPostPublic}>Public Deals</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-slate-200">
+                    <input name="auto_import_enabled" type="checkbox" className="h-4 w-4" />
+                    Auto-run
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">Authorized URLs</span>
+                    <textarea name="source_urls" rows={4} placeholder="One authorized listing/search URL per line" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  </label>
                   <button disabled={!canImportSources} className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Save source</button>
                 </form>
                 <div className="mt-5 space-y-2">
                   {(marketSources || []).length ? (marketSources || []).map((source: any) => (
-                    <div key={source.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm">
-                      <div className="font-semibold text-slate-100">{source.source_name}</div>
-                      <div className="mt-1 text-xs text-slate-500">{source.source_type} · {source.access_mode} · {source.status}</div>
+                    <div key={source.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-slate-100">{source.source_name}</div>
+                          <div className="mt-1 text-xs text-slate-500">{source.source_type} · {source.access_mode} · {source.status}</div>
+                        </div>
+                        <form action={runMarketSourceAction}>
+                          <input type="hidden" name="source_id" value={source.id} />
+                          <button disabled={!canImportSources} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-40">Run now</button>
+                        </form>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div>Auto: <span className="text-slate-200">{source.auto_import_enabled ? 'On' : 'Off'}</span></div>
+                        <div>Schedule: <span className="text-slate-200">{String(source.schedule_frequency || 'daily').replace('_', ' ')}</span></div>
+                        <div>Threshold: <span className="text-slate-200">{source.opportunity_score_threshold || 80}+</span></div>
+                        <div>Next: <span className="text-slate-200">{dateText(source.next_run_at)}</span></div>
+                      </div>
+                      {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-2 text-xs text-red-100">{source.last_error}</div> : null}
                     </div>
                   )) : <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No saved sources yet.</div>}
                 </div>

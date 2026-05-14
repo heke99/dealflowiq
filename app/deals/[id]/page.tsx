@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
+import { deleteDealAction, quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
 import { publishDealToMarketAction } from '@/app/market/actions'
 
 function money(value: number | string | null | undefined) {
@@ -124,6 +124,12 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             </div>
             <textarea name="summary" rows={3} placeholder="Short public/community summary. Leave blank to use deal notes." className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
             <button className="mt-3 w-full rounded-xl bg-emerald-300 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Publish / update Market post</button>
+          </form>
+          <form action={deleteDealAction} className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
+            <input type="hidden" name="deal_id" value={id} />
+            <div className="text-sm font-semibold text-red-100">Delete this deal</div>
+            <p className="mt-1 text-xs leading-5 text-red-100/80">Removes the deal and related property/calculation records. Market posts created from this deal should be archived separately if you want them hidden.</p>
+            <button className="mt-3 w-full rounded-xl border border-red-300/30 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20">Delete Deal</button>
           </form>
         </div>
         <DealHeroImage deal={deal as any} />

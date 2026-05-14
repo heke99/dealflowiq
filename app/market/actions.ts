@@ -6,6 +6,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
+import { runMarketSourceNow } from '@/lib/market/importRunner'
 import {
   buildNormalizedListingKey,
   detectSourceType,
@@ -54,6 +55,33 @@ function imageUrlsValue(formData: FormData) {
     .map((item) => item.trim())
     .filter((item) => item.startsWith('http://') || item.startsWith('https://'))
     .slice(0, 12)
+}
+
+
+
+function sourceUrlsValue(formData: FormData) {
+  const raw = String(formData.get('source_urls') || formData.get('source_url') || '').trim()
+  if (!raw) return []
+  return raw
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.startsWith('http://') || item.startsWith('https://'))
+    .slice(0, 25)
+}
+
+function checkboxValue(formData: FormData, key: string) {
+  return String(formData.get(key) || '') === 'on' || String(formData.get(key) || '') === 'true'
+}
+
+function scheduleFrequencyValue(formData: FormData) {
+  const value = String(formData.get('schedule_frequency') || 'daily')
+  return ['hourly', 'twice_daily', 'daily', 'weekly'].includes(value) ? value : 'daily'
+}
+
+function scoreThresholdValue(formData: FormData) {
+  const value = numberValue(formData, 'opportunity_score_threshold')
+  if (value === null) return 80
+  return Math.max(0, Math.min(100, value))
 }
 
 function listingInsertPayload(params: {
@@ -219,6 +247,8 @@ export async function createMarketSourceAction(formData: FormData) {
 
   const supabase = await createSupabaseServerClient()
   const sourceName = text(formData, 'source_name') || `${sourceTypeValue(formData)} source`
+  const sourceUrls = sourceUrlsValue(formData)
+  const defaultVisibility = visibilityValue(formData)
   const { error } = await supabase.from('market_sources').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,
@@ -227,9 +257,18 @@ export async function createMarketSourceAction(formData: FormData) {
     access_mode: accessModeValue(formData),
     status: 'active',
     rate_limit_per_day: integerValue(formData, 'rate_limit_per_day'),
+    auto_import_enabled: checkboxValue(formData, 'auto_import_enabled'),
+    schedule_frequency: scheduleFrequencyValue(formData),
+    default_visibility: defaultVisibility,
+    opportunity_score_threshold: scoreThresholdValue(formData),
+    next_run_at: checkboxValue(formData, 'auto_import_enabled') ? new Date().toISOString() : null,
     settings: {
       note: text(formData, 'note'),
-      source_url: text(formData, 'source_url'),
+      source_url: sourceUrls[0] || null,
+      source_urls: sourceUrls,
+      max_urls_per_run: integerValue(formData, 'max_urls_per_run') || 5,
+      default_visibility: defaultVisibility,
+      opportunity_score_threshold: scoreThresholdValue(formData),
       createdFrom: 'market_sources_ui',
     },
   })
@@ -570,6 +609,37 @@ export async function convertListingToDealAction(formData: FormData) {
   revalidatePath('/market')
   revalidatePath('/deals')
   redirect(`/deals/${deal.id}?saved=converted`)
+}
+
+
+export async function runMarketSourceAction(formData: FormData) {
+  const sourceId = String(formData.get('source_id') || '').trim()
+  if (!sourceId) redirect('/market?tab=sources&error=Missing source id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  if (!canUseFeature(workspace.access.features, 'scheduled_market_imports') && !workspace.access.isPlatformAdmin) {
+    redirect(`/market?tab=sources&error=${encodeURIComponent('Scheduled/source runs are a premium feature.')}`)
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const { data: source, error } = await supabase
+    .from('market_sources')
+    .select('*')
+    .eq('id', sourceId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+  if (error || !source) redirect(`/market?tab=sources&error=${encodeURIComponent(error?.message || 'Source not found')}`)
+
+  try {
+    await runMarketSourceNow(source as any, { maxUrls: 5 })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not run market source'
+    redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
+  }
+
+  revalidatePath('/market')
+  redirect('/market?tab=opportunities&saved=source_run')
 }
 
 export async function publishDealToMarketAction(formData: FormData) {

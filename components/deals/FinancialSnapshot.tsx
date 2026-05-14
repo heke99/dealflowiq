@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { createCalculationSnapshotAction } from '@/app/deals/actions'
+import { scoreMarketListing } from '@/lib/market/scoring'
 import {
   calculateDealUnderwriting,
   formatMoney,
@@ -133,6 +134,16 @@ function SnapshotList({ snapshots }: { snapshots: CalculationSnapshotRow[] }) {
 export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, showSnapshotTools = false, snapshots = [], message, error, showMethodology = false }: FinancialSnapshotProps) {
   const summary: DealUnderwritingSummary = calculateDealUnderwriting(deal, property)
   const primary = summary.primaryScenario
+  const decisionScore = scoreMarketListing({
+    ...deal,
+    list_price: deal.purchase_price || deal.asking_price,
+    hud_rent: deal.section8_rent,
+    units: property?.number_of_units,
+    zip_code: property?.zip_code,
+    address: property?.address,
+    city: property?.city,
+    state: property?.state,
+  })
   const capRateFormula = findFormula(summary.formulaExplanations, 'cap_rate')
   const dscrFormula = findFormula(summary.formulaExplanations, 'dscr')
   const mortgageFormula = findFormula(summary.formulaExplanations, 'mortgage_payment')
@@ -165,6 +176,31 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
               Open Analyzer
             </Link>
           ) : null}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Smart Analyze verdict</div>
+            <h3 className="mt-2 text-2xl font-bold">{decisionScore.dealScore >= 75 ? 'Strong opportunity' : decisionScore.dealScore >= 55 ? 'Worth reviewing' : 'Needs more data or weak deal'}</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">DealFlowIQ ranks this deal using rent upside, cashflow, DSCR, cap rate, risk and data confidence. Add missing data or run Rent Intelligence to improve the score.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4"><div className="text-2xl font-bold text-emerald-100">{decisionScore.dealScore}</div><div className="text-xs uppercase tracking-wide text-emerald-200">Score</div></div>
+            <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-sm font-bold capitalize text-slate-100">{decisionScore.riskLevel}</div><div className="text-xs uppercase tracking-wide text-slate-500">Risk</div></div>
+            <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-4"><div className="text-sm font-bold capitalize text-slate-100">{decisionScore.dataConfidence}</div><div className="text-xs uppercase tracking-wide text-slate-500">Confidence</div></div>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <div className="text-sm font-semibold text-slate-100">Why</div>
+            <ul className="mt-3 space-y-2 text-sm text-slate-400">{decisionScore.reasons.slice(0, 4).map((item) => <li key={item}>• {item}</li>)}</ul>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <div className="text-sm font-semibold text-slate-100">Risks / missing data</div>
+            <ul className="mt-3 space-y-2 text-sm text-slate-400">{[...decisionScore.risks, ...decisionScore.missingFields.map((field) => `${field} is missing.`)].slice(0, 4).map((item) => <li key={item}>• {item}</li>)}</ul>
+          </div>
         </div>
       </div>
 

@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS public.market_listings (
   source_id uuid REFERENCES public.market_sources(id) ON DELETE SET NULL,
   import_job_id uuid REFERENCES public.market_import_jobs(id) ON DELETE SET NULL,
   created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  source_type text NOT NULL DEFAULT 'manual' CHECK (source_type IN ('manual', 'zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'mls_feed', 'public_deal', 'community_deal', 'other')),
+  source_type text NOT NULL DEFAULT 'manual' CHECK (source_type IN ('manual', 'manual_url', 'zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'mls_feed', 'public_deal', 'community_deal', 'other')),
   external_listing_id text,
   source_url text,
   title text NOT NULL,

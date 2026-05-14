@@ -110,7 +110,8 @@ export default async function DealDetailPage({ params, searchParams }: { params:
           </div>
           <form action={publishDealToMarketAction} className="mt-5 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
             <input type="hidden" name="deal_id" value={id} />
-            <div className="text-sm font-semibold text-slate-100">Publish to Market</div>
+            <div className="text-sm font-semibold text-slate-100">Publish to Market / Community</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Choose where this deal should appear. Team is internal, Community/Public can be premium deal-board posts.</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <select name="visibility" defaultValue={(deal as any).visibility === 'public' || (deal as any).visibility === 'community' || (deal as any).visibility === 'team' ? (deal as any).visibility : 'team'} className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
                 <option value="team">Team Market</option>
@@ -118,7 +119,10 @@ export default async function DealDetailPage({ params, searchParams }: { params:
                 <option value="public">Public Deals</option>
               </select>
               <input name="assignment_fee" type="number" placeholder="Assignment fee, optional" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+              <input name="asking_price" type="number" defaultValue={(deal as any).asking_price || (deal as any).purchase_price || ''} placeholder="Asking price" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+              <input name="contact_email" type="email" defaultValue={workspace.user.email || ''} placeholder="Contact email" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
             </div>
+            <textarea name="summary" rows={3} placeholder="Short public/community summary. Leave blank to use deal notes." className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
             <button className="mt-3 w-full rounded-xl bg-emerald-300 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Publish / update Market post</button>
           </form>
         </div>

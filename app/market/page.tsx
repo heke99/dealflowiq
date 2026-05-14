@@ -3,7 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
-import { convertListingToDealAction, createMarketListingAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
+import { convertListingToDealAction, createMarketListingAction, createMarketSourceAction, importMarketCsvAction, importMarketUrlAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -242,6 +242,15 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
         .limit(12)
     : { data: [] }
 
+  const { data: marketSources } = workspace.organization?.id
+    ? await supabase
+        .from('market_sources')
+        .select('*')
+        .eq('organization_id', workspace.organization.id)
+        .order('created_at', { ascending: false })
+        .limit(20)
+    : { data: [] }
+
   const latestScoreByListingId = new Map<string, Score>()
   for (const score of scores || []) {
     const key = String((score as any).listing_id)
@@ -332,7 +341,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <div>
                   <h2 className="text-xl font-bold">Add Market listing</h2>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Add an authorized URL/manual opportunity now. Batch 12C will process Zillow, Crexi, LoopNet and API sources through the same Market listing model.
+                    Import authorized URLs, paste CSV feeds, or add a manual opportunity. Every source becomes a normalized Market listing, gets scored, and can be saved or converted to a deal.
                   </p>
                 </div>
                 {!canImportSources ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Source imports premium</span> : null}
@@ -391,19 +400,119 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <button className="rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200 md:col-span-2">Add to Market</button>
               </form>
             </div>
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Import jobs</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-400">These are source/import runs. Batch 12C will turn queued source jobs into normalized listings automatically.</p>
-              <div className="mt-5 space-y-3">
-                {(importJobs || []).length ? (importJobs || []).map((job: any) => (
-                  <div key={job.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-semibold text-slate-100">{job.input_url || job.job_type}</div>
-                      <span className="rounded-full border border-white/10 px-3 py-1 text-xs capitalize text-slate-300">{String(job.status).replaceAll('_', ' ')}</span>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">Found {job.items_found || 0} · Created {job.items_created || 0} · Updated {job.items_updated || 0}</div>
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                <h2 className="text-xl font-bold">Source connectors</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">Create a source profile so imports can be tracked by source, access mode and rate limit.</p>
+                <form action={createMarketSourceAction} className="mt-5 grid gap-3">
+                  <Field label="Source name" name="source_name" placeholder="Zillow Tucson buy box" />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-300">Source type</span>
+                      <select name="source_type" defaultValue="zillow" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                        <option value="zillow">Zillow</option>
+                        <option value="crexi">Crexi</option>
+                        <option value="loopnet">LoopNet</option>
+                        <option value="redfin">Redfin</option>
+                        <option value="realtor">Realtor.com</option>
+                        <option value="apartments">Apartments.com</option>
+                        <option value="csv">CSV</option>
+                        <option value="partner_api">Partner/API</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-300">Access mode</span>
+                      <select name="access_mode" defaultValue="authorized_scrape" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                        <option value="authorized_scrape">Authorized scrape</option>
+                        <option value="api">API</option>
+                        <option value="csv">CSV</option>
+                        <option value="manual_url">Manual URL</option>
+                        <option value="feed">Feed</option>
+                      </select>
+                    </label>
                   </div>
-                )) : <div className="rounded-2xl border border-dashed border-white/15 p-6 text-sm text-slate-500">No import jobs yet.</div>}
+                  <Field label="Source URL / search URL" name="source_url" placeholder="https://..." />
+                  <Field label="Daily limit" name="rate_limit_per_day" type="number" placeholder="25" />
+                  <button disabled={!canImportSources} className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Save source</button>
+                </form>
+                <div className="mt-5 space-y-2">
+                  {(marketSources || []).length ? (marketSources || []).map((source: any) => (
+                    <div key={source.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm">
+                      <div className="font-semibold text-slate-100">{source.source_name}</div>
+                      <div className="mt-1 text-xs text-slate-500">{source.source_type} · {source.access_mode} · {source.status}</div>
+                    </div>
+                  )) : <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No saved sources yet.</div>}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                <h2 className="text-xl font-bold">Import from URL</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">Fetch one authorized listing URL and normalize it into Market. If a source blocks server access, the job fails cleanly and you can paste it manually/CSV instead.</p>
+                <form action={importMarketUrlAction} className="mt-5 grid gap-3">
+                  <Field label="Listing URL" name="input_url" placeholder="https://www.zillow.com/..." />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-300">Source</span>
+                      <select name="source_type" defaultValue="manual" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                        <option value="manual">Auto-detect</option>
+                        <option value="zillow">Zillow</option>
+                        <option value="crexi">Crexi</option>
+                        <option value="loopnet">LoopNet</option>
+                        <option value="redfin">Redfin</option>
+                        <option value="realtor">Realtor.com</option>
+                        <option value="apartments">Apartments.com</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-medium text-slate-300">Visibility</span>
+                      <select name="visibility" defaultValue="private" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                        <option value="private">Private Market</option>
+                        <option value="team">Team Market</option>
+                        <option value="community" disabled={!canPostPublic}>Community Deals</option>
+                        <option value="public" disabled={!canPostPublic}>Public Deals</option>
+                      </select>
+                    </label>
+                  </div>
+                  <button disabled={!canImportSources} className="rounded-xl bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40">Import URL & score</button>
+                </form>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                <h2 className="text-xl font-bold">CSV / bulk paste</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">Paste rows from a broker feed or export. Headers can include title,address,city,state,zip,list_price,market_rent,hud_rent,primary_image_url,source_url.</p>
+                <form action={importMarketCsvAction} className="mt-5 grid gap-3">
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">CSV rows</span>
+                    <textarea name="csv_text" rows={6} placeholder="title,address,city,state,zip,list_price,market_rent,primary_image_url" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">Visibility</span>
+                    <select name="visibility" defaultValue="private" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                      <option value="private">Private Market</option>
+                      <option value="team">Team Market</option>
+                      <option value="community" disabled={!canPostPublic}>Community Deals</option>
+                      <option value="public" disabled={!canPostPublic}>Public Deals</option>
+                    </select>
+                  </label>
+                  <button disabled={!canImportSources} className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Import CSV & score</button>
+                </form>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                <h2 className="text-xl font-bold">Import jobs</h2>
+                <div className="mt-5 space-y-3">
+                  {(importJobs || []).length ? (importJobs || []).map((job: any) => (
+                    <div key={job.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="truncate font-semibold text-slate-100">{job.input_url || job.job_type}</div>
+                        <span className={`rounded-full border px-3 py-1 text-xs capitalize ${String(job.status) === 'failed' ? 'border-red-400/30 bg-red-400/10 text-red-100' : String(job.status) === 'completed' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : 'border-white/10 text-slate-300'}`}>{String(job.status).replaceAll('_', ' ')}</span>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">Found {job.items_found || 0} · Created {job.items_created || 0} · Updated {job.items_updated || 0} · Failed {job.items_failed || 0}</div>
+                      {job.error_message ? <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/10 p-2 text-xs text-red-100">{job.error_message}</div> : null}
+                    </div>
+                  )) : <div className="rounded-2xl border border-dashed border-white/15 p-6 text-sm text-slate-500">No import jobs yet.</div>}
+                </div>
               </div>
             </div>
           </section>

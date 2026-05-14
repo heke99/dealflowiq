@@ -249,7 +249,7 @@ export async function createMarketSourceAction(formData: FormData) {
   const sourceName = text(formData, 'source_name') || `${sourceTypeValue(formData)} source`
   const sourceUrls = sourceUrlsValue(formData)
   const defaultVisibility = visibilityValue(formData)
-  const { error } = await supabase.from('market_sources').insert({
+  const { data: source, error } = await supabase.from('market_sources').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,
     source_type: sourceTypeValue(formData),
@@ -271,8 +271,18 @@ export async function createMarketSourceAction(formData: FormData) {
       opportunity_score_threshold: scoreThresholdValue(formData),
       createdFrom: 'market_sources_ui',
     },
-  })
-  if (error) redirect(`/market?tab=sources&error=${encodeURIComponent(error.message)}`)
+  }).select('id').single()
+  if (error || !source) redirect(`/market?tab=sources&error=${encodeURIComponent(error?.message || 'Could not create source')}`)
+
+  if (sourceUrls.length) {
+    await supabase.from('market_source_queue_items').upsert(sourceUrls.map((inputUrl) => ({
+      organization_id: workspace.organization!.id,
+      source_id: source.id,
+      input_url: inputUrl,
+      status: 'queued',
+      priority: 50,
+    })), { onConflict: 'source_id,input_url' })
+  }
 
   revalidatePath('/market')
   redirect('/market?tab=sources&saved=source')

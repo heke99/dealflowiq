@@ -1,4 +1,5 @@
 import { normalizePropertyType } from '@/lib/market/scoring'
+import { getMarketSourceAdapter } from '@/lib/market/sourceAdapters'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
 export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'other'
@@ -214,10 +215,12 @@ function buildTitle(params: { title?: string | null; address?: string | null; ci
 
 export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInput?: string | null): Promise<NormalizedMarketListing> {
   const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
+  const adapter = getMarketSourceAdapter(sourceType)
   const response = await fetch(inputUrl, {
     headers: {
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'user-agent': 'DealFlowIQBot/1.0 (+authorized-market-import; contact=admin@dealflowiq.com)',
+      'user-agent': adapter.userAgent,
+      ...(adapter.referrer ? { referer: adapter.referrer } : {}),
     },
     cache: 'no-store',
   })
@@ -256,7 +259,7 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
 
   return {
     source_type: sourceType,
-    external_listing_id: firstMatch(inputUrl, [/\/(\d{5,})[\/_-]?/]) || firstMatch(html, [/"(?:zpid|listingId|propertyId|id)"\s*:\s*"?([A-Za-z0-9_-]{5,})"?/i]),
+    external_listing_id: firstMatch(inputUrl, adapter.listingIdPatterns) || firstMatch(html, adapter.listingIdPatterns) || firstMatch(html, [/"(?:zpid|listingId|propertyId|id)"\s*:\s*"?([A-Za-z0-9_-]{5,})"?/i]),
     source_url: inputUrl,
     title: buildTitle({ title, address, city, state, sourceType }),
     address,
@@ -292,6 +295,7 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
     raw_payload: {
       source: 'authorized_url_import',
       sourceType,
+      adapter: adapter.label,
       fetchedAt: new Date().toISOString(),
       htmlLength: html.length,
       hasJsonLd: jsonLd.length > 0,

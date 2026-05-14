@@ -27,6 +27,40 @@ function asArrayOfUrls(settings: Record<string, any>) {
   return [...urls].filter((item) => item.startsWith('http://') || item.startsWith('https://')).slice(0, 25)
 }
 
+
+async function loadQueuedUrls(supabase: SupabaseAny, source: SourceRow, limit: number) {
+  const { data, error } = await supabase
+    .from('market_source_queue_items')
+    .select('*')
+    .eq('source_id', source.id)
+    .in('status', ['queued', 'failed'])
+    .or('next_attempt_at.is.null,next_attempt_at.lte.' + new Date().toISOString())
+    .order('created_at', { ascending: true })
+    .limit(limit)
+
+  if (error) return []
+  return (data || []).filter((item: any) => typeof item.input_url === 'string' && item.input_url.startsWith('http'))
+}
+
+async function seedSourceQueueFromSettings(supabase: SupabaseAny, source: SourceRow, urls: string[]) {
+  if (!urls.length) return
+  const rows = urls.map((inputUrl) => ({
+    organization_id: source.organization_id,
+    source_id: source.id,
+    input_url: inputUrl,
+    status: 'queued',
+    priority: 50,
+  }))
+  await supabase.from('market_source_queue_items').upsert(rows, { onConflict: 'source_id,input_url' })
+}
+
+function retryAt(attempts: number) {
+  const date = new Date()
+  const delayMinutes = Math.min(60 * 24, Math.max(15, attempts * attempts * 15))
+  date.setMinutes(date.getMinutes() + delayMinutes)
+  return date.toISOString()
+}
+
 function nextRunFor(frequency: string | null | undefined) {
   const now = new Date()
   const value = String(frequency || 'daily')
@@ -192,7 +226,13 @@ export async function upsertMarketListingFromNormalized(params: {
 export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?: number }) {
   const supabase = createSupabaseAdminClient()
   const settings = (source.settings && typeof source.settings === 'object' ? source.settings : {}) as Record<string, any>
-  const urls = asArrayOfUrls(settings).slice(0, options?.maxUrls || Number(settings.max_urls_per_run || 5) || 5)
+  const maxUrls = options?.maxUrls || Number(settings.max_urls_per_run || 5) || 5
+  const configuredUrls = asArrayOfUrls(settings)
+  await seedSourceQueueFromSettings(supabase, source, configuredUrls)
+  const queuedItems = await loadQueuedUrls(supabase, source, maxUrls)
+  const urls = queuedItems.length ? queuedItems.map((item: any) => item.input_url) : configuredUrls.slice(0, maxUrls)
+  const queueItemByUrl = new Map<string, any>()
+  for (const item of queuedItems) queueItemByUrl.set(String(item.input_url), item)
   const threshold = Number(source.opportunity_score_threshold ?? settings.opportunity_score_threshold ?? 80)
 
   if (!urls.length) {
@@ -215,6 +255,14 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
   const errors: string[] = []
 
   for (const inputUrl of urls) {
+    const queueItem = queueItemByUrl.get(inputUrl)
+    if (queueItem?.id) {
+      await supabase.from('market_source_queue_items').update({
+        status: 'running',
+        attempts: Number(queueItem.attempts || 0) + 1,
+        last_attempt_at: new Date().toISOString(),
+      }).eq('id', queueItem.id)
+    }
     const detectedSource = source.source_type || detectSourceType(inputUrl)
     const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
       organization_id: source.organization_id,
@@ -263,6 +311,14 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
           sourceType: detectedSource,
         },
       }).eq('id', job.id)
+      if (queueItem?.id) {
+        await supabase.from('market_source_queue_items').update({
+          status: 'completed',
+          listing_id: result.listing.id,
+          last_error: null,
+          completed_at: new Date().toISOString(),
+        }).eq('id', queueItem.id)
+      }
     } catch (error) {
       failed += 1
       const message = error instanceof Error ? error.message : 'Scheduled import failed'
@@ -274,6 +330,14 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
         error_message: message,
         source_summary: { sourceType: detectedSource, scheduled: true },
       }).eq('id', job.id)
+      if (queueItem?.id) {
+        const attempts = Number(queueItem.attempts || 0) + 1
+        await supabase.from('market_source_queue_items').update({
+          status: attempts >= 5 ? 'failed' : 'queued',
+          last_error: message,
+          next_attempt_at: retryAt(attempts),
+        }).eq('id', queueItem.id)
+      }
     }
   }
 

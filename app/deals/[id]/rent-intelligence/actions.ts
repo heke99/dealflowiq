@@ -135,6 +135,8 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
   const manualRentOverride = rawManualRentOverride === null ? null : rentValue(formData, 'monthly_rent_override')
   if (rawManualRentOverride !== null && manualRentOverride === null) invalidRentRedirect(dealId, 'Manual rent override')
 
+  let redirectUrl = `/deals/${dealId}/rent-intelligence?saved=zillow`
+
   try {
     const imported = await importZillowRentalByUrl(sourceUrl)
     const monthlyRent = manualRentOverride ?? imported.monthlyRent
@@ -163,7 +165,7 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
       raw_payload: imported.raw as any,
     })
 
-    if (error) redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error.message)}`)
+    if (error) throw new Error(error.message)
 
     if (formData.get('apply_to_deal') === 'on') {
       await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
@@ -180,18 +182,20 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
 
     revalidatePath(`/deals/${dealId}`)
     revalidatePath(`/deals/${dealId}/rent-intelligence`)
-    redirect(`/deals/${dealId}/rent-intelligence?saved=zillow`)
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Zillow import failed'
     await supabase.from('audit_logs').insert({
       organization_id: workspace.organization!.id,
       actor_id: workspace.user.id,
       event_type: 'market_rent_comp.zillow_import_failed',
       entity_type: 'deal',
       entity_id: dealId,
-      metadata: { source_url: sourceUrl, error: error instanceof Error ? error.message : 'Unknown Zillow import error' },
+      metadata: { source_url: sourceUrl, error: message },
     })
-    redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error instanceof Error ? error.message : 'Zillow import failed')}`)
+    redirectUrl = `/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(message)}`
   }
+
+  redirect(redirectUrl)
 }
 
 export async function applyMarketRentSummaryAction(formData: FormData) {

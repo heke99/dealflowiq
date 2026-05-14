@@ -37,6 +37,22 @@ type HudEntityCandidate = {
   ratio?: number
 }
 
+type ResolvedEntities = {
+  candidates: HudEntityCandidate[]
+  diagnostics: string[]
+}
+
+class HudUserHttpError extends Error {
+  status: number
+  url: string
+
+  constructor(status: number, url: string, body?: string) {
+    super(`${status}${body ? `: ${body.slice(0, 220)}` : ''}`)
+    this.status = status
+    this.url = url
+  }
+}
+
 export const HUDUSER_MIN_LOOKBACK_YEAR = 2020
 
 const DEFAULT_FMR_BASE_URL = 'https://www.huduser.gov/hudapi/public/fmr'
@@ -61,7 +77,6 @@ export function getHudCandidateYears(explicitYear?: number | 'auto' | null): Can
   const configured = getHudConfiguredDefaultYear()
   if (configured) return [configured]
 
-  // HUD says year is optional and defaults to latest. Use that first, then fall back by year.
   const currentYear = new Date().getFullYear()
   const years: CandidateYear[] = ['latest']
   for (let year = currentYear + 1; year >= HUDUSER_MIN_LOOKBACK_YEAR; year -= 1) years.push(year)
@@ -78,9 +93,7 @@ function uspsBaseUrl() {
 
 function endpoint(path: string) {
   const base = fmrBaseUrl()
-  if (base.endsWith('/fmr/data') && path.startsWith('/data/')) {
-    return `${base}${path.replace(/^\/data/, '')}`
-  }
+  if (base.endsWith('/fmr/data') && path.startsWith('/data/')) return `${base}${path.replace(/^\/data/, '')}`
   if (base.endsWith('/fmr') || base === DEFAULT_FMR_BASE_URL) return `${base}${path}`
   return `${base}${path}`
 }
@@ -120,12 +133,11 @@ function headers(): Record<string, string> {
 async function fetchJson(url: string) {
   const response = await fetch(url, { headers: headers(), cache: 'no-store' })
   if (!response.ok) {
-    let message = `${response.status}`
+    let text = ''
     try {
-      const text = await response.text()
-      if (text) message = `${response.status}: ${text.slice(0, 220)}`
+      text = await response.text()
     } catch {}
-    throw new Error(message)
+    throw new HudUserHttpError(response.status, url, text)
   }
   return response.json()
 }
@@ -217,7 +229,7 @@ function rowsFromUsps(raw: unknown): Array<Record<string, unknown>> {
   return Array.isArray(results) ? results.filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object')) : []
 }
 
-async function resolveMetroCodeFromCbsa(cbsaNumeric: string): Promise<string | null> {
+async function resolveMetroCodeFromCbsa(cbsaNumeric: string, diagnostics: string[]): Promise<string | null> {
   try {
     const raw = await fetchJson(buildMetroListUrl())
     const data = getPayloadData(raw)
@@ -227,52 +239,70 @@ async function resolveMetroCodeFromCbsa(cbsaNumeric: string): Promise<string | n
       return code.includes(`M${cbsaNumeric}`) || code.includes(`N${cbsaNumeric}`) || code.endsWith(cbsaNumeric) || code.includes(cbsaNumeric)
     }) as Record<string, unknown> | undefined
     return metro?.cbsa_code ? String(metro.cbsa_code) : null
-  } catch {
+  } catch (error) {
+    diagnostics.push(`FMR metro list lookup failed: ${formatHudApiError(error)}`)
     return null
   }
 }
 
-async function resolveEntitiesForZip(zipCode: string): Promise<HudEntityCandidate[]> {
+async function resolveEntitiesForZip(zipCode: string): Promise<ResolvedEntities> {
   const candidates: HudEntityCandidate[] = []
+  const diagnostics: string[] = []
 
   const customTemplate = process.env.HUDUSER_FMR_LOOKUP_URL_TEMPLATE
   if (customTemplate) candidates.push({ entityId: zipCode, source: 'custom_template', label: 'Custom template direct ZIP' })
 
   try {
-    const raw = await fetchJson(buildUspsUrl(3, zipCode)) // zip-cbsa
+    const raw = await fetchJson(buildUspsUrl(3, zipCode))
     const rows = rowsFromUsps(raw).sort((a, b) => ratio(b) - ratio(a))
     const cbsa = rows[0]?.geoid ? String(rows[0].geoid) : null
     if (cbsa) {
-      const metroCode = await resolveMetroCodeFromCbsa(cbsa)
+      const metroCode = await resolveMetroCodeFromCbsa(cbsa, diagnostics)
       if (metroCode) candidates.push({ entityId: metroCode, source: 'zip_cbsa_metro', label: `CBSA ${cbsa}`, ratio: ratio(rows[0]) })
+      else diagnostics.push(`USPS ZIP→CBSA returned ${cbsa}, but no matching FMR metro entity was found.`)
+    } else {
+      diagnostics.push('USPS ZIP→CBSA returned no CBSA rows for this ZIP.')
     }
-  } catch {}
+  } catch (error) {
+    diagnostics.push(`USPS ZIP→CBSA lookup failed: ${formatHudApiError(error)}`)
+  }
 
   try {
-    const raw = await fetchJson(buildUspsUrl(2, zipCode)) // zip-county
+    const raw = await fetchJson(buildUspsUrl(2, zipCode))
     const rows = rowsFromUsps(raw).sort((a, b) => ratio(b) - ratio(a))
     const county = rows[0]?.geoid ? String(rows[0].geoid).padStart(5, '0') : null
     if (county) candidates.push({ entityId: `${county}99999`, source: 'zip_county', label: `County ${county}`, ratio: ratio(rows[0]) })
-  } catch {}
+    else diagnostics.push('USPS ZIP→county returned no county rows for this ZIP.')
+  } catch (error) {
+    diagnostics.push(`USPS ZIP→county lookup failed: ${formatHudApiError(error)}`)
+  }
 
-  // Last-resort direct ZIP candidate for custom deployments/API variants. Official FMR data normally expects entity id, not ZIP.
-  candidates.push({ entityId: zipCode, source: 'direct_zip', label: 'Direct ZIP fallback' })
+  if (process.env.HUDUSER_ALLOW_DIRECT_ZIP_FALLBACK === 'true') {
+    candidates.push({ entityId: zipCode, source: 'direct_zip', label: 'Direct ZIP fallback' })
+  }
 
   const seen = new Set<string>()
-  return candidates.filter((candidate) => {
-    const key = `${candidate.source}:${candidate.entityId}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return {
+    candidates: candidates.filter((candidate) => {
+      const key = `${candidate.source}:${candidate.entityId}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }),
+    diagnostics,
+  }
 }
 
-function formatHudApiError(message: string) {
-  if (message.startsWith('403')) {
-    return 'HUD USER returned 403. This usually means the token is not registered for the required dataset API. Confirm the token has FAIR MARKET RENT access, and USPS ZIP CODE CROSSWALK access if using ZIP lookup.'
+function formatHudApiError(error: unknown) {
+  const status = error instanceof HudUserHttpError ? error.status : null
+  const message = error instanceof Error ? error.message : String(error || 'Unknown error')
+
+  if (status === 403 || message.startsWith('403')) {
+    return 'HUD USER returned 403. Your token is valid, but it is not registered for this dataset API. Enable both FAIR MARKET RENT and USPS ZIP CODE CROSSWALK on the same token, then create a new token and restart the app.'
   }
-  if (message.startsWith('401')) return 'HUD USER authentication failed. Check HUDUSER_API_TOKEN.'
-  if (message.startsWith('406')) return 'HUD USER rejected the Accept header. The request must accept application/json.'
+  if (status === 401 || message.startsWith('401')) return 'HUD USER authentication failed. Check HUDUSER_API_TOKEN, remove extra spaces/quotes, and restart the app.'
+  if (status === 406 || message.startsWith('406')) return 'HUD USER rejected the Accept header. The request must accept application/json.'
+  if (status === 404 || message.startsWith('404')) return 'HUD USER returned no data for that entity/year.'
   return message
 }
 
@@ -283,8 +313,12 @@ export async function lookupHudFmrByZip(params: LookupParams): Promise<HudFmrRes
 
   const candidateYears = getHudCandidateYears(params.hudYear)
   const attemptedYears: Array<number | 'latest'> = []
-  const entities = await resolveEntitiesForZip(zipCode)
+  const { candidates: entities, diagnostics } = await resolveEntitiesForZip(zipCode)
   let lastError: string | null = null
+
+  if (!entities.length) {
+    throw new Error(`DealFlowIQ could not resolve ZIP ${zipCode} to a HUD FMR entity. ${diagnostics.join(' ') || 'No HUD entity candidates were produced.'}`)
+  }
 
   for (const entity of entities) {
     for (const hudYear of candidateYears) {
@@ -320,20 +354,18 @@ export async function lookupHudFmrByZip(params: LookupParams): Promise<HudFmrRes
           sourceUrl,
           raw: {
             ...(raw as Record<string, unknown>),
-            dealflowiq_resolution: { entity, zipCode, requestedYear: hudYear },
+            dealflowiq_resolution: { entity, zipCode, requestedYear: hudYear, diagnostics },
           },
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : `HUD USER lookup failed for ${String(hudYear)}.`
-        lastError = formatHudApiError(message)
-        if (message.startsWith('401') || message.startsWith('403')) {
-          throw new Error(`${lastError} Tried entity/source: ${entity.entityId} (${entity.source}).`)
+        const message = formatHudApiError(error)
+        lastError = message
+        if (error instanceof HudUserHttpError && (error.status === 401 || error.status === 403)) {
+          throw new Error(`${message} Endpoint: ${entity.source === 'direct_zip' ? 'direct ZIP fallback' : entity.source}. Entity: ${entity.entityId}.`)
         }
       }
     }
   }
 
-  throw new Error(
-    `${lastError || 'HUD USER lookup failed.'} Tried HUD/FMR years: ${attemptedYears.join(', ')}. Tried entities: ${entities.map((entity) => `${entity.entityId} (${entity.source})`).join(', ')}.`,
-  )
+  throw new Error(`${lastError || 'HUD USER lookup failed.'} Tried HUD/FMR years: ${attemptedYears.join(', ')}. Tried entities: ${entities.map((entity) => `${entity.entityId} (${entity.source})`).join(', ')}. ${diagnostics.join(' ')}`)
 }

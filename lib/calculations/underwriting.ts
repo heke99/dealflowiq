@@ -118,7 +118,7 @@ export type DealUnderwritingSummary = {
   warnings: string[]
 }
 
-const FORMULA_VERSION = 'dealflowiq-underwriting-v1.2'
+const FORMULA_VERSION = 'dealflowiq-underwriting-v1.3'
 
 const RENT_SCENARIOS: Array<{ key: RentScenarioKey; label: string; field: string }> = [
   { key: 'current', label: 'Current Rent', field: 'current_rent' },
@@ -309,8 +309,9 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
 
   const downPaymentPercent = positive(deal.down_payment_percent, 20)
   const explicitDownPayment = positive(deal.down_payment_amount)
-  const downPaymentAmount = explicitDownPayment > 0 ? explicitDownPayment : purchasePrice * (downPaymentPercent / 100)
-  const loanAmount = positive(deal.loan_amount) || Math.max(0, purchasePrice - downPaymentAmount)
+  const downPaymentAmount = purchasePrice > 0 ? (explicitDownPayment > 0 ? explicitDownPayment : purchasePrice * (downPaymentPercent / 100)) : explicitDownPayment
+  const explicitLoanAmount = positive(deal.loan_amount)
+  const loanAmount = explicitLoanAmount > 0 ? explicitLoanAmount : purchasePrice > 0 ? Math.max(0, purchasePrice - downPaymentAmount) : 0
   const interestRatePercent = positive(deal.interest_rate_percent, 7)
   const loanTermYears = positive(deal.loan_term_years, 30) || 30
   const loanTermMonths = Math.max(1, Math.round(positive(deal.loan_term_months, loanTermYears * 12) || loanTermYears * 12))
@@ -430,6 +431,7 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
     }
   }
   if (!purchasePrice) warnings.push('Purchase price is missing. Cap rate, financing and offer metrics will be incomplete.')
+  if (!purchasePrice && explicitLoanAmount > 0) warnings.push('Loan amount exists without purchase price. Debt service is being calculated from the explicit loan amount; add purchase price or clear loan amount if this was not intentional.')
   if (basis === 'custom_value' && !customCapValue) warnings.push('Cap rate basis is custom value, but no custom cap rate value is entered.')
   if (!currentRent && !primaryScenario.monthlyRent) warnings.push('Rent assumptions are missing. Add current, market or target rent to calculate cashflow.')
   if (primaryScenario.dscr !== null && primaryScenario.dscr < dscrMinThreshold) warnings.push(`DSCR is below your ${dscrMinThreshold.toFixed(2)} threshold. Adjust the threshold per lender/program if needed.`)

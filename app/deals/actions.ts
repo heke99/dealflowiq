@@ -56,6 +56,19 @@ function capRateBasisValue(formData: FormData) {
   return value === 'arv' || value === 'custom_value' ? value : 'purchase_price'
 }
 
+function hasFormValue(formData: FormData, key: string) {
+  return String(formData.get(key) ?? '').trim() !== ''
+}
+
+function maybeNumber(formData: FormData, key: string) {
+  return hasFormValue(formData, key) ? numberValue(formData, key) : undefined
+}
+
+function maybeRent(formData: FormData, key: string) {
+  if (!hasFormValue(formData, key)) return undefined
+  return rentValue(formData, key)
+}
+
 function buildDealPayload(formData: FormData) {
   return {
     title: text(formData, 'title') || 'Untitled Deal',
@@ -207,6 +220,83 @@ export async function updateDealAction(formData: FormData) {
   revalidatePath('/deals')
   revalidatePath(`/deals/${dealId}`)
   redirect(`/deals/${dealId}`)
+}
+
+
+export async function quickUpdateDealAssumptionsAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  const redirectTo = String(formData.get('redirect_to') || `/deals/${dealId}`)
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const payload: Record<string, unknown> = {}
+  const keys = [
+    'purchase_price',
+    'arv',
+    'rehab_estimate',
+    'current_rent',
+    'market_rent',
+    'section8_rent',
+    'target_rent',
+    'taxes_annual',
+    'insurance_annual',
+    'hoa_monthly',
+    'utilities_monthly',
+    'capex_monthly',
+    'down_payment_percent',
+    'down_payment_amount',
+    'loan_amount',
+    'interest_rate_percent',
+    'loan_term_months',
+    'dscr_min_threshold',
+    'vacancy_percent',
+    'management_percent',
+    'closing_costs',
+    'selling_costs_percent',
+    'holding_costs_monthly',
+    'mao_percentage',
+    'desired_wholesale_fee',
+    'refinance_ltv_percent',
+    'rent_growth_percent',
+    'expense_growth_percent',
+    'exit_cap_rate_percent',
+  ]
+
+  for (const key of keys) {
+    if (!hasFormValue(formData, key)) continue
+    const value = key.endsWith('_rent') ? maybeRent(formData, key) : maybeNumber(formData, key)
+    if (value === null) redirect(`${redirectTo}?error=${encodeURIComponent(`${key.replaceAll('_', ' ')} must be a realistic value.`)}`)
+    if (value !== undefined) payload[key] = value
+  }
+
+  if (hasFormValue(formData, 'cap_rate_basis')) payload.cap_rate_basis = capRateBasisValue(formData)
+  if (hasFormValue(formData, 'cap_rate_custom_value')) payload.cap_rate_custom_value = numberValue(formData, 'cap_rate_custom_value')
+
+  if (!Object.keys(payload).length) redirect(`${redirectTo}?error=${encodeURIComponent('Enter at least one value to update.')}`)
+
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase
+    .from('deals')
+    .update(payload)
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+
+  if (error) redirect(`${redirectTo}?error=${encodeURIComponent(error.message)}`)
+
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization.id,
+    actor_id: workspace.user.id,
+    event_type: 'deal.quick_assumptions.updated',
+    entity_type: 'deal',
+    entity_id: dealId,
+    metadata: { fields: Object.keys(payload) },
+  })
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/deals/${dealId}/analyzer`)
+  redirect(`${redirectTo}?saved=assumptions`)
 }
 
 export async function createCalculationSnapshotAction(formData: FormData) {

@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
 
 function money(value: number | string | null | undefined) {
   const numberValue = Number(value || 0)
@@ -26,8 +27,18 @@ function row(label: string, value: React.ReactNode) {
   )
 }
 
-export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function QuickField({ label, name, defaultValue, placeholder }: { label: string; name: string; defaultValue?: string | number | null; placeholder?: string }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <input name={name} type="number" step="0.01" defaultValue={defaultValue ?? ''} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+    </label>
+  )
+}
+
+export default async function DealDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params
+  const query = await searchParams
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
 
@@ -82,6 +93,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </div>
         </section>
 
+        {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
+        {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <div className="text-sm text-slate-400">Purchase Price</div>
@@ -99,6 +113,37 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <div className="text-sm text-slate-400">HUD Rent Gap</div>
             <div className={hudGap > 0 ? 'mt-3 text-2xl font-bold text-emerald-300' : 'mt-3 text-2xl font-bold'}>{hudGap ? money(hudGap) + '/mo' : '—'}</div>
           </div>
+        </section>
+
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Quick underwriting inputs</div>
+              <h2 className="mt-2 text-xl font-bold">Fill the numbers needed for analysis</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                Use this fast form after creating a deal. It updates the deal without wiping fields you leave blank.
+              </p>
+            </div>
+            <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Full edit</Link>
+          </div>
+          <form action={quickUpdateDealAssumptionsAction} className="mt-5 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <input type="hidden" name="deal_id" value={id} />
+            <input type="hidden" name="redirect_to" value={`/deals/${id}`} />
+            <QuickField label="Purchase price" name="purchase_price" defaultValue={(deal as any).purchase_price} />
+            <QuickField label="Current rent" name="current_rent" defaultValue={(deal as any).current_rent} />
+            <QuickField label="Market rent" name="market_rent" defaultValue={(deal as any).market_rent} />
+            <QuickField label="HUD rent" name="section8_rent" defaultValue={(deal as any).section8_rent} />
+            <QuickField label="Taxes / year" name="taxes_annual" defaultValue={(deal as any).taxes_annual} />
+            <QuickField label="Insurance / year" name="insurance_annual" defaultValue={(deal as any).insurance_annual} />
+            <QuickField label="Vacancy %" name="vacancy_percent" defaultValue={(deal as any).vacancy_percent} />
+            <QuickField label="Management %" name="management_percent" defaultValue={(deal as any).management_percent} />
+            <QuickField label="Down payment %" name="down_payment_percent" defaultValue={(deal as any).down_payment_percent} />
+            <QuickField label="Interest %" name="interest_rate_percent" defaultValue={(deal as any).interest_rate_percent} />
+            <QuickField label="Loan months" name="loan_term_months" defaultValue={(deal as any).loan_term_months} />
+            <QuickField label="DSCR target" name="dscr_min_threshold" defaultValue={(deal as any).dscr_min_threshold} />
+            <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 md:col-span-3 xl:col-span-6">Update analysis inputs</button>
+          </form>
         </section>
 
         <section className="grid gap-6 lg:grid-cols-2">

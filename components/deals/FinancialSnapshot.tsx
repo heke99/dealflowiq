@@ -25,6 +25,7 @@ type FinancialSnapshotProps = {
   snapshots?: CalculationSnapshotRow[]
   message?: string | null
   error?: string | null
+  showMethodology?: boolean
 }
 
 function metric(label: string, value: string, hint?: string, tone: 'default' | 'good' | 'bad' = 'default', explanation?: string) {
@@ -129,7 +130,7 @@ function SnapshotList({ snapshots }: { snapshots: CalculationSnapshotRow[] }) {
   )
 }
 
-export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, showSnapshotTools = false, snapshots = [], message, error }: FinancialSnapshotProps) {
+export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, showSnapshotTools = false, snapshots = [], message, error, showMethodology = false }: FinancialSnapshotProps) {
   const summary: DealUnderwritingSummary = calculateDealUnderwriting(deal, property)
   const primary = summary.primaryScenario
   const capRateFormula = findFormula(summary.formulaExplanations, 'cap_rate')
@@ -147,7 +148,7 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
           <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Financial Snapshot</div>
           <h2 className="mt-2 text-2xl font-bold">Core underwriting results</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-            These numbers are calculated from the saved deal assumptions. Key assumptions are editable, and saved snapshots preserve historical analyses before you change inputs.
+            Smart summary of the deal using saved rent, debt and expense inputs. Update the key numbers above and the analysis refreshes immediately.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -168,24 +169,24 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metric('Monthly cashflow', `${formatMoney(primary.monthlyCashflow)}/mo`, primary.label, primary.monthlyCashflow >= 0 ? 'good' : 'bad', 'Cashflow = NOI - annual debt service, divided monthly.')}
-        {metric('NOI', formatMoney(primary.noi), 'Annual net operating income', 'default', 'NOI = effective gross income - operating expenses. Debt service is excluded.')}
-        {metric('Cap rate', formatPercent(primary.capRate), `${summary.assumptions.capRate.basis.replaceAll('_', ' ')} basis`, primary.capRate !== null && primary.capRate >= 0.07 ? 'good' : 'default', capRateFormula?.formula)}
-        {metric('DSCR', primary.dscr ? primary.dscr.toFixed(2) : '—', `Threshold: ${summary.assumptions.dscr.minimumThreshold.toFixed(2)}`, primary.dscr !== null && primary.dscr >= summary.assumptions.dscr.minimumThreshold ? 'good' : primary.dscr !== null ? 'bad' : 'default', dscrFormula?.formula)}
+        {metric('Monthly cashflow', `${formatMoney(primary.monthlyCashflow)}/mo`, primary.label, primary.monthlyCashflow >= 0 ? 'good' : 'bad', showMethodology ? 'Cashflow = NOI - annual debt service, divided monthly.' : undefined)}
+        {metric('NOI', formatMoney(primary.noi), 'Annual net operating income', 'default', showMethodology ? 'NOI = effective gross income - operating expenses. Debt service is excluded.' : undefined)}
+        {metric('Cap rate', formatPercent(primary.capRate), `${summary.assumptions.capRate.basis.replaceAll('_', ' ')} basis`, primary.capRate !== null && primary.capRate >= 0.07 ? 'good' : 'default', showMethodology ? capRateFormula?.formula : undefined)}
+        {metric('DSCR', primary.dscr ? primary.dscr.toFixed(2) : '—', `Threshold: ${summary.assumptions.dscr.minimumThreshold.toFixed(2)}`, primary.dscr !== null && primary.dscr >= summary.assumptions.dscr.minimumThreshold ? 'good' : primary.dscr !== null ? 'bad' : 'default', showMethodology ? dscrFormula?.formula : undefined)}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metric('Monthly debt service', `${formatMoney(summary.monthlyDebtService)}/mo`, `${summary.interestRatePercent}% · ${summary.loanTermMonths} payments`, 'default', mortgageFormula?.formula)}
+        {metric('Monthly debt service', `${formatMoney(summary.monthlyDebtService)}/mo`, `${summary.interestRatePercent}% · ${summary.loanTermMonths} payments`, 'default', showMethodology ? mortgageFormula?.formula : undefined)}
         {metric('Loan amount', formatMoney(summary.loanAmount), `${summary.downPaymentPercent}% down payment`)}
         {metric('Cash needed', formatMoney(summary.cashNeeded), 'Down payment + rehab + closing costs')}
-        {metric('Break-even rent', `${formatMoney(primary.breakEvenRent)}/mo`, 'Rent needed to cover expenses and debt', 'default', breakEvenFormula?.formula)}
+        {metric('Break-even rent', `${formatMoney(primary.breakEvenRent)}/mo`, 'Rent needed to cover expenses and debt', 'default', showMethodology ? breakEvenFormula?.formula : undefined)}
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
         <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Editable assumptions</div>
-        <h3 className="mt-2 text-xl font-bold">Formula inputs you can change</h3>
+        <h3 className="mt-2 text-xl font-bold">Key assumptions</h3>
         <p className="mt-2 text-sm leading-6 text-slate-400">
-          DealFlowIQ stores formula inputs on the deal, not hidden in the code. Edit lender terms, DSCR thresholds, cap rate basis, MAO %, vacancy, management, selling costs and refinance LTV when your model requires it.
+          These are the deal-level assumptions currently driving the numbers. Edit them directly from the deal or analyzer when your lender/program requires different inputs.
         </p>
         <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4"><span className="font-semibold text-slate-100">Mortgage:</span> {summary.assumptions.mortgage.annualInterestRatePercent}% interest, {summary.assumptions.mortgage.monthlyPayments} payments.</div>
@@ -197,16 +198,19 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
         </div>
       </div>
 
+      {showMethodology ? (
       <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-        <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Calculation methodology</div>
-        <h3 className="mt-2 text-xl font-bold">Formula source and explanation</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-400">
-          These are conventional real estate underwriting formulas using the assumptions saved on this deal. Market Rent, Section 8 / HUD Rent and Target Rent are separate rent scenarios. HUD/FMR values are benchmarks, not guaranteed contract rents.
-        </p>
-        <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
-          {summary.formulaExplanations.map((formula) => <FormulaCard key={formula.key} formula={formula} />)}
+          <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Calculation methodology</div>
+          <h3 className="mt-2 text-xl font-bold">Formula source and explanation</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            These are conventional real estate underwriting formulas using the assumptions saved on this deal. Market Rent, Section 8 / HUD Rent and Target Rent are separate rent scenarios. HUD/FMR values are benchmarks, not guaranteed contract rents.
+          </p>
+          <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
+            {summary.formulaExplanations.map((formula) => <FormulaCard key={formula.key} formula={formula} />)}
+          </div>
         </div>
-      </div>
+  
+        ) : null}
 
       {showSnapshotTools ? (
         <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

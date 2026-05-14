@@ -16,7 +16,6 @@ function text(formData: FormData, key: string) {
 function numberValue(formData: FormData, key: string) {
   const raw = String(formData.get(key) || '').trim()
   if (!raw) return null
-  // Accept common money formatting such as 1,750 or $1,750.50.
   const cleaned = raw.replace(/[$\s]/g, '').replace(/,/g, '')
   const parsed = Number(cleaned)
   return Number.isFinite(parsed) ? parsed : null
@@ -38,7 +37,7 @@ function intValue(formData: FormData, key: string) {
 
 function sourceType(formData: FormData) {
   const value = String(formData.get('source_type') || 'manual')
-  return ['manual', 'zillow_url', 'licensed_api', 'csv_upload', 'pdf_upload', 'ai_extracted', 'other'].includes(value) ? value : 'manual'
+  return ['manual', 'zillow_url', 'crexi_url', 'licensed_api', 'csv_upload', 'pdf_upload', 'ai_extracted', 'other'].includes(value) ? value : 'manual'
 }
 
 async function requireDeal(dealId: string) {
@@ -59,7 +58,7 @@ async function requireDeal(dealId: string) {
 async function refreshMarketRentFromComps(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, dealId: string) {
   const { data: comps } = await supabase
     .from('market_rent_comps')
-    .select('monthly_rent, bedrooms, square_feet, confidence_score')
+    .select('monthly_rent, bedrooms, square_feet, confidence_score, import_status')
     .eq('organization_id', organizationId)
     .eq('deal_id', dealId)
   const summary = summarizeMarketRentComps((comps || []) as any)
@@ -71,6 +70,55 @@ async function refreshMarketRentFromComps(supabase: Awaited<ReturnType<typeof cr
       .eq('id', dealId)
   }
   return summary
+}
+
+async function applyHudLookupToDeal(params: {
+  dealId: string
+  zipCode: string
+  bedrooms: number | null
+  hudYear: number | 'auto'
+  source: 'manual_button' | 'smart_analyze'
+}) {
+  const { workspace, supabase } = await requireDeal(params.dealId)
+  const result = await lookupHudFmrByZip({ zipCode: params.zipCode, bedrooms: params.bedrooms, hudYear: params.hudYear })
+  const rent = result.selectedBedroomRent || result.rents[2] || result.rents[1] || result.rents[3] || result.rents[4] || result.rents[0]
+
+  await supabase.from('hud_fmr_cache').upsert({
+    zip_code: result.zipCode,
+    state: result.state,
+    county: result.county,
+    metro_area: result.metroArea,
+    hud_year: result.hudYear,
+    rent_0br: result.rents[0],
+    rent_1br: result.rents[1],
+    rent_2br: result.rents[2],
+    rent_3br: result.rents[3],
+    rent_4br: result.rents[4],
+    source: result.hudYearMode === 'auto' ? 'HUDUSER_AUTO_LATEST' : 'HUDUSER_MANUAL_YEAR',
+    source_url: result.sourceUrl,
+    raw_response: { ...(result.raw as any), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears, entityId: result.entityId, entitySource: result.entitySource, action_source: params.source } } as any,
+    fetched_at: new Date().toISOString(),
+  }, { onConflict: 'zip_code,hud_year' })
+
+  if (rent) {
+    await supabase.from('deals').update({ section8_rent: rent }).eq('organization_id', workspace.organization!.id).eq('id', params.dealId)
+  }
+
+  await supabase.from('hud_lookup_events').insert({
+    organization_id: workspace.organization!.id,
+    deal_id: params.dealId,
+    created_by: workspace.user.id,
+    zip_code: result.zipCode,
+    bedrooms: params.bedrooms,
+    hud_year: result.hudYear,
+    status: 'success',
+    message: rent
+      ? `Applied ${rent} HUD/FMR benchmark from HUD year ${result.hudYear}. Entity: ${result.entityId || 'n/a'} (${result.entitySource || 'n/a'}).`
+      : `HUD lookup succeeded for HUD year ${result.hudYear}, but no selected bedroom rent was found.`,
+    source_url: result.sourceUrl,
+  })
+
+  return { rent, result }
 }
 
 export async function addMarketRentCompAction(formData: FormData) {
@@ -106,9 +154,7 @@ export async function addMarketRentCompAction(formData: FormData) {
 
   if (error) redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error.message)}`)
 
-  if (formData.get('apply_to_deal') === 'on') {
-    await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
-  }
+  if (formData.get('apply_to_deal') === 'on') await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
 
   await supabase.from('audit_logs').insert({
     organization_id: workspace.organization!.id,
@@ -123,7 +169,6 @@ export async function addMarketRentCompAction(formData: FormData) {
   revalidatePath(`/deals/${dealId}/rent-intelligence`)
   redirect(`/deals/${dealId}/rent-intelligence?saved=comp`)
 }
-
 
 export async function importZillowMarketRentCompAction(formData: FormData) {
   const dealId = String(formData.get('deal_id') || '').trim()
@@ -166,10 +211,7 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
     })
 
     if (error) throw new Error(error.message)
-
-    if (formData.get('apply_to_deal') === 'on') {
-      await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
-    }
+    if (formData.get('apply_to_deal') === 'on') await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
 
     await supabase.from('audit_logs').insert({
       organization_id: workspace.organization!.id,
@@ -216,49 +258,14 @@ export async function lookupHudRentAction(formData: FormData) {
   const bedrooms = numberValue(formData, 'bedrooms') ?? property?.bedrooms ?? null
   const hudYearRaw = String(formData.get('hud_year') || 'auto').trim().toLowerCase()
   const hudYear = hudYearRaw && hudYearRaw !== 'auto' ? Number(hudYearRaw) : 'auto'
+  const redirectTo = String(formData.get('redirect_to') || `/deals/${dealId}/rent-intelligence`)
 
   try {
-    const result = await lookupHudFmrByZip({ zipCode, bedrooms, hudYear })
-    const rent = result.selectedBedroomRent || result.rents[2] || result.rents[1] || result.rents[3] || result.rents[4] || result.rents[0]
-
-    await supabase.from('hud_fmr_cache').upsert({
-      zip_code: result.zipCode,
-      state: result.state,
-      county: result.county,
-      metro_area: result.metroArea,
-      hud_year: result.hudYear,
-      rent_0br: result.rents[0],
-      rent_1br: result.rents[1],
-      rent_2br: result.rents[2],
-      rent_3br: result.rents[3],
-      rent_4br: result.rents[4],
-      source: result.hudYearMode === 'auto' ? 'HUDUSER_AUTO_LATEST' : 'HUDUSER_MANUAL_YEAR',
-      source_url: result.sourceUrl,
-      raw_response: { ...(result.raw as any), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears, entityId: result.entityId, entitySource: result.entitySource } } as any,
-      fetched_at: new Date().toISOString(),
-    }, { onConflict: 'zip_code,hud_year' })
-
-    if (rent) {
-      await supabase.from('deals').update({ section8_rent: rent }).eq('organization_id', workspace.organization!.id).eq('id', dealId)
-    }
-
-    await supabase.from('hud_lookup_events').insert({
-      organization_id: workspace.organization!.id,
-      deal_id: dealId,
-      created_by: workspace.user.id,
-      zip_code: result.zipCode,
-      bedrooms,
-      hud_year: result.hudYear,
-      status: 'success',
-      message: rent
-        ? `Applied ${rent} HUD/FMR benchmark from HUD year ${result.hudYear}. Entity: ${result.entityId || 'n/a'} (${result.entitySource || 'n/a'}). Attempted years: ${result.attemptedYears.join(', ')}.`
-        : `HUD lookup succeeded for HUD year ${result.hudYear}, but no selected bedroom rent was found.`,
-      source_url: result.sourceUrl,
-    })
-
+    await applyHudLookupToDeal({ dealId, zipCode, bedrooms, hudYear, source: 'manual_button' })
     revalidatePath(`/deals/${dealId}`)
     revalidatePath(`/deals/${dealId}/rent-intelligence`)
-    redirect(`/deals/${dealId}/rent-intelligence?saved=hud`)
+    revalidatePath(`/deals/${dealId}/analyzer`)
+    redirect(`${redirectTo}?saved=hud`)
   } catch (error) {
     await supabase.from('hud_lookup_events').insert({
       organization_id: workspace.organization!.id,
@@ -270,6 +277,43 @@ export async function lookupHudRentAction(formData: FormData) {
       status: 'failed',
       message: error instanceof Error ? error.message : 'HUD lookup failed',
     })
-    redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error instanceof Error ? error.message : 'HUD lookup failed')}`)
+    redirect(`${redirectTo}?error=${encodeURIComponent(error instanceof Error ? error.message : 'HUD lookup failed')}`)
   }
+}
+
+export async function smartAnalyzeDealAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const { workspace, supabase, deal, property } = await requireDeal(dealId)
+  const redirectTo = String(formData.get('redirect_to') || `/deals/${dealId}/analyzer`)
+  const zipCode = property?.zip_code || ''
+  const bedrooms = property?.bedrooms ?? null
+  const messages: string[] = []
+
+  try {
+    if (!deal.section8_rent && zipCode) {
+      const hud = await applyHudLookupToDeal({ dealId, zipCode, bedrooms, hudYear: 'auto', source: 'smart_analyze' })
+      if (hud.rent) messages.push('HUD rent updated')
+    }
+  } catch (error) {
+    messages.push(`HUD lookup skipped: ${error instanceof Error ? error.message : 'failed'}`)
+  }
+
+  const summary = await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
+  if (summary.recommendedRent) messages.push('Market rent updated from comps')
+
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization!.id,
+    actor_id: workspace.user.id,
+    event_type: 'deal.smart_analyze.run',
+    entity_type: 'deal',
+    entity_id: dealId,
+    metadata: { messages },
+  })
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/deals/${dealId}/rent-intelligence`)
+  revalidatePath(`/deals/${dealId}/analyzer`)
+  redirect(`${redirectTo}?saved=smart&notice=${encodeURIComponent(messages.join(' · ') || 'Smart analysis refreshed')}`)
 }

@@ -23,6 +23,7 @@ export const FEATURE_KEYS = [
   'ai_review',
   'lender_view',
   'admin_plan_management',
+  'market_source_imports',
 ] as const
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number]
@@ -60,6 +61,7 @@ export const PREMIUM_FEATURES: FeatureKey[] = [
   'white_label',
   'ai_review',
   'lender_view',
+  'market_source_imports',
 ]
 
 export const featureLabels: Record<FeatureKey, string> = {
@@ -85,6 +87,7 @@ export const featureLabels: Record<FeatureKey, string> = {
   ai_review: 'AI Deal Review',
   lender_view: 'Bank / Lender View',
   admin_plan_management: 'Admin Plan Management',
+  market_source_imports: 'Premium Market Source Imports',
 }
 
 export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
@@ -150,6 +153,7 @@ export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
     community_members: true,
     white_label: true,
     lender_view: true,
+    market_source_imports: true,
   },
   team_company: {
     ...CORE_FEATURES,
@@ -164,6 +168,7 @@ export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
     buyer_matching: true,
     deal_distribution: true,
     lender_view: true,
+    market_source_imports: true,
   },
 }
 

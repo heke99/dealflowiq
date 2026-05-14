@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isReasonableMonthlyRent, summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
-import { addMarketRentCompAction, applyMarketRentSummaryAction, importZillowMarketRentCompAction, lookupHudRentAction } from '@/app/deals/[id]/rent-intelligence/actions'
+import { addMarketRentCompAction, applyMarketRentSummaryAction, importZillowMarketRentCompAction, lookupHudRentAction, smartAnalyzeDealAction } from '@/app/deals/[id]/rent-intelligence/actions'
 
 function money(value: unknown) {
   const num = Number(value || 0)
@@ -89,19 +89,32 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
       <div className="space-y-6">
         <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Batch 6</div>
-            <h1 className="mt-2 text-3xl font-bold">Rent Intelligence</h1>
+            <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Rent Intelligence</div>
+            <h1 className="mt-2 text-3xl font-bold">Smart rent lookup</h1>
             <p className="mt-3 max-w-3xl text-slate-300">
-              Build market rent from comparable listings and pull Section 8/HUD FMR benchmarks by ZIP. HUD lookups default to the latest available HUD year with fallback, and you can manually select a historical year for audit/comparison.
+              Pull HUD/FMR rent by ZIP, collect market comps, and apply the best rent assumptions to the deal before analysis.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
+            <form action={smartAnalyzeDealAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <input type="hidden" name="redirect_to" value={`/deals/${id}/rent-intelligence`} />
+              <button className="rounded-xl bg-emerald-300 px-5 py-3 text-center font-semibold text-slate-950 hover:bg-emerald-200">Smart analyze</button>
+            </form>
+            <form action={lookupHudRentAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <input type="hidden" name="redirect_to" value={`/deals/${id}/rent-intelligence`} />
+              <input type="hidden" name="zip_code" value={property?.zip_code || ''} />
+              <input type="hidden" name="bedrooms" value={property?.bedrooms || ''} />
+              <input type="hidden" name="hud_year" value="auto" />
+              <button className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 hover:bg-white/10">Search HUD rent</button>
+            </form>
             <Link href={`/deals/${id}/analyzer`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 hover:bg-slate-200">Analyze</Link>
             <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 hover:bg-white/10">Edit Deal</Link>
           </div>
         </section>
 
-        {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
+        {query?.notice ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{String(query.notice)}</div> : query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
         {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
         {summary.warnings.length ? (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
@@ -181,7 +194,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
               <input type="hidden" name="deal_id" value={id} />
               <h2 className="text-xl font-bold">HUD / Section 8 lookup</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                Uses official HUD USER benchmark data by ZIP. DealFlowIQ defaults to Auto, which tries the newest likely HUD/FMR year first and falls back year-by-year until a published dataset responds. Configure <code>HUDUSER_API_TOKEN</code>, <code>HUDUSER_FMR_API_BASE_URL</code> and <code>HUDUSER_USPS_API_BASE_URL</code> in environment variables. ZIP lookup resolves the ZIP through HUD USPS Crosswalk first, then calls the official HUD FMR entity endpoint.
+Uses official HUD USER data. Default is Auto/latest available; use a specific year only when you need historical underwriting.
               </p>
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <Field label="ZIP code" name="zip_code" defaultValue={property?.zip_code || ''} />

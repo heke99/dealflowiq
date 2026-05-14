@@ -353,3 +353,41 @@ export async function createCalculationSnapshotAction(formData: FormData) {
   revalidatePath(`/deals/${dealId}/analyzer`)
   redirect(redirectTo.startsWith('/deals/') ? `${redirectTo}?snapshot=saved` : `/deals/${dealId}/analyzer?snapshot=saved`)
 }
+
+export async function deleteDealAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const supabase = await createSupabaseServerClient()
+  const { data: deal, error: readError } = await supabase
+    .from('deals')
+    .select('id, title, created_by, organization_id')
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+
+  if (readError || !deal) redirect(`/deals?error=${encodeURIComponent(readError?.message || 'Deal not found')}`)
+
+  const { error } = await supabase
+    .from('deals')
+    .delete()
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+
+  if (error) redirect(`/deals/${dealId}?error=${encodeURIComponent(error.message)}`)
+
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization.id,
+    actor_id: workspace.user.id,
+    event_type: 'deal.deleted',
+    entity_type: 'deal',
+    entity_id: dealId,
+    metadata: { title: (deal as any).title },
+  })
+
+  revalidatePath('/deals')
+  redirect('/deals?saved=deleted')
+}

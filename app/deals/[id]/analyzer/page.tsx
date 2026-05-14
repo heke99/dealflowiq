@@ -5,6 +5,7 @@ import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
+import { lookupHudRentAction, smartAnalyzeDealAction } from '@/app/deals/[id]/rent-intelligence/actions'
 
 
 function QuickField({ label, name, defaultValue }: { label: string; name: string; defaultValue?: string | number | null }) {
@@ -66,7 +67,20 @@ export default async function DealAnalyzerPage({ params, searchParams }: { param
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href={`/deals/${id}/edit`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">Edit Inputs</Link>
+            <form action={smartAnalyzeDealAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <input type="hidden" name="redirect_to" value={`/deals/${id}/analyzer`} />
+              <button className="rounded-xl bg-emerald-300 px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-emerald-200">Smart analyze</button>
+            </form>
+            <form action={lookupHudRentAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <input type="hidden" name="redirect_to" value={`/deals/${id}/analyzer`} />
+              <input type="hidden" name="zip_code" value={property?.zip_code || ''} />
+              <input type="hidden" name="bedrooms" value={property?.bedrooms || ''} />
+              <input type="hidden" name="hud_year" value="auto" />
+              <button className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Search HUD rent</button>
+            </form>
+            <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Edit Inputs</Link>
             <Link href={`/deals/${id}`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Back to Deal</Link>
           </div>
         </section>
@@ -100,7 +114,7 @@ export default async function DealAnalyzerPage({ params, searchParams }: { param
           showAnalyzerLink={false}
           showSnapshotTools
           snapshots={(snapshots || []) as any}
-          message={query?.snapshot === 'saved' ? 'Calculation snapshot saved. Future assumption changes will not alter that saved analysis.' : query?.saved === 'assumptions' ? 'Inputs saved. The analyzer has been recalculated.' : null}
+          message={query?.notice ? String(query.notice) : query?.snapshot === 'saved' ? 'Calculation snapshot saved. Future assumption changes will not alter that saved analysis.' : query?.saved === 'assumptions' ? 'Inputs saved. The analyzer has been recalculated.' : query?.saved === 'hud' ? 'HUD rent updated and analysis refreshed.' : query?.saved === 'smart' ? 'Smart analysis refreshed.' : null}
           error={query?.error ? String(query.error) : null}
         />
       </div>

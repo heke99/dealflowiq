@@ -1,5 +1,8 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
+import { determineDealReviewStatus } from '@/lib/market/review'
+import { recordMarketListingActivity } from '@/lib/market/activity'
+import { createInAppNotification } from '@/lib/notifications'
 import {
   buildNormalizedListingKey,
   detectSourceType,
@@ -156,6 +159,57 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
     missing_fields: score.missingFields,
   })
   if (error) throw new Error(error.message)
+
+  if (organizationId && listing.id) {
+    const review = determineDealReviewStatus(score as any, listing)
+    await supabase
+      .from('market_listings')
+      .update({
+        deal_status: review.dealStatus,
+        review_reason: review.reviewReason,
+        why_this_deal: review.why,
+        status: ['archived', 'converted_to_deal'].includes(String(listing.status)) ? listing.status : review.listingStatus,
+      })
+      .eq('id', listing.id)
+      .eq('organization_id', organizationId)
+
+    await recordMarketListingActivity(supabase, {
+      organizationId,
+      listingId: listing.id,
+      actorId: listing.created_by || null,
+      eventType: 'score_calculated',
+      title: 'Score calculated by import worker',
+      description: `${Math.round(score.dealScore)}/100 score · rent confidence ${Math.round(score.rentConfidenceScore)}/100`,
+      metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore, dealStatus: review.dealStatus },
+    })
+
+    if (review.dealStatus === 'ready') {
+      await createInAppNotification(supabase, {
+        organizationId,
+        userId: listing.created_by || null,
+        type: 'opportunity_found',
+        title: 'New high-score opportunity found',
+        message: `${listing.title || 'A market listing'} reached ${Math.round(score.dealScore)}/100 and passed rent confidence rules.`,
+        relatedEntityType: 'market_listing',
+        relatedEntityId: listing.id,
+        actionHref: `/market/${listing.id}`,
+        metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore },
+      })
+    } else if (review.dealStatus === 'low_confidence') {
+      await createInAppNotification(supabase, {
+        organizationId,
+        userId: listing.created_by || null,
+        type: 'rent_confidence_review',
+        title: 'Rent confidence needs review',
+        message: `${listing.title || 'A market listing'} needs rent review before Opportunity promotion.`,
+        relatedEntityType: 'market_listing',
+        relatedEntityId: listing.id,
+        actionHref: `/market/${listing.id}`,
+        metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore },
+      })
+    }
+  }
+
   return score
 }
 
@@ -214,6 +268,7 @@ export async function upsertMarketListingFromNormalized(params: {
       .single()
     if (error || !data) throw new Error(error?.message || 'Could not update market listing')
     const score = await insertMarketListingScore(params.supabase, data as any, params.organizationId)
+    await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing updated from source run', description: 'Existing listing was refreshed by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
     return { listing: data as any, created: false, score }
   }
 
@@ -224,6 +279,7 @@ export async function upsertMarketListingFromNormalized(params: {
     .single()
   if (error || !data) throw new Error(error?.message || 'Could not create market listing')
   const score = await insertMarketListingScore(params.supabase, data as any, params.organizationId)
+  await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing imported from source run', description: 'New listing was created by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
   return { listing: data as any, created: true, score }
 }
 
@@ -587,6 +643,18 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       lastRunSummary: { created, updated, failed, opportunities, topScore, listingIds, errors: errors.slice(0, 5), ranAt: new Date().toISOString() },
     },
   }).eq('id', source.id)
+
+  await createInAppNotification(supabase, {
+    organizationId: source.organization_id,
+    userId: source.created_by || null,
+    type: 'buy_box_run_completed',
+    title: 'Import source run completed',
+    message: `${source.source_name || 'Source'} finished: ${created} created, ${updated} updated, ${opportunities} opportunities, ${failed} failed.`,
+    relatedEntityType: 'market_source',
+    relatedEntityId: source.id,
+    actionHref: '/market?tab=sources',
+    metadata: { created, updated, failed, opportunities, topScore, listingIds },
+  })
 
   return { sourceId: source.id, found: urls.length, created, updated, failed, opportunities, topScore, listingIds, errors }
 }

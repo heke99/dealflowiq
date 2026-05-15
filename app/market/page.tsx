@@ -13,6 +13,7 @@ import {
   saveOpportunityAction,
 } from '@/app/market/actions'
 import { getMarketSourceAdapters } from '@/lib/market/sourceAdapters'
+import { dealStatusLabel } from '@/lib/market/review'
 
 type Search = Record<string, string | string[] | undefined>
 type Row = Record<string, any>
@@ -132,6 +133,7 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
         <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {score?.risk_level || 'medium'}</span>
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence || '—'}</span>
+        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{dealStatusLabel(listing.deal_status)}</span>
         {watch?.status ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{String(watch.status).replaceAll('_', ' ')}</span> : null}
       </div>
 
@@ -148,6 +150,7 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
           <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{reasons.slice(0, 2).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
         ) : <p className="mt-2 text-xs leading-5 text-slate-500">Add rent, price and ZIP data to improve ranking.</p>}
         {risks.length ? <p className="mt-2 text-xs text-amber-200">Risk: {String(risks[0])}</p> : null}
+        {listing.why_this_deal ? <p className="mt-2 text-xs leading-5 text-slate-400">{listing.why_this_deal}</p> : null}
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -248,6 +251,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <p className="mt-4 max-w-3xl text-slate-300">One clean place for imported listings, public/community deals and the highest-ranked opportunities. Deals stay in My Deals; Market is where the system finds and ranks new inventory.</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">View Opportunities</Link>
+                <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">URL Import Queue</Link>
                 <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import Sources</Link>
                 <Link href="/deals/new" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Add My Deal</Link>
               </div>
@@ -300,8 +304,8 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-xl font-bold">Quick URL import</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. DealFlowIQ imports, normalizes, scores and ranks it immediately.</p>
+                    <h2 className="text-xl font-bold">Quick listing URL import</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. For search URLs like Zillow map searches, use the controlled URL Import Analyzer.</p>
                   </div>
                   {!canImportSources ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Premium</span> : null}
                 </div>
@@ -326,6 +330,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                   </div>
                   <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and rank now</button>
                 </form>
+                <Link href="/imports" className="mt-3 inline-flex w-full justify-center rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Analyze search URL instead</Link>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

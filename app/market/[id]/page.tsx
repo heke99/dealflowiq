@@ -3,8 +3,9 @@ import { notFound } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
+import { addMarketListingNoteAction, convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction, updateMarketListingReviewStatusAction } from '@/app/market/actions'
 import { canUseFeature } from '@/lib/billing/features'
+import { dealStatusLabel } from '@/lib/market/review'
 
 type Row = Record<string, any>
 
@@ -58,11 +59,13 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const supabase = await createSupabaseServerClient()
 
   const buyersEnabled = canUseFeature(workspace.access.features, 'buyer_matching') || Boolean(workspace.access.isPlatformAdmin)
-  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }] = await Promise.all([
+  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }] = await Promise.all([
     supabase.from('market_listings').select('*').eq('id', id).maybeSingle(),
     supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('calculated_at', { ascending: false }).limit(1),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('listing_id', id).eq('user_id', workspace.user.id).maybeSingle() : Promise.resolve({ data: null }),
     workspace.organization?.id && buyersEnabled ? supabase.from('buyer_deal_matches').select('*, buyers(name, company_name, email, phone, status)').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('match_score', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
+    workspace.organization?.id ? supabase.from('market_listing_notes').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
+    workspace.organization?.id ? supabase.from('market_listing_activity_events').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(12) : Promise.resolve({ data: [] as Row[] }),
   ])
 
   if (!listing) notFound()
@@ -72,6 +75,8 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const rentConfidence = Math.round(Number(score?.rent_confidence_score || 0))
   const isQualifiedOpportunity = dealScore >= 80 && rentConfidence >= 65
   const matches = (buyerMatches || []) as Row[]
+  const noteRows = (notes || []) as Row[]
+  const activityRows = (activity || []) as Row[]
   const images = [row.primary_image_url, ...asStringArray(row.image_urls)].filter(Boolean).filter((value, index, arr) => arr.indexOf(value) === index).slice(0, 8)
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
@@ -99,6 +104,8 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                 <span>•</span>
                 <span>{row.visibility || 'private'}</span>
                 <span>•</span>
+                <span>{dealStatusLabel(row.deal_status)}</span>
+                <span>•</span>
                 <span>{dateText(row.created_at)}</span>
               </div>
               <h1 className="mt-3 max-w-4xl text-3xl font-bold tracking-tight sm:text-5xl">{row.title}</h1>
@@ -107,7 +114,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
             <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
               <div className="text-xs font-semibold uppercase tracking-wide">Deal Score</div>
               <div className="mt-1 text-5xl font-black">{dealScore || '—'}</div>
-              <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : 'Market listing'}</div>
+              <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : dealStatusLabel(row.deal_status)}</div>
             </div>
           </div>
         </section>
@@ -134,8 +141,11 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                 <Metric label="Risk" value={String(score?.risk_level || 'medium')} />
                 <Metric label="Confidence" value={String(score?.data_confidence || 'low')} />
                 <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
+                <Metric label="Deal status" value={dealStatusLabel(row.deal_status)} />
                 <Metric label="Best strategy" value={String(score?.strategy_fit || 'Needs review')} />
               </div>
+              {row.why_this_deal ? <div className="mt-5 rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4 text-sm leading-6 text-sky-50">{row.why_this_deal}</div> : null}
+              {row.review_reason ? <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-6 text-slate-300">Review note: {row.review_reason}</div> : null}
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
                   <div className="text-sm font-bold text-emerald-100">Positive signals</div>
@@ -156,6 +166,35 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               <h2 className="text-xl font-bold">Description</h2>
               <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-300">{row.description || 'No source description imported yet. Use original source or add this listing as a deal to enrich the analysis.'}</p>
             </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Deal notes</h2>
+              <form action={addMarketListingNoteAction} className="mt-4 grid gap-3">
+                <input type="hidden" name="listing_id" value={row.id} />
+                <select name="note_type" defaultValue="internal" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none">
+                  <option value="internal">Internal note</option>
+                  <option value="seller_call">Seller / broker call</option>
+                  <option value="buyer_feedback">Buyer feedback</option>
+                  <option value="underwriting">Underwriting</option>
+                  <option value="offer">Offer</option>
+                  <option value="risk">Risk</option>
+                </select>
+                <textarea name="note" rows={4} placeholder="Called seller, rent numbers need review, buyer X interested..." className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Add note</button>
+              </form>
+              <div className="mt-5 space-y-3">
+                {noteRows.map((note) => <div key={note.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{String(note.note_type).replaceAll('_', ' ')} · {dateText(note.created_at)}</div><p className="mt-2 text-sm leading-6 text-slate-300">{note.note}</p></div>)}
+                {!noteRows.length ? <p className="text-sm text-slate-500">No notes yet.</p> : null}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Activity timeline</h2>
+              <div className="mt-5 space-y-3">
+                {activityRows.map((event) => <div key={event.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-white">{event.title}</div><div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{String(event.event_type).replaceAll('_', ' ')}</div></div><div className="text-xs text-slate-500">{dateText(event.created_at)}</div></div>{event.description ? <p className="mt-2 text-sm leading-6 text-slate-400">{event.description}</p> : null}</div>)}
+                {!activityRows.length ? <p className="text-sm text-slate-500">Timeline will fill as this deal is imported, scored, saved, matched and reviewed.</p> : null}
+              </div>
+            </div>
           </div>
 
           <aside className="space-y-5">
@@ -174,6 +213,19 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                 <form action={rescoreMarketListingAction}>
                   <input type="hidden" name="listing_id" value={row.id} />
                   <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Recalculate score</button>
+                </form>
+                <form action={updateMarketListingReviewStatusAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Review status</label>
+                  <select name="deal_status" defaultValue={row.deal_status || 'needs_review'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
+                    <option value="ready">Ready / Opportunity</option>
+                    <option value="needs_review">Needs review</option>
+                    <option value="missing_data">Missing data</option>
+                    <option value="low_confidence">Low confidence</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                  <input name="review_reason" placeholder="Reason" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Update review</button>
                 </form>
                 {row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-center text-sm font-semibold text-slate-100 hover:bg-white/10">Open source</a> : null}
               </div>

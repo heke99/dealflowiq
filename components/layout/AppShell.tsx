@@ -3,6 +3,7 @@ import { signOutAction } from '@/lib/auth/actions'
 import type { FeatureMap, FeatureKey } from '@/lib/billing/features'
 import { canUseFeature, featureLabels } from '@/lib/billing/features'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
+import { NotificationBell } from '@/components/layout/NotificationBell'
 
 type NavItem = {
   href: string
@@ -56,12 +57,14 @@ export function AppShell({
     { href: '/buy-boxes', label: 'Buy Boxes', visible: true, feature: 'scheduled_market_imports' },
     { href: '/saved-deals', label: 'Saved Deals', visible: true, feature: 'market_opportunities', core: true },
     { href: '/deals', label: 'My Deals', visible: true, feature: 'deals', core: true },
+    { href: '/imports', label: 'Import Queue', visible: true, feature: 'market_source_imports' },
     { href: '/market-search', label: 'Source Imports', visible: true, feature: 'market_source_imports' },
     { href: '/rent-analysis', label: 'Rent Analysis', visible: true, feature: 'rent_analysis', core: true },
     { href: '/calculators', label: 'Calculators', visible: true, feature: 'calculators', core: true },
     { href: '/buyers', label: 'Buyers', visible: true, feature: 'buyers' },
     { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
     { href: '/settings/underwriting', label: 'Underwriting Defaults', visible: true, core: true },
+    { href: '/notifications', label: 'Notifications', visible: true, core: true },
     { href: '/settings', label: 'Settings', visible: true, core: true },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
@@ -106,7 +109,8 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="mt-4 border-t border-white/10 pt-4">
+        <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
+          <NotificationBell />
           <form action={signOutAction}>
             <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10">
               Sign out
@@ -119,9 +123,12 @@ export function AppShell({
         <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between gap-4">
             <Link href="/dashboard" className="font-bold">DealFlowIQ</Link>
-            <form action={signOutAction}>
-              <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
-            </form>
+            <div className="flex items-center gap-2">
+              <NotificationBell />
+              <form action={signOutAction}>
+                <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
+              </form>
+            </div>
           </div>
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
             {nav.map((item) => {

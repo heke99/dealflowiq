@@ -3,7 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
-import { importMarketUrlAction } from '@/app/market/actions'
+import { analyzeImportUrlAction } from '@/app/imports/actions'
 
 type Row = Record<string, any>
 
@@ -75,15 +75,19 @@ export default async function DashboardPage() {
   const plan = workspace.access.plan
   const supabase = await createSupabaseServerClient()
 
-  const [dealsResult, marketResult, scoresResult, jobsResult, sourcesResult] = workspace.organization?.id
+  const [dealsResult, marketResult, scoresResult, jobsResult, sourcesResult, reviewResult, buyerMatchResult, watchResult, importBatchResult] = workspace.organization?.id
     ? await Promise.all([
         supabase.from('deals').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id),
         supabase.from('market_listings').select('id', { count: 'exact', head: true }).or(`organization_id.eq.${workspace.organization.id},visibility.eq.public`),
         supabase.from('market_listing_scores').select('*, market_listings(*)').order('deal_score', { ascending: false }).limit(8),
         supabase.from('market_import_jobs').select('status,items_created,items_updated,items_failed,error_message,created_at').eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5),
         supabase.from('market_sources').select('id,auto_import_enabled,status').eq('organization_id', workspace.organization.id),
+        supabase.from('market_listings').select('deal_status').eq('organization_id', workspace.organization.id).in('deal_status', ['needs_review', 'missing_data', 'low_confidence']).limit(500),
+        supabase.from('buyer_deal_matches').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).gte('match_score', 80),
+        supabase.from('market_watchlist').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).eq('user_id', workspace.user.id),
+        supabase.from('market_url_import_batches').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).in('status', ['analyzed', 'queued', 'importing', 'needs_review']),
       ])
-    : [{ count: 0 }, { count: 0 }, { data: [] }, { data: [] }, { data: [] }]
+    : [{ count: 0 }, { count: 0 }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { count: 0 }, { count: 0 }, { count: 0 }]
 
   const visibleScores = ((scoresResult.data || []) as Row[]).filter((score) => {
     const listing = score.market_listings as Row | null
@@ -93,6 +97,11 @@ export default async function DashboardPage() {
   const opportunities = visibleScores.filter((score) => Number(score.deal_score || 0) >= 80)
   const latestFailedJob = ((jobsResult.data || []) as Row[]).find((job) => job.status === 'failed')
   const autoSources = ((sourcesResult.data || []) as Row[]).filter((source) => source.auto_import_enabled && source.status === 'active').length
+  const reviewRows = (reviewResult.data || []) as Row[]
+  const needsReviewCount = reviewRows.length
+  const buyerMatchCount = buyerMatchResult.count || 0
+  const watchCount = watchResult.count || 0
+  const queuedImportBatches = importBatchResult.count || 0
 
   const enabledModules = ['market_opportunities', 'market_source_imports', 'scheduled_market_imports', 'public_community_deals', 'section8_hud', 'calculators']
     .map((feature) => ({ feature, label: featureLabels[feature] || feature, enabled: Boolean((workspace.access.features as Record<string, boolean | undefined>)[feature]) || Boolean(workspace.access.isPlatformAdmin) }))
@@ -120,18 +129,18 @@ export default async function DashboardPage() {
                 <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200">Open Opportunities</Link>
                 <Link href="/market" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Open Market</Link>
                 <Link href="/buy-boxes" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Buy Boxes</Link>
+                <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Import Queue</Link>
                 <Link href="/saved-deals" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Saved Deals</Link>
                 <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">My Deals</Link>
               </div>
             </div>
             <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
               <h2 className="text-lg font-bold">Quick import</h2>
-              <p className="mt-2 text-sm text-slate-400">Paste an authorized listing URL. The system imports, scores and places 80+ deals in Opportunities.</p>
-              <form action={importMarketUrlAction} className="mt-4 space-y-3">
-                <input name="input_url" placeholder="https://www.zillow.com/homedetails/..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
-                <input type="hidden" name="source_type" value="manual_url" />
+              <p className="mt-2 text-sm text-slate-400">Paste a Zillow/Redfin/Realtor search URL. The analyzer extracts location, price filters and creates an in-app import batch.</p>
+              <form action={analyzeImportUrlAction} className="mt-4 space-y-3">
+                <input name="input_url" placeholder="https://www.zillow.com/johnstown-oh-43031/?searchQueryState=..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
                 <input type="hidden" name="visibility" value="private" />
-                <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import listing</button>
+                <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Analyze URL</button>
               </form>
             </div>
           </div>
@@ -142,6 +151,13 @@ export default async function DashboardPage() {
           <StatCard label="Market Listings" value={String(marketResult.count || 0)} hint="Imported, public and team-visible listings." href="/market" />
           <StatCard label="Opportunities 80+" value={String(opportunities.length || 0)} hint="Highest-ranked deals ready for review." href="/opportunities" />
           <StatCard label="Auto Sources" value={String(autoSources || 0)} hint="Sources scheduled through the worker." href="/market?tab=sources" />
+        </section>
+
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Needs Review" value={String(needsReviewCount)} hint="Listings that need rent, data or underwriting review." href="/market?tab=needs_review" />
+          <StatCard label="Buyer Matches" value={String(buyerMatchCount)} hint="Strong 80+ buyer-to-listing matches." href="/buyers" />
+          <StatCard label="Saved Deals" value={String(watchCount)} hint="Your personal watchlist and deal pipeline." href="/saved-deals" />
+          <StatCard label="Import Queue" value={String(queuedImportBatches)} hint="Analyzed or queued source URL batches." href="/imports" />
         </section>
 
         <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">

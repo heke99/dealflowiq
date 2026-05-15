@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { canUseFeature } from '@/lib/billing/features'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { createInAppNotification } from '@/lib/notifications'
+import { recordMarketListingActivity } from '@/lib/market/activity'
 
 type Row = Record<string, any>
 
@@ -449,7 +451,32 @@ export async function runBuyerMatchingAction(formData: FormData) {
           .eq('id', existingMatch.id)
       : await supabase.from('buyer_deal_matches').insert(row)
 
-    if (!error) createdOrUpdated += 1
+    if (!error) {
+      createdOrUpdated += 1
+      if (Number(row.match_score || 0) >= 80) {
+        await createInAppNotification(supabase, {
+          organizationId: workspace.organization.id,
+          userId: workspace.user.id,
+          actorId: workspace.user.id,
+          type: 'buyer_match',
+          title: 'Strong buyer match found',
+          message: `A buyer matched a listing with ${Math.round(Number(row.match_score || 0))}/100 fit.`,
+          relatedEntityType: 'market_listing',
+          relatedEntityId: row.listing_id,
+          actionHref: `/market/${row.listing_id}`,
+          metadata: { buyerId: row.buyer_id, matchScore: row.match_score },
+        })
+        await recordMarketListingActivity(supabase, {
+          organizationId: workspace.organization.id,
+          listingId: row.listing_id,
+          actorId: workspace.user.id,
+          eventType: 'buyer_matched',
+          title: 'Buyer matched',
+          description: `Buyer match score ${Math.round(Number(row.match_score || 0))}/100.`,
+          metadata: { buyerId: row.buyer_id, matchScore: row.match_score, status: row.status },
+        })
+      }
+    }
   }
 
   await supabase.from('audit_logs').insert({

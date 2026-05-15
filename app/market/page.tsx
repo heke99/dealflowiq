@@ -13,7 +13,6 @@ import {
   saveOpportunityAction,
 } from '@/app/market/actions'
 import { getMarketSourceAdapters } from '@/lib/market/sourceAdapters'
-import { dealStatusLabel } from '@/lib/market/review'
 
 type Search = Record<string, string | string[] | undefined>
 type Row = Record<string, any>
@@ -44,6 +43,17 @@ function dateText(value: string | null | undefined) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
+function numberText(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (!parsed) return '—'
+  return parsed.toLocaleString()
+}
+
+function percent(value: number | string | null | undefined) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return '—'
+  return `${(parsed * 100).toFixed(1)}%`
+}
 
 function initials(title: string) {
   return title.split(/\s+/).filter(Boolean).slice(0, 2).map((item) => item[0]?.toUpperCase()).join('') || 'DF'
@@ -110,7 +120,6 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
 
 function ListingCard({ listing, score, watch }: { listing: Row; score: Row | null; watch: Row | null }) {
   const dealScore = Math.round(Number(score?.deal_score || 0))
-  const rentConfidence = Math.round(Number(score?.rent_confidence_score || 0))
   const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || listing.address || 'Location pending'
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
@@ -132,15 +141,13 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
         <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {score?.risk_level || 'medium'}</span>
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence || '—'}</span>
-        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{dealStatusLabel(listing.deal_status)}</span>
         {watch?.status ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{String(watch.status).replaceAll('_', ' ')}</span> : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <Metric label="Price" value={money(listing.list_price || listing.asking_price, true)} />
         <Metric label="Cashflow" value={money(score?.estimated_monthly_cashflow)} tone={Number(score?.estimated_monthly_cashflow || 0) > 0 ? 'text-emerald-300' : undefined} />
-        <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
+        <Metric label="HUD gap" value={score?.hud_rent_gap ? `${money(score.hud_rent_gap)}/mo` : '—'} tone={Number(score?.hud_rent_gap || 0) > 0 ? 'text-emerald-300' : undefined} />
         <Metric label="DSCR" value={score?.estimated_dscr ? Number(score.estimated_dscr).toFixed(2) : '—'} />
       </div>
 
@@ -150,7 +157,6 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
           <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{reasons.slice(0, 2).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
         ) : <p className="mt-2 text-xs leading-5 text-slate-500">Add rent, price and ZIP data to improve ranking.</p>}
         {risks.length ? <p className="mt-2 text-xs text-amber-200">Risk: {String(risks[0])}</p> : null}
-        {listing.why_this_deal ? <p className="mt-2 text-xs leading-5 text-slate-400">{listing.why_this_deal}</p> : null}
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -184,6 +190,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const city = one(params?.city)
   const state = one(params?.state)
   const zip = one(params?.zip)
+  const importJobId = one(params?.import_job_id)
   const minScore = Number(one(params?.min_score, activeTab === 'opportunities' ? '80' : '0'))
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
@@ -195,6 +202,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   if (city) listingsQuery = listingsQuery.ilike('city', `%${city}%`)
   if (state) listingsQuery = listingsQuery.ilike('state', state)
   if (zip) listingsQuery = listingsQuery.eq('zip_code', zip)
+  if (importJobId) listingsQuery = listingsQuery.eq('import_job_id', importJobId)
   if (activeTab === 'public') listingsQuery = listingsQuery.eq('visibility', 'public')
   if (activeTab === 'community') listingsQuery = listingsQuery.eq('visibility', 'community')
   if (activeTab === 'needs_review') listingsQuery = listingsQuery.eq('status', 'needs_review')
@@ -214,19 +222,13 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const queueRows = (queueResult.data || []) as Row[]
 
   let visibleListings = [...listings]
-  if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => {
-    const score = scoresByListing.get(String(listing.id))
-    return Number(score?.deal_score || 0) >= Math.max(80, minScore) && Number(score?.rent_confidence_score || 0) >= 65
-  })
+  if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => Number(scoresByListing.get(String(listing.id))?.deal_score || 0) >= Math.max(80, minScore))
   if (activeTab === 'saved') visibleListings = visibleListings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
-  visibleListings = visibleListings.filter((listing) => listing.status !== 'archived' && !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
+  visibleListings = visibleListings.filter((listing) => !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
   visibleListings.sort((a, b) => Number(scoresByListing.get(String(b.id))?.deal_score || 0) - Number(scoresByListing.get(String(a.id))?.deal_score || 0))
 
   const totalListings = listings.length
-  const opportunityCount = listings.filter((listing) => {
-    const score = scoresByListing.get(String(listing.id))
-    return Number(score?.deal_score || 0) >= 80 && Number(score?.rent_confidence_score || 0) >= 65
-  }).length
+  const opportunityCount = listings.filter((listing) => Number(scoresByListing.get(String(listing.id))?.deal_score || 0) >= 80).length
   const savedCount = listings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || ''))).length
   const runningImports = queueRows.filter((row) => row.status === 'running').length
   const queuedImports = queueRows.filter((row) => row.status === 'queued').length
@@ -251,14 +253,13 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <p className="mt-4 max-w-3xl text-slate-300">One clean place for imported listings, public/community deals and the highest-ranked opportunities. Deals stay in My Deals; Market is where the system finds and ranks new inventory.</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">View Opportunities</Link>
-                <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">URL Import Queue</Link>
                 <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import Sources</Link>
                 <Link href="/deals/new" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Add My Deal</Link>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
               <Metric label="Market" value={String(totalListings)} />
-              <Metric label="Qualified Opportunities" value={String(opportunityCount)} tone="text-emerald-300" />
+              <Metric label="80+ Opportunities" value={String(opportunityCount)} tone="text-emerald-300" />
               <Metric label="Saved" value={String(savedCount)} />
               <Metric label="Queue" value={`${queuedImports} queued / ${runningImports} running`} />
             </div>
@@ -266,6 +267,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
           {params?.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
           {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(params.error)}</div> : null}
           {listingsResult.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{listingsResult.error.message}</div> : null}
+          {importJobId ? <div className="mt-5 rounded-xl border border-blue-400/30 bg-blue-400/10 p-4 text-sm text-blue-100">Showing listings created or updated by import job <span className="font-mono">{importJobId.slice(0, 8)}</span>. <Link href="/market" className="underline">Clear filter</Link>.</div> : null}
         </section>
 
         <nav className="flex gap-2 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03] p-2">
@@ -293,7 +295,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             </form>
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100 lg:w-72">
               <div className="font-semibold">Opportunity rule</div>
-              <p className="mt-2 text-emerald-100/80">Listings need score 80+ and rent confidence 65+ before they are promoted into Opportunities. Lower-confidence deals stay searchable in Market.</p>
+              <p className="mt-2 text-emerald-100/80">Listings with score 80+ are promoted into Opportunities. Lower scores remain searchable in Market.</p>
             </div>
           </section>
         ) : null}
@@ -304,8 +306,8 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-xl font-bold">Quick listing URL import</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. For search URLs like Zillow map searches, use the controlled URL Import Analyzer.</p>
+                    <h2 className="text-xl font-bold">Quick URL import</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. DealFlowIQ imports, normalizes, scores and ranks it immediately.</p>
                   </div>
                   {!canImportSources ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Premium</span> : null}
                 </div>
@@ -330,7 +332,6 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                   </div>
                   <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and rank now</button>
                 </form>
-                <Link href="/imports" className="mt-3 inline-flex w-full justify-center rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Analyze search URL instead</Link>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
@@ -420,8 +421,11 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                         <div className="text-sm font-semibold text-slate-100">{job.job_type.replaceAll('_', ' ')}</div>
                         <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${job.status === 'completed' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : job.status === 'failed' ? 'border-red-400/30 bg-red-400/10 text-red-100' : 'border-amber-400/30 bg-amber-400/10 text-amber-100'}`}>{job.status}</span>
                       </div>
-                      <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · created {job.items_created || 0} · updated {job.items_updated || 0} · failed {job.items_failed || 0}</div>
-                      {job.error_message ? <div className="mt-2 text-xs text-red-200">{job.error_message}</div> : null}
+                      <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · found {job.items_found || 0} · created {job.items_created || 0} · updated {job.items_updated || 0} · failed {job.items_failed || 0}</div>
+                      {job.input_url ? <a href={String(job.input_url)} target="_blank" className="mt-2 block truncate text-xs text-slate-300 underline">Source URL</a> : null}
+                      {Array.isArray(job.normalized_listing_ids) && job.normalized_listing_ids.length ? <Link href={`/market?tab=all&import_job_id=${job.id}`} className="mt-3 inline-flex rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10">View imported listings in Market</Link> : null}
+                      {job.error_message ? <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs leading-5 text-red-100">{job.error_message}</div> : null}
+                      {job.source_summary?.rowErrors?.length ? <details className="mt-2 text-xs text-slate-400"><summary className="cursor-pointer text-slate-300">Show row errors</summary><ul className="mt-2 space-y-1">{job.source_summary.rowErrors.slice(0, 5).map((error: string, index: number) => <li key={index}>• {error}</li>)}</ul></details> : null}
                     </div>
                   ))}
                   {!(jobsResult.data || []).length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No import jobs yet.</div> : null}

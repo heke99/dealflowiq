@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DealFlowIQ",
-  description: "DealFlowIQ real estate investment intelligence platform",
+  description: "DealFlowIQ real estate underwriting and market intelligence platform",
 };
 
 export default function RootLayout({

@@ -2,20 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: {
-    default: "DealFlowIQ",
-    template: "%s | DealFlowIQ",
-  },
-  description:
-    "DealFlowIQ is a real estate underwriting, market discovery and deal matching platform.",
-  applicationName: "DealFlowIQ",
-  openGraph: {
-    title: "DealFlowIQ",
-    description:
-      "Real estate underwriting, market discovery and buyer matching for investors.",
-    siteName: "DealFlowIQ",
-    type: "website",
-  },
+  title: "DealFlowIQ",
+  description: "DealFlowIQ real estate investment intelligence platform",
 };
 
 export default function RootLayout({

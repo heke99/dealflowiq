@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { addMarketListingNoteAction, convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction, updateMarketListingReviewStatusAction } from '@/app/market/actions'
+import { addListingManualOverrideAction, addMarketListingNoteAction, convertListingToDealAction, ignoreMarketListingAction, rescoreMarketListingAction, runListingFullIntelligenceAction, runListingHudLookupAction, runListingMarketRentAction, saveOpportunityAction, updateMarketListingReviewStatusAction, updateMarketListingStageAction } from '@/app/market/actions'
 import { canUseFeature } from '@/lib/billing/features'
 import { dealStatusLabel } from '@/lib/market/review'
 
@@ -47,6 +47,12 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
   )
 }
 
+function daysUntil(value: string | null | undefined) {
+  if (!value) return null
+  const days = Math.ceil((new Date(value).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+  return Number.isFinite(days) ? days : null
+}
+
 function scoreTone(score: number) {
   if (score >= 80) return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
   if (score >= 65) return 'border-amber-400/30 bg-amber-400/10 text-amber-100'
@@ -59,13 +65,16 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const supabase = await createSupabaseServerClient()
 
   const buyersEnabled = canUseFeature(workspace.access.features, 'buyer_matching') || Boolean(workspace.access.isPlatformAdmin)
-  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }] = await Promise.all([
+  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }, { data: rentEstimates }, { data: hudSnapshots }, { data: manualOverrides }] = await Promise.all([
     supabase.from('market_listings').select('*').eq('id', id).maybeSingle(),
     supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('calculated_at', { ascending: false }).limit(1),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('listing_id', id).eq('user_id', workspace.user.id).maybeSingle() : Promise.resolve({ data: null }),
     workspace.organization?.id && buyersEnabled ? supabase.from('buyer_deal_matches').select('*, buyers(name, company_name, email, phone, status)').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('match_score', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
     workspace.organization?.id ? supabase.from('market_listing_notes').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
     workspace.organization?.id ? supabase.from('market_listing_activity_events').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(12) : Promise.resolve({ data: [] as Row[] }),
+    workspace.organization?.id ? supabase.from('listing_rent_estimates').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5) : Promise.resolve({ data: [] as Row[] }),
+    workspace.organization?.id ? supabase.from('listing_hud_rent_snapshots').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5) : Promise.resolve({ data: [] as Row[] }),
+    workspace.organization?.id ? supabase.from('listing_manual_overrides').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
   ])
 
   if (!listing) notFound()
@@ -77,11 +86,19 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const matches = (buyerMatches || []) as Row[]
   const noteRows = (notes || []) as Row[]
   const activityRows = (activity || []) as Row[]
+  const rentRows = (rentEstimates || []) as Row[]
+  const hudRows = (hudSnapshots || []) as Row[]
+  const overrideRows = (manualOverrides || []) as Row[]
   const images = [row.primary_image_url, ...asStringArray(row.image_urls)].filter(Boolean).filter((value, index, arr) => arr.indexOf(value) === index).slice(0, 8)
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
   const missing = Array.isArray(score?.missing_fields) ? score.missing_fields : []
   const location = [row.address, row.city, row.state, row.zip_code].filter(Boolean).join(', ')
+  const expiryDays = daysUntil(row.provider_data_expires_at)
+  const dataChecklist = Array.isArray(row.data_quality_checklist) ? row.data_quality_checklist : []
+  const confidenceBreakdown = row.confidence_breakdown && typeof row.confidence_breakdown === 'object' ? row.confidence_breakdown : {}
+  const confidencePositives = Array.isArray(confidenceBreakdown.positives) ? confidenceBreakdown.positives : []
+  const confidenceNegatives = Array.isArray(confidenceBreakdown.negatives) ? confidenceBreakdown.negatives : []
 
   return (
     <AppShell
@@ -118,6 +135,8 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
             </div>
           </div>
         </section>
+
+        {row.provider_data_expired_at ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-50">Provider data expired. DealFlowIQ analysis is retained, but copied provider content was removed.</div> : row.provider_data_expires_at ? <div className="rounded-2xl border border-sky-400/25 bg-sky-400/10 p-4 text-sm text-sky-50">Provider data expires {expiryDays !== null ? expiryDays >= 0 ? `in ${expiryDays} day(s)` : 'now' : ''}. Source link, scores, notes and DealFlowIQ analysis stay after cleanup.</div> : null}
 
         <section className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-5">
@@ -159,6 +178,28 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                   <div className="text-sm font-bold text-slate-100">Missing data</div>
                   {missing.length ? <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-400">{missing.map((field: string, index: number) => <li key={index}>• {field}</li>)}</ul> : <p className="mt-3 text-sm text-slate-500">No critical missing fields.</p>}
                 </div>
+              </div>
+            </div>
+
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Rent intelligence</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent)} />
+                <Metric label="HUD/FMR rent" value={money(row.hud_rent)} />
+                <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : 'text-amber-300'} />
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Latest market rent estimates</div>{rentRows.length ? <div className="mt-3 space-y-2 text-sm text-slate-300">{rentRows.map((rent) => <div key={rent.id}>• {money(rent.estimated_rent)} ({rent.confidence_score || 0}/100) · {dateText(rent.created_at)}</div>)}</div> : <p className="mt-3 text-sm text-slate-500">No market rent run yet.</p>}</div>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Latest HUD/FMR snapshots</div>{hudRows.length ? <div className="mt-3 space-y-2 text-sm text-slate-300">{hudRows.map((hud) => <div key={hud.id}>• HUD {hud.hud_year || '—'} · {money(hud.selected_fmr)} · {hud.lookup_status}</div>)}</div> : <p className="mt-3 text-sm text-slate-500">No HUD/FMR lookup yet.</p>}</div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Data quality & confidence</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Checklist</div><div className="mt-3 space-y-2 text-sm">{dataChecklist.length ? dataChecklist.map((item: Row, index: number) => <div key={item.key || index} className={item.ok ? 'text-emerald-200' : 'text-amber-200'}>{item.ok ? '✓' : '⚠'} {item.label}</div>) : <p className="text-slate-500">Run rent intelligence to generate checklist.</p>}</div></div>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Confidence breakdown</div><div className="mt-3 grid gap-3 text-sm"><div>{confidencePositives.map((item: string, index: number) => <div key={index} className="text-emerald-200">+ {item}</div>)}</div><div>{confidenceNegatives.map((item: string, index: number) => <div key={index} className="text-amber-200">- {item}</div>)}</div>{!confidencePositives.length && !confidenceNegatives.length ? <p className="text-slate-500">No confidence breakdown yet.</p> : null}</div></div>
               </div>
             </div>
 
@@ -214,6 +255,18 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                   <input type="hidden" name="listing_id" value={row.id} />
                   <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Recalculate score</button>
                 </form>
+                <form action={runListingFullIntelligenceAction}>
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <button className="w-full rounded-xl border border-emerald-400/30 px-5 py-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Run Market Rent + HUD/FMR</button>
+                </form>
+                <form action={runListingMarketRentAction}>
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Run Market Rent</button>
+                </form>
+                <form action={runListingHudLookupAction}>
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Run HUD/FMR Lookup</button>
+                </form>
                 <form action={updateMarketListingReviewStatusAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
                   <input type="hidden" name="listing_id" value={row.id} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Review status</label>
@@ -227,6 +280,30 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                   <input name="review_reason" placeholder="Reason" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                   <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Update review</button>
                 </form>
+                <form action={updateMarketListingStageAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Deal stage</label>
+                  <select name="deal_stage" defaultValue={row.deal_stage || 'imported'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
+                    <option value="imported">Imported</option><option value="needs_review">Needs Review</option><option value="analyzed">Analyzed</option><option value="watchlist">Watchlist</option><option value="opportunity">Opportunity</option><option value="underwriting">Underwriting</option><option value="offer_made">Offer Made</option><option value="rejected">Rejected</option><option value="archived">Archived</option>
+                  </select>
+                  <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Update stage</button>
+                </form>
+                <form action={addListingManualOverrideAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Manual override</label>
+                  <select name="field_name" defaultValue="market_rent" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="market_rent">Market rent</option><option value="hud_rent">HUD rent</option><option value="current_rent">Current rent</option><option value="list_price">List price</option><option value="rehab_estimate">Rehab estimate</option></select>
+                  <input name="new_value" placeholder="New value" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="reason" placeholder="Reason" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <label className="mt-2 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" name="apply_to_score" defaultChecked /> Apply to score</label>
+                  <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Save override</button>
+                </form>
+                <form action={ignoreMarketListingAction} className="rounded-2xl border border-red-400/20 bg-red-400/5 p-3">
+                  <input type="hidden" name="listing_id" value={row.id} />
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-red-200">Ignore / do not re-import</label>
+                  <select name="ignore_reason" defaultValue="not_investment_suitable" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="bad_area">Bad area</option><option value="wrong_asset_type">Wrong asset type</option><option value="duplicate">Duplicate</option><option value="already_reviewed">Already reviewed</option><option value="unrealistic_price">Unrealistic price</option><option value="not_investment_suitable">Not investment suitable</option><option value="other">Other</option></select>
+                  <input name="ignore_notes" placeholder="Optional note" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <button className="mt-2 w-full rounded-xl border border-red-400/30 px-3 py-2 text-sm font-semibold text-red-100 hover:bg-red-400/10">Ignore listing</button>
+                </form>
                 {row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-center text-sm font-semibold text-slate-100 hover:bg-white/10">Open source</a> : null}
               </div>
               {watch?.status ? <p className="mt-4 text-xs text-slate-500">Your status: {String((watch as Row).status).replaceAll('_', ' ')}</p> : null}
@@ -237,6 +314,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               <Metric label="Units" value={numberText(row.units || 1)} />
               <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent)} />
               <Metric label="HUD rent" value={money(row.hud_rent)} />
+              <Metric label="Stage" value={String(row.deal_stage || 'imported').replaceAll('_', ' ')} />
               <Metric label="Monthly cashflow" value={money(score?.estimated_monthly_cashflow)} tone={Number(score?.estimated_monthly_cashflow || 0) > 0 ? 'text-emerald-300' : undefined} />
               <Metric label="DSCR" value={score?.estimated_dscr ? Number(score.estimated_dscr).toFixed(2) : '—'} />
               <Metric label="Cap rate" value={percent(score?.estimated_cap_rate)} />

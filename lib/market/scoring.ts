@@ -73,46 +73,6 @@ function listingToDeal(listing: MarketListingLike) {
   }
 }
 
-
-function scoreSourceConfidence(listing: MarketListingLike) {
-  const sourceType = String(listing.source_type || '').toLowerCase()
-  let score = 35
-  if (listing.source_url) score += 15
-  if (listing.external_listing_id) score += 10
-  if (['mls_feed', 'partner_api', 'csv'].includes(sourceType)) score += 20
-  if (['zillow', 'redfin', 'realtor', 'crexi', 'loopnet', 'apartments'].includes(sourceType)) score += 12
-  if (listing.raw_payload && typeof listing.raw_payload === 'object') score += 8
-  if (listing.broker_email || listing.broker_phone) score += 5
-  return clamp(score)
-}
-
-function scoreRentConfidence(listing: MarketListingLike, selectedRent: number, breakEvenRent: number | null) {
-  const currentRent = positive(listing.current_rent ?? listing.estimated_rent)
-  const marketRent = positive(listing.market_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent)
-  const hudRent = positive(listing.hud_rent ?? listing.section8_rent)
-  const zip = Boolean(listing.zip_code)
-  const units = positive(listing.units ?? listing.number_of_units, 1)
-  let score = 10
-
-  if (currentRent > 0) score += 22
-  if (marketRent > 0) score += 24
-  if (hudRent > 0) score += 24
-  if (zip) score += 8
-  if (units > 0) score += 5
-  if (selectedRent > 0) score += 7
-  if (breakEvenRent && breakEvenRent > 0 && selectedRent > 0) score += 5
-
-  const rents = [currentRent, marketRent, hudRent].filter((value) => value > 0)
-  if (rents.length >= 2) {
-    const min = Math.min(...rents)
-    const max = Math.max(...rents)
-    if (min > 0 && max / min <= 1.8) score += 5
-    if (min > 0 && max / min > 2.5) score -= 20
-  }
-
-  return clamp(score)
-}
-
 export function scoreMarketListing(listing: MarketListingLike, options?: { dscrThreshold?: number; interestRatePercent?: number; downPaymentPercent?: number; loanTermMonths?: number }) {
   const deal = {
     ...listingToDeal(listing),
@@ -138,8 +98,22 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
   const marketScore = clamp((marketGap + 250) / 10)
   const dataFields = [listPrice, primary.monthlyRent, units, Number(Boolean(listing.zip_code)), Number(Boolean(listing.address || listing.city)), Number(Boolean(listing.primary_image_url || (Array.isArray(listing.image_urls) && listing.image_urls.length)))]
   const dataConfidenceScore = clamp(dataFields.filter(Boolean).length / dataFields.length * 100)
-  const rentConfidenceScore = scoreRentConfidence(listing, primary.monthlyRent, primary.breakEvenRent)
-  const sourceConfidenceScore = scoreSourceConfidence(listing)
+  const rentConfidenceScore = clamp(
+    (marketRent || hudRent || currentRent ? 35 : 0) +
+    (Boolean(listing.zip_code) ? 20 : 0) +
+    (Boolean(listing.bedrooms ?? listing.beds) ? 15 : 0) +
+    (Boolean(listing.sqft) ? 10 : 0) +
+    (Boolean(listing.property_type) ? 10 : 0) +
+    (Boolean(listing.address || listing.city) ? 10 : 0),
+  )
+  const sourceConfidenceScore = clamp(
+    (Boolean(listing.source_url) ? 25 : 0) +
+    (Boolean(listing.external_listing_id) ? 20 : 0) +
+    (Boolean(listing.address || listing.city) ? 20 : 0) +
+    (Boolean(listing.list_price ?? listing.asking_price) ? 15 : 0) +
+    (Boolean(listing.primary_image_url || (Array.isArray(listing.image_urls) && listing.image_urls.length)) ? 10 : 0) +
+    (Boolean(listing.raw_payload) ? 10 : 0),
+  )
   const riskPenalty = clamp(
     (!listPrice ? 15 : 0) +
     (!primary.monthlyRent ? 20 : 0) +
@@ -160,7 +134,6 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
   if (marketGap > 0) reasons.push(`Market rent upside is about $${Math.round(marketGap).toLocaleString()}/mo.`)
   if (primary.dscr !== null && primary.dscr >= summary.assumptions.dscr.minimumThreshold) reasons.push(`DSCR passes threshold at ${primary.dscr.toFixed(2)}.`)
   if (primary.capRate !== null && primary.capRate >= 0.07) reasons.push(`Cap rate is estimated at ${(primary.capRate * 100).toFixed(1)}%.`)
-  if (rentConfidenceScore >= 65) reasons.push(`Rent confidence is ${Math.round(rentConfidenceScore)} based on current, market or HUD rent data.`)
   if (primary.monthlyCashflow > 0) reasons.push(`Estimated cashflow is about $${Math.round(primary.monthlyCashflow).toLocaleString()}/mo.`)
   if (summary.flipProfit !== null && summary.flipProfit > 0) reasons.push(`Flip profit preview is about $${Math.round(summary.flipProfit).toLocaleString()}.`)
   if (summary.wholesaleSpread !== null && summary.wholesaleSpread > 0) reasons.push(`Wholesale spread preview is about $${Math.round(summary.wholesaleSpread).toLocaleString()}.`)
@@ -170,7 +143,6 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
   if (!listing.zip_code) missingFields.push('ZIP code')
   if (!listing.address && !listing.city) missingFields.push('Location')
   if (!listing.primary_image_url && !(Array.isArray(listing.image_urls) && listing.image_urls.length)) missingFields.push('Property image')
-  if (rentConfidenceScore < 65) risks.push('Rent confidence is not high enough for automatic opportunity promotion.')
   if (!positive(listing.taxes_annual)) risks.push('Taxes are missing or unverified.')
   if (!positive(listing.insurance_annual)) risks.push('Insurance is missing or unverified.')
   if (primary.monthlyCashflow < 0) risks.push('Estimated monthly cashflow is negative.')

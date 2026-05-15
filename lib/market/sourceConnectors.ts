@@ -2,7 +2,7 @@ import { normalizePropertyType } from '@/lib/market/scoring'
 import { getMarketSourceAdapter } from '@/lib/market/sourceAdapters'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
-export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'other'
+export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'generic' | 'other'
 
 export type NormalizedMarketListing = {
   source_type: MarketSourceType
@@ -85,7 +85,7 @@ export function detectSourceType(inputUrl: string | null | undefined): MarketSou
   if (url.includes('redfin.')) return 'redfin'
   if (url.includes('realtor.')) return 'realtor'
   if (url.includes('apartments.')) return 'apartments'
-  return 'manual_url'
+  return 'generic'
 }
 
 function firstMatch(html: string, patterns: RegExp[]) {
@@ -391,4 +391,60 @@ export function buildNormalizedListingKey(listing: Pick<NormalizedMarketListing,
   if (listing.source_url) return `url:${listing.source_url.toLowerCase()}`
   if (listing.external_listing_id) return `external:${listing.external_listing_id.toLowerCase()}`
   return `address:${[listing.address, listing.city, listing.state, listing.zip_code].filter(Boolean).join('|').toLowerCase()}`
+}
+
+
+export function extractListingUrlsFromSearchHtml(html: string, baseUrl: string, sourceTypeInput?: string | null) {
+  const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(baseUrl)) as MarketSourceType
+  const urls = new Set<string>()
+  const add = (value: string | undefined | null) => {
+    if (!value) return
+    let raw = value.replace(/\\u002F/g, '/').replace(/&amp;/g, '&')
+    if (!raw) return
+    try {
+      if (raw.startsWith('/')) raw = new URL(raw, baseUrl).toString()
+      if (!raw.startsWith('http')) return
+      const parsed = new URL(raw)
+      parsed.hash = ''
+      urls.add(parsed.toString())
+    } catch {}
+  }
+
+  if (sourceType === 'zillow') {
+    for (const match of html.matchAll(/https?:\/\/www\.zillow\.com\/homedetails\/[^"'\s<]+?\/\d+_zpid\/?/gi)) add(match[0])
+    for (const match of html.matchAll(/href=["'](\/homedetails\/[^"']+?\/\d+_zpid\/?)["']/gi)) add(match[1])
+    for (const match of html.matchAll(/"detailUrl"\s*:\s*"([^"]+?_zpid\/?[^"]*)"/gi)) add(match[1])
+  } else if (sourceType === 'redfin') {
+    for (const match of html.matchAll(/https?:\/\/www\.redfin\.com\/[^"'\s<]+\/home\/\d+/gi)) add(match[0])
+    for (const match of html.matchAll(/href=["'](\/[^"']+\/home\/\d+)["']/gi)) add(match[1])
+  } else if (sourceType === 'realtor') {
+    for (const match of html.matchAll(/https?:\/\/www\.realtor\.com\/realestateandhomes-detail\/[^"'\s<]+/gi)) add(match[0])
+    for (const match of html.matchAll(/href=["'](\/realestateandhomes-detail\/[^"']+)["']/gi)) add(match[1])
+  } else if (sourceType === 'crexi') {
+    for (const match of html.matchAll(/https?:\/\/www\.crexi\.com\/properties\/[^"'\s<]+/gi)) add(match[0])
+    for (const match of html.matchAll(/href=["'](\/properties\/[^"']+)["']/gi)) add(match[1])
+  } else if (sourceType === 'loopnet') {
+    for (const match of html.matchAll(/https?:\/\/www\.loopnet\.com\/Listing\/[^"'\s<]+/gi)) add(match[0])
+    for (const match of html.matchAll(/href=["'](\/Listing\/[^"']+)["']/gi)) add(match[1])
+  } else {
+    for (const match of html.matchAll(/href=["']([^"']*(?:listing|property|homedetails|realestate)[^"']*)["']/gi)) add(match[1])
+  }
+
+  return [...urls].filter((url) => detectSourceType(url) === sourceType || sourceType === 'generic').slice(0, 50)
+}
+
+export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceTypeInput?: string | null, maxResults = 10) {
+  const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
+  const adapter = getMarketSourceAdapter(sourceType)
+  const response = await fetch(inputUrl, {
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'user-agent': adapter.userAgent,
+      ...(adapter.referrer ? { referer: adapter.referrer } : {}),
+    },
+    cache: 'no-store',
+  })
+  if (!response.ok) throw new Error(`${sourceType} search import returned HTTP ${response.status}.`)
+  const html = await response.text()
+  return extractListingUrlsFromSearchHtml(html, inputUrl, sourceType).slice(0, maxResults)
 }

@@ -38,6 +38,43 @@ function LockedPill({ feature }: { feature: FeatureKey }) {
   )
 }
 
+function UserMenu({ userEmail, organizationName, accountTitle, planName, subscriptionStatus, trialDate }: { userEmail?: string | null; organizationName?: string | null; accountTitle: string; planName?: string | null; subscriptionStatus?: string | null; trialDate?: string | null }) {
+  const initials = String(userEmail || 'U').slice(0, 1).toUpperCase()
+  return (
+    <details className="group relative">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-300 text-sm font-black text-slate-950">{initials}</span>
+        <span className="hidden max-w-44 truncate text-left md:block">
+          <span className="block truncate text-white">{userEmail || 'Profile'}</span>
+          <span className="block truncate text-xs font-normal text-slate-500">{organizationName || 'Organization'}</span>
+        </span>
+      </summary>
+      <div className="absolute right-0 z-50 mt-3 w-80 overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl shadow-black/50">
+        <div className="border-b border-white/10 p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Profile</div>
+          <div className="mt-1 truncate font-semibold text-white">{userEmail || 'Signed in user'}</div>
+          <div className="mt-1 truncate text-sm text-slate-400">{organizationName || 'Organization'}</div>
+        </div>
+        <div className="p-4 text-sm text-slate-300">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Account</div>
+            <div className="mt-1 font-semibold text-white">{accountTitle}</div>
+            <div className="mt-1 text-xs text-slate-500">{planName || 'Plan pending'} · {subscriptionStatus || 'trialing'}</div>
+            {trialDate ? <div className="mt-1 text-xs text-emerald-300">Trial ends {trialDate}</div> : null}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Link href="/settings" className="rounded-xl border border-white/10 px-3 py-2 text-center text-xs font-semibold hover:bg-white/10">Settings</Link>
+            <Link href="/settings/billing" className="rounded-xl border border-white/10 px-3 py-2 text-center text-xs font-semibold hover:bg-white/10">Billing</Link>
+          </div>
+          <form action={signOutAction} className="mt-3">
+            <button className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-200">Sign out</button>
+          </form>
+        </div>
+      </div>
+    </details>
+  )
+}
+
 export function AppShell({
   children,
   organizationName,
@@ -64,13 +101,11 @@ export function AppShell({
     { href: '/buyers', label: 'Buyers', visible: true, feature: 'buyers' },
     { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
     { href: '/settings/underwriting', label: 'Underwriting Defaults', visible: true, core: true },
-    { href: '/notifications', label: 'Notifications', visible: true, core: true },
     { href: '/settings', label: 'Settings', visible: true, core: true },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
   ]
   const nav = rawNav.filter((item) => item.visible)
-
   const trialDate = formatTrialDate(trialEndsAt)
 
   return (
@@ -108,29 +143,24 @@ export function AppShell({
             )
           })}
         </nav>
-
-        <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
-          <NotificationBell />
-          <form action={signOutAction}>
-            <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10">
-              Sign out
-            </button>
-          </form>
-        </div>
       </aside>
 
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between gap-4">
-            <Link href="/dashboard" className="font-bold">DealFlowIQ</Link>
+        <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
+            <div className="min-w-0">
+              <Link href="/dashboard" className="font-bold lg:hidden">DealFlowIQ</Link>
+              <div className="hidden lg:block">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Workspace</div>
+                <div className="truncate text-sm font-semibold text-white">{organizationName || 'Organization'}</div>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <NotificationBell />
-              <form action={signOutAction}>
-                <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
-              </form>
+              <UserMenu userEmail={userEmail} organizationName={organizationName} accountTitle={config.title} planName={planName} subscriptionStatus={subscriptionStatus} trialDate={trialDate} />
             </div>
           </div>
-          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
             {nav.map((item) => {
               const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
               return (

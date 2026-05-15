@@ -145,11 +145,14 @@ async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createS
   await supabase.from('market_listing_scores').insert({
     listing_id: listing.id,
     organization_id: organizationId,
-    formula_version: 'market-score-v2',
+    formula_version: 'market-score-v3',
     deal_score: score.dealScore,
     risk_score: score.riskScore,
     risk_level: score.riskLevel,
     data_confidence: score.dataConfidence,
+    data_confidence_score: score.dataConfidenceScore,
+    rent_confidence_score: score.rentConfidenceScore,
+    source_confidence_score: score.sourceConfidenceScore,
     strategy_fit: score.strategyFit,
     estimated_noi: score.estimatedNoi,
     estimated_cashflow: score.estimatedCashflow,
@@ -355,7 +358,7 @@ export async function importMarketUrlAction(formData: FormData) {
     redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
   }
 
-  redirect('/market?tab=opportunities&saved=imported')
+  redirect('/opportunities?saved=imported')
 }
 
 export async function importMarketCsvAction(formData: FormData) {
@@ -425,7 +428,7 @@ export async function importMarketCsvAction(formData: FormData) {
     redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
   }
 
-  redirect('/market?tab=opportunities&saved=csv_imported')
+  redirect('/opportunities?saved=csv_imported')
 }
 
 export async function createMarketListingAction(formData: FormData) {
@@ -528,7 +531,8 @@ export async function rescoreMarketListingAction(formData: FormData) {
   if (error || !listing) redirect(`/market?error=${encodeURIComponent(error?.message || 'Listing not found')}`)
   await insertScoreForListing(supabase, listing as any, (listing as any).organization_id || workspace.organization.id)
   revalidatePath('/market')
-  redirect('/market?tab=opportunities&saved=rescore')
+  revalidatePath(`/market/${listingId}`)
+  redirect('/opportunities?saved=rescore')
 }
 
 export async function saveOpportunityAction(formData: FormData) {
@@ -544,10 +548,13 @@ export async function saveOpportunityAction(formData: FormData) {
     user_id: workspace.user.id,
     listing_id: listingId,
     status: safeStatus,
+    last_action_at: new Date().toISOString(),
   }, { onConflict: 'organization_id,user_id,listing_id' })
   if (error) redirect(`/market?error=${encodeURIComponent(error.message)}`)
   revalidatePath('/market')
-  redirect(`/market?tab=${safeStatus === 'ignored' || safeStatus === 'passed' ? 'ignored' : 'saved'}&saved=${safeStatus}`)
+  revalidatePath('/saved-deals')
+  revalidatePath(`/market/${listingId}`)
+  redirect(`/saved-deals?status=${safeStatus}&saved=${safeStatus}`)
 }
 
 export async function convertListingToDealAction(formData: FormData) {
@@ -613,10 +620,13 @@ export async function convertListingToDealAction(formData: FormData) {
     user_id: workspace.user.id,
     listing_id: listingId,
     status: 'converted_to_deal',
+    last_action_at: new Date().toISOString(),
   }, { onConflict: 'organization_id,user_id,listing_id' })
   await supabase.from('market_listings').update({ status: 'converted_to_deal' }).eq('id', listingId)
 
   revalidatePath('/market')
+  revalidatePath('/saved-deals')
+  revalidatePath(`/market/${listingId}`)
   revalidatePath('/deals')
   redirect(`/deals/${deal.id}?saved=converted`)
 }
@@ -649,7 +659,7 @@ export async function runMarketSourceAction(formData: FormData) {
   }
 
   revalidatePath('/market')
-  redirect('/market?tab=opportunities&saved=source_run')
+  redirect('/opportunities?saved=source_run')
 }
 
 export async function publishDealToMarketAction(formData: FormData) {
@@ -782,7 +792,8 @@ export async function archiveMarketListingAction(formData: FormData) {
 
   const row = listing as any
   const isOwner = row.created_by === workspace.user.id
-  const isOrgAdmin = Boolean(workspace.access.isPlatformAdmin)
+  const membershipRole = String(workspace.membership?.role || '')
+  const isOrgAdmin = workspace.access.isPlatformAdmin || ['owner', 'admin'].includes(membershipRole)
   if (!isOwner && !isOrgAdmin) {
     redirect(`${returnTo}?error=${encodeURIComponent('Only the listing owner or an admin can remove this listing from Market.')}`)
   }
@@ -796,5 +807,6 @@ export async function archiveMarketListingAction(formData: FormData) {
   revalidatePath('/market')
   revalidatePath('/opportunities')
   revalidatePath('/saved-deals')
+  revalidatePath(`/market/${listingId}`)
   redirect(`${returnTo}?saved=listing_archived`)
 }

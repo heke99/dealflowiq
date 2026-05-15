@@ -43,17 +43,6 @@ function dateText(value: string | null | undefined) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
-function numberText(value: number | string | null | undefined) {
-  const parsed = Number(value || 0)
-  if (!parsed) return '—'
-  return parsed.toLocaleString()
-}
-
-function percent(value: number | string | null | undefined) {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return '—'
-  return `${(parsed * 100).toFixed(1)}%`
-}
 
 function initials(title: string) {
   return title.split(/\s+/).filter(Boolean).slice(0, 2).map((item) => item[0]?.toUpperCase()).join('') || 'DF'
@@ -120,6 +109,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
 
 function ListingCard({ listing, score, watch }: { listing: Row; score: Row | null; watch: Row | null }) {
   const dealScore = Math.round(Number(score?.deal_score || 0))
+  const rentConfidence = Math.round(Number(score?.rent_confidence_score || 0))
   const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || listing.address || 'Location pending'
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
@@ -141,13 +131,14 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
         <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {score?.risk_level || 'medium'}</span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence || '—'}</span>
         {watch?.status ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{String(watch.status).replaceAll('_', ' ')}</span> : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <Metric label="Price" value={money(listing.list_price || listing.asking_price, true)} />
         <Metric label="Cashflow" value={money(score?.estimated_monthly_cashflow)} tone={Number(score?.estimated_monthly_cashflow || 0) > 0 ? 'text-emerald-300' : undefined} />
-        <Metric label="HUD gap" value={score?.hud_rent_gap ? `${money(score.hud_rent_gap)}/mo` : '—'} tone={Number(score?.hud_rent_gap || 0) > 0 ? 'text-emerald-300' : undefined} />
+        <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
         <Metric label="DSCR" value={score?.estimated_dscr ? Number(score.estimated_dscr).toFixed(2) : '—'} />
       </div>
 
@@ -220,13 +211,19 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const queueRows = (queueResult.data || []) as Row[]
 
   let visibleListings = [...listings]
-  if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => Number(scoresByListing.get(String(listing.id))?.deal_score || 0) >= Math.max(80, minScore))
+  if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => {
+    const score = scoresByListing.get(String(listing.id))
+    return Number(score?.deal_score || 0) >= Math.max(80, minScore) && Number(score?.rent_confidence_score || 0) >= 65
+  })
   if (activeTab === 'saved') visibleListings = visibleListings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
-  visibleListings = visibleListings.filter((listing) => !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
+  visibleListings = visibleListings.filter((listing) => listing.status !== 'archived' && !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
   visibleListings.sort((a, b) => Number(scoresByListing.get(String(b.id))?.deal_score || 0) - Number(scoresByListing.get(String(a.id))?.deal_score || 0))
 
   const totalListings = listings.length
-  const opportunityCount = listings.filter((listing) => Number(scoresByListing.get(String(listing.id))?.deal_score || 0) >= 80).length
+  const opportunityCount = listings.filter((listing) => {
+    const score = scoresByListing.get(String(listing.id))
+    return Number(score?.deal_score || 0) >= 80 && Number(score?.rent_confidence_score || 0) >= 65
+  }).length
   const savedCount = listings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || ''))).length
   const runningImports = queueRows.filter((row) => row.status === 'running').length
   const queuedImports = queueRows.filter((row) => row.status === 'queued').length
@@ -257,7 +254,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
               <Metric label="Market" value={String(totalListings)} />
-              <Metric label="80+ Opportunities" value={String(opportunityCount)} tone="text-emerald-300" />
+              <Metric label="Qualified Opportunities" value={String(opportunityCount)} tone="text-emerald-300" />
               <Metric label="Saved" value={String(savedCount)} />
               <Metric label="Queue" value={`${queuedImports} queued / ${runningImports} running`} />
             </div>
@@ -292,7 +289,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             </form>
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100 lg:w-72">
               <div className="font-semibold">Opportunity rule</div>
-              <p className="mt-2 text-emerald-100/80">Listings with score 80+ are promoted into Opportunities. Lower scores remain searchable in Market.</p>
+              <p className="mt-2 text-emerald-100/80">Listings need score 80+ and rent confidence 65+ before they are promoted into Opportunities. Lower-confidence deals stay searchable in Market.</p>
             </div>
           </section>
         ) : null}

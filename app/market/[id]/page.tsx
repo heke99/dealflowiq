@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
+import { canUseFeature } from '@/lib/billing/features'
 
 type Row = Record<string, any>
 
@@ -56,16 +57,21 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
 
-  const [{ data: listing }, { data: scores }, { data: watch }] = await Promise.all([
+  const buyersEnabled = canUseFeature(workspace.access.features, 'buyer_matching') || Boolean(workspace.access.isPlatformAdmin)
+  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }] = await Promise.all([
     supabase.from('market_listings').select('*').eq('id', id).maybeSingle(),
     supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('calculated_at', { ascending: false }).limit(1),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('listing_id', id).eq('user_id', workspace.user.id).maybeSingle() : Promise.resolve({ data: null }),
+    workspace.organization?.id && buyersEnabled ? supabase.from('buyer_deal_matches').select('*, buyers(name, company_name, email, phone, status)').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('match_score', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
   ])
 
   if (!listing) notFound()
   const row = listing as Row
   const score = (scores || [])[0] as Row | undefined
   const dealScore = Math.round(Number(score?.deal_score || 0))
+  const rentConfidence = Math.round(Number(score?.rent_confidence_score || 0))
+  const isQualifiedOpportunity = dealScore >= 80 && rentConfidence >= 65
+  const matches = (buyerMatches || []) as Row[]
   const images = [row.primary_image_url, ...asStringArray(row.image_urls)].filter(Boolean).filter((value, index, arr) => arr.indexOf(value) === index).slice(0, 8)
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
@@ -101,7 +107,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
             <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
               <div className="text-xs font-semibold uppercase tracking-wide">Deal Score</div>
               <div className="mt-1 text-5xl font-black">{dealScore || '—'}</div>
-              <div className="mt-1 text-sm">{dealScore >= 80 ? 'Opportunity' : 'Market listing'}</div>
+              <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : 'Market listing'}</div>
             </div>
           </div>
         </section>
@@ -127,6 +133,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               <div className="mt-5 grid gap-4 md:grid-cols-3">
                 <Metric label="Risk" value={String(score?.risk_level || 'medium')} />
                 <Metric label="Confidence" value={String(score?.data_confidence || 'low')} />
+                <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
                 <Metric label="Best strategy" value={String(score?.strategy_fit || 'Needs review')} />
               </div>
               <div className="mt-6 grid gap-5 md:grid-cols-3">
@@ -183,6 +190,32 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               <Metric label="Cap rate" value={percent(score?.estimated_cap_rate)} />
               <Metric label="Break-even rent" value={money(score?.break_even_rent)} />
             </div>
+
+            {buyersEnabled ? (
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-xl font-bold">Buyer matches</h2>
+                  <Link href="/buyers" className="text-sm font-semibold text-slate-300 hover:text-white">Open buyers</Link>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {matches.map((match) => {
+                    const buyer = match.buyers as Row | null
+                    return (
+                      <div key={match.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-white">{buyer?.name || 'Buyer'}</div>
+                            <div className="mt-1 text-xs text-slate-500">{buyer?.company_name || buyer?.email || buyer?.phone || 'Contact pending'}</div>
+                          </div>
+                          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">{Math.round(Number(match.match_score || 0))}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {!matches.length ? <p className="text-sm leading-6 text-slate-500">No buyer matches yet. Run buyer matching from Buyers after adding buyer criteria.</p> : null}
+                </div>
+              </div>
+            ) : null}
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Broker / contact</h2>

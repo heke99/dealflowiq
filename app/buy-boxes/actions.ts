@@ -158,6 +158,11 @@ export async function updateBuyBoxAction(formData: FormData) {
   requireBuyBoxAccess(workspace)
   const supabase = await createSupabaseServerClient()
 
+  const sourceUrls = urlList(formData, 'source_urls')
+  const schedule = scheduleFrequencyValue(formData)
+  const minDealScore = integerValue(formData, 'min_deal_score') || 80
+  const minRentConfidence = integerValue(formData, 'min_rent_confidence') || 65
+
   const { error } = await supabase.from('market_buy_boxes').update({
     name: text(formData, 'name') || 'Untitled Buy Box',
     description: text(formData, 'description'),
@@ -171,19 +176,53 @@ export async function updateBuyBoxAction(formData: FormData) {
     max_price: numberValue(formData, 'max_price'),
     min_units: integerValue(formData, 'min_units'),
     max_units: integerValue(formData, 'max_units'),
-    min_deal_score: integerValue(formData, 'min_deal_score') || 80,
-    min_rent_confidence: integerValue(formData, 'min_rent_confidence') || 65,
+    min_deal_score: minDealScore,
+    min_rent_confidence: minRentConfidence,
     min_cashflow: numberValue(formData, 'min_cashflow'),
     min_dscr: numberValue(formData, 'min_dscr'),
     min_cap_rate: numberValue(formData, 'min_cap_rate'),
     min_hud_rent_gap: numberValue(formData, 'min_hud_rent_gap'),
     min_market_rent_gap: numberValue(formData, 'min_market_rent_gap'),
-    source_urls: urlList(formData, 'source_urls'),
-    schedule_frequency: scheduleFrequencyValue(formData),
+    source_urls: sourceUrls,
+    schedule_frequency: schedule,
   }).eq('id', buyBoxId).eq('organization_id', workspace.organization.id)
   if (error) redirect(`/buy-boxes/${buyBoxId}?error=${encodeURIComponent(error.message)}`)
 
+  const { data: linkedSources } = await supabase
+    .from('market_sources')
+    .select('id,settings')
+    .eq('buy_box_id', buyBoxId)
+    .eq('organization_id', workspace.organization.id)
+
+  for (const source of linkedSources || []) {
+    await supabase.from('market_sources').update({
+      auto_import_enabled: schedule !== 'manual',
+      schedule_frequency: schedule === 'manual' ? 'daily' : schedule,
+      opportunity_score_threshold: minDealScore,
+      next_run_at: schedule === 'manual' ? null : new Date().toISOString(),
+      settings: {
+        ...((source as any).settings || {}),
+        buy_box_id: buyBoxId,
+        source_urls: sourceUrls,
+        opportunity_score_threshold: minDealScore,
+        min_rent_confidence: minRentConfidence,
+      },
+    }).eq('id', (source as any).id)
+
+    if (sourceUrls.length) {
+      await supabase.from('market_source_queue_items').upsert(sourceUrls.map((inputUrl) => ({
+        organization_id: workspace.organization!.id,
+        source_id: (source as any).id,
+        buy_box_id: buyBoxId,
+        input_url: inputUrl,
+        status: 'queued',
+        priority: 60,
+      })), { onConflict: 'source_id,input_url' })
+    }
+  }
+
   revalidatePath('/buy-boxes')
+  revalidatePath('/market')
   redirect(`/buy-boxes/${buyBoxId}?saved=updated`)
 }
 
@@ -211,7 +250,7 @@ export async function runBuyBoxNowAction(formData: FormData) {
     created += result.created
     updated += result.updated
     failed += result.failed
-    opportunities += result.topScore >= Number(buyBox.min_deal_score || 80) ? 1 : 0
+    opportunities += Number(result.opportunities || 0)
   }
 
   await supabase.from('market_buy_boxes').update({

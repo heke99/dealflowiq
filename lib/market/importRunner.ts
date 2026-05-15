@@ -50,6 +50,7 @@ async function seedSourceQueueFromSettings(supabase: SupabaseAny, source: Source
     input_url: inputUrl,
     status: 'queued',
     priority: 50,
+    buy_box_id: source.buy_box_id || null,
   }))
   await supabase.from('market_source_queue_items').upsert(rows, { onConflict: 'source_id,input_url' })
 }
@@ -136,6 +137,9 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
     risk_score: score.riskScore,
     risk_level: score.riskLevel,
     data_confidence: score.dataConfidence,
+    data_confidence_score: score.dataConfidenceScore,
+    rent_confidence_score: score.rentConfidenceScore,
+    source_confidence_score: score.sourceConfidenceScore,
     strategy_fit: score.strategyFit,
     estimated_noi: score.estimatedNoi,
     estimated_cashflow: score.estimatedCashflow,
@@ -223,6 +227,194 @@ export async function upsertMarketListingFromNormalized(params: {
   return { listing: data as any, created: true, score }
 }
 
+
+function textList(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item).trim().toLowerCase()).filter(Boolean) : []
+}
+
+function moneyNumber(value: unknown) {
+  const parsed = Number(value || 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function capRateNumber(value: unknown) {
+  const parsed = Number(value || 0)
+  if (!Number.isFinite(parsed)) return 0
+  return parsed > 1 ? parsed / 100 : parsed
+}
+
+function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string, any>, score: Awaited<ReturnType<typeof insertMarketListingScore>>, threshold: number) {
+  if (!buyBox) {
+    return {
+      matchScore: score.dealScore,
+      matchedStatus: score.dealScore >= threshold && score.rentConfidenceScore >= 65 ? 'opportunity' : 'matched',
+      reasons: score.reasons,
+      risks: score.risks,
+      snapshot: { threshold, source: 'source_without_buy_box' },
+    }
+  }
+
+  let points = 20
+  const reasons: string[] = []
+  const risks: string[] = []
+  const price = moneyNumber(listing.list_price || listing.asking_price)
+  const units = Math.max(1, Math.round(moneyNumber(listing.units || 1)))
+  const sqft = moneyNumber(listing.sqft)
+  const propertyTypes = textList(buyBox.property_types)
+  const listingType = String(listing.property_type || '').toLowerCase()
+  const city = String(listing.city || '').toLowerCase()
+  const state = String(listing.state || '').toLowerCase()
+  const zip = String(listing.zip_code || '').toLowerCase()
+  const minRentConfidence = Number(buyBox.min_rent_confidence || 65)
+
+  if (buyBox.city || buyBox.state || buyBox.zip_code) {
+    const cityOk = !buyBox.city || city === String(buyBox.city).toLowerCase()
+    const stateOk = !buyBox.state || state === String(buyBox.state).toLowerCase()
+    const zipOk = !buyBox.zip_code || zip === String(buyBox.zip_code).toLowerCase()
+    if (cityOk && stateOk && zipOk) {
+      points += 18
+      reasons.push('Location matches Buy Box.')
+    } else {
+      points -= 22
+      risks.push('Location is outside Buy Box criteria.')
+    }
+  } else {
+    points += 6
+  }
+
+  if (propertyTypes.length) {
+    if (propertyTypes.some((type) => listingType.includes(type))) {
+      points += 12
+      reasons.push('Property type matches Buy Box.')
+    } else {
+      points -= 16
+      risks.push('Property type does not match Buy Box.')
+    }
+  } else {
+    points += 5
+  }
+
+  if (buyBox.min_price && price && price < Number(buyBox.min_price)) {
+    points -= 8
+    risks.push('Price is below Buy Box minimum.')
+  }
+  if (buyBox.max_price && price && price > Number(buyBox.max_price)) {
+    points -= 24
+    risks.push('Price is above Buy Box maximum.')
+  }
+  if (price && (!buyBox.min_price || price >= Number(buyBox.min_price)) && (!buyBox.max_price || price <= Number(buyBox.max_price))) {
+    points += 12
+    reasons.push('Price is inside Buy Box range.')
+  }
+
+  if (buyBox.min_units && units < Number(buyBox.min_units)) {
+    points -= 10
+    risks.push('Unit count is below Buy Box minimum.')
+  } else if (buyBox.min_units) points += 5
+  if (buyBox.max_units && units > Number(buyBox.max_units)) {
+    points -= 10
+    risks.push('Unit count is above Buy Box maximum.')
+  } else if (buyBox.max_units) points += 5
+  if (buyBox.min_sqft && sqft && sqft < Number(buyBox.min_sqft)) {
+    points -= 8
+    risks.push('Square footage is below Buy Box minimum.')
+  }
+
+  if (score.dealScore >= threshold) {
+    points += 15
+    reasons.push(`Deal score passes Buy Box threshold (${threshold}+).`)
+  } else {
+    points -= 15
+    risks.push(`Deal score is below Buy Box threshold (${threshold}+).`)
+  }
+
+  if (score.rentConfidenceScore >= minRentConfidence) {
+    points += 12
+    reasons.push(`Rent confidence passes threshold (${minRentConfidence}+).`)
+  } else {
+    points -= 18
+    risks.push(`Rent confidence is below threshold (${minRentConfidence}+).`)
+  }
+
+  if (buyBox.min_cashflow) {
+    if (moneyNumber(score.estimatedMonthlyCashflow) >= Number(buyBox.min_cashflow)) {
+      points += 10
+      reasons.push('Cashflow meets Buy Box target.')
+    } else {
+      points -= 10
+      risks.push('Cashflow is below Buy Box target.')
+    }
+  }
+  if (buyBox.min_dscr) {
+    if (Number(score.estimatedDscr || 0) >= Number(buyBox.min_dscr)) {
+      points += 8
+      reasons.push('DSCR meets Buy Box target.')
+    } else {
+      points -= 8
+      risks.push('DSCR is below Buy Box target.')
+    }
+  }
+  if (buyBox.min_cap_rate) {
+    if (capRateNumber(score.estimatedCapRate) >= capRateNumber(buyBox.min_cap_rate)) {
+      points += 8
+      reasons.push('Cap rate meets Buy Box target.')
+    } else {
+      points -= 8
+      risks.push('Cap rate is below Buy Box target.')
+    }
+  }
+  if (buyBox.min_hud_rent_gap) {
+    if (moneyNumber(score.hudRentGap) >= Number(buyBox.min_hud_rent_gap)) {
+      points += 8
+      reasons.push('HUD rent gap meets Buy Box target.')
+    } else {
+      points -= 8
+      risks.push('HUD rent gap is below Buy Box target.')
+    }
+  }
+  if (buyBox.min_market_rent_gap) {
+    if (moneyNumber(score.rentGap) >= Number(buyBox.min_market_rent_gap)) {
+      points += 8
+      reasons.push('Market rent gap meets Buy Box target.')
+    } else {
+      points -= 8
+      risks.push('Market rent gap is below Buy Box target.')
+    }
+  }
+
+  const matchScore = Math.max(0, Math.min(100, Math.round(points)))
+  const matchedStatus = score.dealScore >= threshold && score.rentConfidenceScore >= minRentConfidence && matchScore >= 70
+    ? 'opportunity'
+    : matchScore >= 55
+      ? 'matched'
+      : 'needs_review'
+
+  return {
+    matchScore,
+    matchedStatus,
+    reasons: reasons.length ? reasons : score.reasons,
+    risks: risks.length ? risks : score.risks,
+    snapshot: {
+      buyBoxId: buyBox.id,
+      threshold,
+      minRentConfidence,
+      criteria: {
+        city: buyBox.city,
+        state: buyBox.state,
+        zip_code: buyBox.zip_code,
+        property_types: buyBox.property_types,
+        min_price: buyBox.min_price,
+        max_price: buyBox.max_price,
+        min_units: buyBox.min_units,
+        max_units: buyBox.max_units,
+        min_cashflow: buyBox.min_cashflow,
+        min_dscr: buyBox.min_dscr,
+        min_cap_rate: buyBox.min_cap_rate,
+      },
+    },
+  }
+}
+
 export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?: number }) {
   const supabase = createSupabaseAdminClient()
   const settings = (source.settings && typeof source.settings === 'object' ? source.settings : {}) as Record<string, any>
@@ -234,6 +426,9 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
   const queueItemByUrl = new Map<string, any>()
   for (const item of queuedItems) queueItemByUrl.set(String(item.input_url), item)
   const threshold = Number(source.opportunity_score_threshold ?? settings.opportunity_score_threshold ?? 80)
+  const { data: buyBox } = source.buy_box_id
+    ? await supabase.from('market_buy_boxes').select('*').eq('id', source.buy_box_id).maybeSingle()
+    : { data: null }
 
   if (!urls.length) {
     const message = 'No source URLs configured. Add source_url or source_urls in this source settings.'
@@ -251,6 +446,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
   let updated = 0
   let failed = 0
   let topScore = 0
+  let opportunities = 0
   const listingIds: string[] = []
   const errors: string[] = []
 
@@ -298,6 +494,12 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       topScore = Math.max(topScore, result.score.dealScore)
       listingIds.push(result.listing.id)
 
+      const criteriaMatch = evaluateBuyBoxCriteria((buyBox as SourceRow | null) || null, result.listing, result.score, threshold)
+      if (criteriaMatch.matchedStatus === 'opportunity') {
+        opportunities += 1
+        await supabase.from('market_listings').update({ status: 'opportunity' }).eq('id', result.listing.id)
+      }
+
       if (source.buy_box_id) {
         await supabase.from('market_buy_box_matches').upsert({
           organization_id: source.organization_id,
@@ -305,9 +507,13 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
           listing_id: result.listing.id,
           source_id: source.id,
           deal_score: result.score.dealScore,
-          matched_status: result.score.dealScore >= threshold ? 'opportunity' : 'matched',
-          reasons: result.score.reasons,
-          risks: result.score.risks,
+          rent_confidence: result.score.rentConfidenceScore,
+          rent_confidence_score: result.score.rentConfidenceScore,
+          match_score: criteriaMatch.matchScore,
+          matched_status: criteriaMatch.matchedStatus,
+          reasons: criteriaMatch.reasons,
+          risks: criteriaMatch.risks,
+          criteria_snapshot: criteriaMatch.snapshot,
           matched_at: new Date().toISOString(),
         }, { onConflict: 'buy_box_id,listing_id' })
       }
@@ -322,7 +528,9 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
         normalized_listing_ids: [result.listing.id],
         source_summary: {
           score: result.score.dealScore,
-          opportunity: result.score.dealScore >= threshold,
+          opportunity: criteriaMatch.matchedStatus === 'opportunity',
+          matchScore: criteriaMatch.matchScore,
+          rentConfidenceScore: result.score.rentConfidenceScore,
           sourceType: detectedSource,
         },
       }).eq('id', job.id)
@@ -361,7 +569,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     await supabase.from('market_buy_boxes').update({
       last_run_at: new Date().toISOString(),
       last_results_count: created + updated,
-      last_opportunities_count: topScore >= threshold ? 1 : 0,
+      last_opportunities_count: opportunities,
       last_error: errors[0] || null,
       next_run_at: nextRunFor(source.schedule_frequency),
     }).eq('id', source.buy_box_id)
@@ -376,11 +584,11 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     next_run_at: nextRunFor(source.schedule_frequency),
     settings: {
       ...settings,
-      lastRunSummary: { created, updated, failed, topScore, listingIds, errors: errors.slice(0, 5), ranAt: new Date().toISOString() },
+      lastRunSummary: { created, updated, failed, opportunities, topScore, listingIds, errors: errors.slice(0, 5), ranAt: new Date().toISOString() },
     },
   }).eq('id', source.id)
 
-  return { sourceId: source.id, found: urls.length, created, updated, failed, topScore, listingIds, errors }
+  return { sourceId: source.id, found: urls.length, created, updated, failed, opportunities, topScore, listingIds, errors }
 }
 
 export async function runScheduledMarketImports(options?: { limitSources?: number; maxUrlsPerSource?: number }) {

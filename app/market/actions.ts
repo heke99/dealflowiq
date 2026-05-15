@@ -534,7 +534,7 @@ export async function rescoreMarketListingAction(formData: FormData) {
 export async function saveOpportunityAction(formData: FormData) {
   const listingId = String(formData.get('listing_id') || '').trim()
   const status = String(formData.get('status') || 'saved')
-  const safeStatus = ['saved', 'watching', 'ignored', 'contacted', 'under_contract', 'passed'].includes(status) ? status : 'saved'
+  const safeStatus = ['saved', 'watching', 'interested', 'contacted', 'analyzing', 'converted_to_deal', 'ignored', 'passed', 'under_contract'].includes(status) ? status : 'saved'
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
@@ -763,4 +763,38 @@ export async function publishDealToMarketAction(formData: FormData) {
   revalidatePath('/market')
   revalidatePath(`/deals/${dealId}`)
   redirect(`/market?tab=${visibility === 'public' ? 'public' : visibility === 'community' ? 'community' : 'all'}&saved=published`)
+}
+
+export async function archiveMarketListingAction(formData: FormData) {
+  const listingId = String(formData.get('listing_id') || '').trim()
+  const returnTo = String(formData.get('return_to') || '/market').trim() || '/market'
+  if (!listingId) redirect('/market?error=Missing listing id')
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  const supabase = await createSupabaseServerClient()
+
+  const { data: listing, error: listingError } = await supabase
+    .from('market_listings')
+    .select('id,organization_id,created_by,visibility')
+    .eq('id', listingId)
+    .maybeSingle()
+  if (listingError || !listing) redirect(`${returnTo}?error=${encodeURIComponent(listingError?.message || 'Listing not found')}`)
+
+  const row = listing as any
+  const isOwner = row.created_by === workspace.user.id
+  const isOrgAdmin = Boolean(workspace.access.isPlatformAdmin)
+  if (!isOwner && !isOrgAdmin) {
+    redirect(`${returnTo}?error=${encodeURIComponent('Only the listing owner or an admin can remove this listing from Market.')}`)
+  }
+
+  const { error } = await supabase
+    .from('market_listings')
+    .update({ status: 'archived', archived_at: new Date().toISOString(), archived_by: workspace.user.id })
+    .eq('id', listingId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent(error.message)}`)
+
+  revalidatePath('/market')
+  revalidatePath('/opportunities')
+  revalidatePath('/saved-deals')
+  redirect(`${returnTo}?saved=listing_archived`)
 }

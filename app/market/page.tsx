@@ -18,11 +18,10 @@ type Search = Record<string, string | string[] | undefined>
 type Row = Record<string, any>
 
 const tabs = [
-  ['all', 'Market'],
-  ['opportunities', 'Opportunities'],
+  ['all', 'All Listings'],
   ['public', 'Public'],
   ['community', 'Community'],
-  ['saved', 'Saved'],
+  ['needs_review', 'Needs Review'],
   ['sources', 'Sources'],
 ]
 
@@ -204,6 +203,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   if (zip) listingsQuery = listingsQuery.eq('zip_code', zip)
   if (activeTab === 'public') listingsQuery = listingsQuery.eq('visibility', 'public')
   if (activeTab === 'community') listingsQuery = listingsQuery.eq('visibility', 'community')
+  if (activeTab === 'needs_review') listingsQuery = listingsQuery.eq('status', 'needs_review')
 
   const [listingsResult, scoresResult, watchResult, sourcesResult, jobsResult, queueResult] = await Promise.all([
     listingsQuery,
@@ -250,7 +250,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-5xl">Market & Opportunities</h1>
               <p className="mt-4 max-w-3xl text-slate-300">One clean place for imported listings, public/community deals and the highest-ranked opportunities. Deals stay in My Deals; Market is where the system finds and ranks new inventory.</p>
               <div className="mt-6 flex flex-wrap gap-3">
-                <Link href="/market?tab=opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">View Opportunities</Link>
+                <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">View Opportunities</Link>
                 <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import Sources</Link>
                 <Link href="/deals/new" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Add My Deal</Link>
               </div>

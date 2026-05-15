@@ -117,8 +117,10 @@ export default async function DashboardPage() {
               <p className="mt-4 max-w-3xl text-slate-300">Track your own deals, open Market, review 80+ Opportunities and keep source imports running from one simple dashboard.</p>
               {workspace.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Supabase setup issue: {workspace.error}</div> : null}
               <div className="mt-6 flex flex-wrap gap-3">
-                <Link href="/market?tab=opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200">Open Opportunities</Link>
+                <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200">Open Opportunities</Link>
                 <Link href="/market" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Open Market</Link>
+                <Link href="/buy-boxes" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Buy Boxes</Link>
+                <Link href="/saved-deals" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Saved Deals</Link>
                 <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">My Deals</Link>
               </div>
             </div>
@@ -138,7 +140,7 @@ export default async function DashboardPage() {
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="My Deals" value={String(dealsResult.count || 0)} hint="Deals you created or converted from Market." href="/deals" />
           <StatCard label="Market Listings" value={String(marketResult.count || 0)} hint="Imported, public and team-visible listings." href="/market" />
-          <StatCard label="Opportunities 80+" value={String(opportunities.length || 0)} hint="Highest-ranked deals ready for review." href="/market?tab=opportunities" />
+          <StatCard label="Opportunities 80+" value={String(opportunities.length || 0)} hint="Highest-ranked deals ready for review." href="/opportunities" />
           <StatCard label="Auto Sources" value={String(autoSources || 0)} hint="Sources scheduled through the worker." href="/market?tab=sources" />
         </section>
 
@@ -149,7 +151,7 @@ export default async function DashboardPage() {
                 <h2 className="text-xl font-bold">Top Opportunities</h2>
                 <p className="mt-2 text-sm text-slate-400">Only listings scoring 80+ should be treated as Opportunities.</p>
               </div>
-              <Link href="/market?tab=opportunities" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">View all</Link>
+              <Link href="/opportunities" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">View all</Link>
             </div>
             <div className="mt-5 space-y-3">
               {opportunities.slice(0, 4).map((score, index) => <OpportunityMiniCard key={score.id} score={score} listing={score.market_listings as Row} index={index} />)}

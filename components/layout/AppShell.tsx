@@ -51,8 +51,11 @@ export function AppShell({
   const config = getAccountTypeConfig(accountType)
   const rawNav: NavItem[] = [
     { href: '/dashboard', label: 'Dashboard', visible: true, core: true },
-    { href: '/deals', label: 'My Deals', visible: true, feature: 'deals', core: true },
     { href: '/market', label: 'Market', visible: true, feature: 'market_opportunities', core: true },
+    { href: '/opportunities', label: 'Opportunities', visible: true, feature: 'market_opportunities', core: true },
+    { href: '/buy-boxes', label: 'Buy Boxes', visible: true, feature: 'scheduled_market_imports' },
+    { href: '/saved-deals', label: 'Saved Deals', visible: true, feature: 'market_opportunities', core: true },
+    { href: '/deals', label: 'My Deals', visible: true, feature: 'deals', core: true },
     { href: '/market-search', label: 'Source Imports', visible: true, feature: 'market_source_imports' },
     { href: '/rent-analysis', label: 'Rent Analysis', visible: true, feature: 'rent_analysis', core: true },
     { href: '/calculators', label: 'Calculators', visible: true, feature: 'calculators', core: true },

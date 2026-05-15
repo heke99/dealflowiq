@@ -267,6 +267,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
       organization_id: source.organization_id,
       source_id: source.id,
+      buy_box_id: source.buy_box_id || null,
       created_by: source.created_by || null,
       job_type: source.access_mode === 'api' ? 'api_sync' : source.access_mode === 'feed' ? 'source_run' : 'authorized_scrape',
       status: 'running',
@@ -296,6 +297,20 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       else updated += 1
       topScore = Math.max(topScore, result.score.dealScore)
       listingIds.push(result.listing.id)
+
+      if (source.buy_box_id) {
+        await supabase.from('market_buy_box_matches').upsert({
+          organization_id: source.organization_id,
+          buy_box_id: source.buy_box_id,
+          listing_id: result.listing.id,
+          source_id: source.id,
+          deal_score: result.score.dealScore,
+          matched_status: result.score.dealScore >= threshold ? 'opportunity' : 'matched',
+          reasons: result.score.reasons,
+          risks: result.score.risks,
+          matched_at: new Date().toISOString(),
+        }, { onConflict: 'buy_box_id,listing_id' })
+      }
 
       await supabase.from('market_import_jobs').update({
         status: 'completed',
@@ -342,6 +357,16 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
   }
 
   const runStatus = failed && created + updated ? 'active' : failed ? 'failed' : 'active'
+  if (source.buy_box_id) {
+    await supabase.from('market_buy_boxes').update({
+      last_run_at: new Date().toISOString(),
+      last_results_count: created + updated,
+      last_opportunities_count: topScore >= threshold ? 1 : 0,
+      last_error: errors[0] || null,
+      next_run_at: nextRunFor(source.schedule_frequency),
+    }).eq('id', source.buy_box_id)
+  }
+
   await supabase.from('market_sources').update({
     status: runStatus,
     last_run_at: new Date().toISOString(),

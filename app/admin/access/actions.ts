@@ -48,7 +48,7 @@ export async function createAdminAccessInviteAction(formData: FormData) {
   const accountType = getAccountType(formData.get('account_type'))
   const role = getRole(formData.get('role'))
   const planId = String(formData.get('plan_id') || '').trim() || null
-  const trialDays = toInt(formData.get('trial_days'), 7)
+  const trialDays = toInt(formData.get('trial_days'), 0)
   const expiresInDays = toInt(formData.get('expires_in_days'), 30)
   const notes = String(formData.get('notes') || '').trim()
   const featuresOverride = parseFeatures(formData)

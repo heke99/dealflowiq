@@ -27,7 +27,7 @@ export default async function HomePage() {
         <Link href="/" className="text-2xl font-bold tracking-tight">DealFlowIQ</Link>
         <nav className="flex items-center gap-3 text-sm">
           <Link href="/login" className="rounded-xl border border-white/10 px-4 py-2 font-semibold text-slate-100 hover:bg-white/10">Log in</Link>
-          <Link href="/signup" className="rounded-xl bg-white px-4 py-2 font-semibold text-slate-950 hover:bg-slate-200">Start free</Link>
+          <Link href="/signup" className="rounded-xl bg-white px-4 py-2 font-semibold text-slate-950 hover:bg-slate-200">Get started</Link>
         </nav>
       </header>
 

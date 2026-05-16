@@ -67,7 +67,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
           <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Platform Admin</div>
           <h1 className="mt-2 text-3xl font-bold">Access Invites & Manual Grants</h1>
           <p className="mt-3 max-w-3xl text-slate-300">
-            Invite a user by email and predefine account type, role, plan, trial length, feature overrides and limits. When that email signs up or logs in, the access grant is applied to their workspace automatically.
+            Invite a user by email and predefine account type, role, plan, role, feature overrides and limits. When that email signs up or logs in, the access grant is applied to their workspace automatically.
           </p>
           {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{params.error}</div> : null}
           {params.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Saved.</div> : null}
@@ -87,9 +87,9 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
                 <label className="block text-sm"><span className="text-slate-300">Role</span><select name="role" defaultValue="owner" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3">{roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-3">
+              <input type="hidden" name="trial_days" value="0" />
+              <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block text-sm"><span className="text-slate-300">Plan</span><select name="plan_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Default by account type</option>{(plans || []).map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select></label>
-                <label className="block text-sm"><span className="text-slate-300">Trial days</span><input name="trial_days" type="number" min="0" defaultValue="7" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
                 <label className="block text-sm"><span className="text-slate-300">Invite expires in days</span><input name="expires_in_days" type="number" min="0" defaultValue="30" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
               </div>
 
@@ -126,7 +126,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <div className="font-semibold">{invite.email}</div>
-                        <div className="mt-1 text-xs text-slate-500">{invite.account_type} · {invite.role} · {plan?.name || 'default plan'} · {invite.trial_days} trial days</div>
+                        <div className="mt-1 text-xs text-slate-500">{invite.account_type} · {invite.role} · {plan?.name || 'default plan'}</div>
                         <div className="mt-2 text-xs text-slate-500">Token: {invite.invite_token}</div>
                       </div>
                       <div className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">{invite.status}</div>

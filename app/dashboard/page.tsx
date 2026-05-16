@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ArrowRight, BadgeCheck, Bell, DatabaseZap, Heart, LineChart, Search, Target, Users } from 'lucide-react'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -6,6 +7,8 @@ import { getAccountTypeConfig } from '@/lib/product/accountTypes'
 import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 
 type Row = Record<string, any>
+
+type Tone = 'default' | 'green' | 'amber' | 'red' | 'blue'
 
 function money(value: number | string | null | undefined, compact = false) {
   const parsed = Number(value || 0)
@@ -18,20 +21,27 @@ function numberText(value: number | null | undefined) {
 }
 
 function dateText(value?: string | null) {
-  if (!value) return 'No date set'
+  if (!value) return '—'
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }
 
-function StatCard({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: 'default' | 'green' | 'amber' | 'red' }) {
-  const tones = {
-    default: 'border-white/10 bg-white/[0.03]',
+function accessStatus(value?: string | null) {
+  if (!value || value === 'trialing') return 'Active'
+  if (value === 'manually_granted') return 'Manual access'
+  return String(value).replaceAll('_', ' ')
+}
+
+function StatCard({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: Tone }) {
+  const tones: Record<Tone, string> = {
+    default: 'border-white/10 bg-white/[0.035]',
     green: 'border-emerald-400/25 bg-emerald-400/10',
     amber: 'border-amber-400/25 bg-amber-400/10',
     red: 'border-red-400/25 bg-red-400/10',
+    blue: 'border-blue-400/25 bg-blue-400/10',
   }
   const content = (
-    <div className={`rounded-3xl border p-5 transition hover:border-white/25 hover:bg-white/[0.06] ${tones[tone]}`}>
-      <div className="text-sm text-slate-400">{label}</div>
+    <div className={`h-full rounded-3xl border p-5 transition hover:border-white/25 hover:bg-white/[0.07] ${tones[tone]}`}>
+      <div className="text-sm font-bold text-slate-400">{label}</div>
       <div className="mt-3 text-3xl font-black tracking-tight">{value}</div>
       <div className="mt-3 text-xs leading-5 text-slate-500">{hint}</div>
     </div>
@@ -39,12 +49,20 @@ function StatCard({ label, value, hint, href, tone = 'default' }: { label: strin
   return href ? <Link href={href}>{content}</Link> : content
 }
 
-function ActionCard({ title, text, href, cta }: { title: string; text: string; href: string; cta: string }) {
+function ActionCard({ title, text, href, cta, icon: Icon }: { title: string; text: string; href: string; cta: string; icon: any }) {
   return (
-    <Link href={href} className="group rounded-3xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-white/25 hover:bg-white/[0.06]">
-      <div className="text-lg font-black text-white">{title}</div>
-      <p className="mt-2 min-h-12 text-sm leading-6 text-slate-400">{text}</p>
-      <div className="mt-5 inline-flex rounded-xl bg-white px-4 py-2 text-sm font-black text-slate-950 group-hover:bg-slate-200">{cta}</div>
+    <Link href={href} className="group rounded-3xl border border-white/10 bg-white/[0.035] p-5 transition hover:border-white/25 hover:bg-white/[0.07]">
+      <div className="flex items-start gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/60 text-emerald-100"><Icon className="h-5 w-5" /></div>
+        <div>
+          <div className="text-lg font-black text-white">{title}</div>
+          <p className="mt-2 text-sm leading-6 text-slate-400">{text}</p>
+        </div>
+      </div>
+      <div className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2 text-sm font-black text-slate-950 group-hover:bg-slate-200">
+        {cta}
+        <ArrowRight className="h-4 w-4" />
+      </div>
     </Link>
   )
 }
@@ -105,25 +123,29 @@ export default async function DashboardPage() {
   const failedJobs = importJobs.filter((job) => job.status === 'failed').length
   const runningJobs = importJobs.filter((job) => ['queued', 'running', 'processing', 'importing'].includes(String(job.status))).length
   const activeSources = ((sourcesResult.data || []) as Row[]).filter((source) => source.status === 'active' || source.auto_import_enabled).length
+  const notifications = Number(notificationsResult.count || 0)
 
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
       <div className="space-y-8">
-        <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-blue-500/10 p-6 sm:p-8">
+        <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-blue-500/10 p-6 shadow-2xl shadow-black/20 sm:p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
             <div>
-              <div className="text-sm font-black uppercase tracking-wide text-emerald-300">DealFlowIQ command center</div>
-              <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Good to see you. Your {config.shortTitle.toLowerCase()} pipeline is ready.</h1>
-              <p className="mt-4 max-w-3xl text-slate-300">Import authorized URLs, review Market, push qualified listings into Opportunities and keep your underwriting assumptions synced across the whole workspace.</p>
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-black uppercase tracking-wide text-emerald-100">
+                <BadgeCheck className="h-4 w-4" />
+                DealFlowIQ command center
+              </div>
+              <h1 className="mt-5 max-w-4xl text-4xl font-black tracking-tight sm:text-5xl">Your {config.shortTitle.toLowerCase()} pipeline is ready.</h1>
+              <p className="mt-4 max-w-3xl text-slate-300">Start from the highest-impact workflow: import listings, review opportunities, tune buy boxes, or open your saved deals. Everything important is visible from this dashboard.</p>
               {workspace.error ? <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Supabase setup issue: {workspace.error}</div> : null}
               <div className="mt-7 flex flex-wrap gap-3">
                 <Link href="/market?tab=sources" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">Import listings</Link>
                 <Link href="/opportunities" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Review opportunities</Link>
-                <Link href="/buy-boxes" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Buy boxes</Link>
+                <Link href="/saved-deals" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Saved deals</Link>
               </div>
             </div>
             <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div>
                   <div className="text-sm text-slate-400">Opportunity rule</div>
                   <div className="mt-1 text-xl font-black">{OPPORTUNITY_SCORE_THRESHOLD}+ score / {OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD}+ rent confidence</div>
@@ -134,9 +156,9 @@ export default async function DashboardPage() {
                 </div>
               </div>
               <div className="mt-5 grid gap-3 text-sm text-slate-300">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Plan: <span className="font-bold text-white">{workspace.access.plan?.name || 'Trial'}</span></div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Trial ends: <span className="font-bold text-white">{dateText(workspace.access.trialEndsAt)}</span></div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Unread notifications: <span className="font-bold text-white">{numberText(notificationsResult.count || 0)}</span></div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Plan: <span className="font-bold text-white">{workspace.access.plan?.name || 'Active plan'}</span></div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Access: <span className="font-bold capitalize text-white">{accessStatus(workspace.access.status)}</span></div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Unread notifications: <span className="font-bold text-white">{numberText(notifications)}</span></div>
               </div>
             </div>
           </div>
@@ -148,19 +170,20 @@ export default async function DashboardPage() {
           <StatCard label="Strong opportunities" value={numberText(strongResult.count || 0)} hint="85+ score and 65+ rent confidence." href="/opportunities" tone="green" />
           <StatCard label="Needs review" value={numberText(reviewResult.count || 0)} hint="Missing data, low confidence or manual review." href="/market?tab=needs_review" tone="amber" />
           <StatCard label="My deals" value={numberText(dealsResult.count || 0)} hint="Saved/manual underwriting deals." href="/deals" />
-          <StatCard label="Saved deals" value={numberText(watchResult.count || 0)} hint="Your personal watchlist." href="/saved-deals" />
+          <StatCard label="Saved deals" value={numberText(watchResult.count || 0)} hint="Your personal watchlist." href="/saved-deals" tone="blue" />
           <StatCard label="Buyer matches" value={numberText(buyerMatchResult.count || 0)} hint="Potential buyer/deal matches." href="/buyers" />
           <StatCard label="Import health" value={failedJobs ? `${failedJobs} failed` : runningJobs ? `${runningJobs} running` : 'Healthy'} hint={`${activeSources} active/importable source configs.`} href="/market?tab=sources" tone={failedJobs ? 'red' : runningJobs ? 'amber' : 'green'} />
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-3">
-          <ActionCard title="Run a source import" text="Paste a direct listing or search URL, preview the first allowed listings and import them into Market." href="/market?tab=sources" cta="Open imports" />
-          <ActionCard title="Review qualified opportunities" text="See listings that meet the current Opportunity rule and jump into underwriting detail." href="/opportunities" cta="Open opportunities" />
-          <ActionCard title="Tune your buy boxes" text="Create filters for areas, price ranges and return targets so new matches surface faster." href="/buy-boxes" cta="Manage buy boxes" />
+        <section className="grid gap-5 lg:grid-cols-4">
+          <ActionCard icon={DatabaseZap} title="Run source import" text="Paste a direct listing or search URL and create clean Market records." href="/market?tab=sources" cta="Open imports" />
+          <ActionCard icon={Target} title="Review opportunities" text="Work the listings that already meet your scoring threshold." href="/opportunities" cta="Review now" />
+          <ActionCard icon={LineChart} title="Analyze rent" text="Update rent assumptions, DSCR, cap rate and confidence signals." href="/rent-analysis" cta="Analyze" />
+          <ActionCard icon={Users} title="Manage buyers" text="Keep buyers and deal matches ready for distribution." href="/buyers" cta="Open CRM" />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-6">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-black">Top opportunities</h2>
@@ -177,7 +200,7 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-6">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-black">Recent imports</h2>
@@ -206,6 +229,13 @@ export default async function DashboardPage() {
             </div>
           </div>
         </section>
+
+        {notifications > 0 ? (
+          <Link href="/notifications" className="flex items-center justify-between gap-4 rounded-3xl border border-amber-400/25 bg-amber-400/10 p-5 text-amber-50 hover:bg-amber-400/15">
+            <span className="flex items-center gap-3"><Bell className="h-5 w-5" /> You have {numberText(notifications)} unread notification{notifications === 1 ? '' : 's'}.</span>
+            <ArrowRight className="h-5 w-5" />
+          </Link>
+        ) : null}
       </div>
     </AppShell>
   )

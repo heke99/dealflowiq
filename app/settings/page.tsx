@@ -23,7 +23,7 @@ export default async function SettingsPage() {
           <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Workspace Settings</div>
           <h1 className="mt-2 text-3xl font-bold">Settings</h1>
           <p className="mt-3 max-w-2xl text-slate-300">
-            Organization settings, team members, roles, billing and white-label settings will expand from this foundation.
+            Manage your organization profile, plan access, underwriting defaults and workspace controls from one place.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link href="/settings/billing" className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">

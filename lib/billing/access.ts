@@ -119,7 +119,7 @@ export async function getWorkspaceAccess(params: {
       }
     : null
 
-  const status = subscription?.status || 'trialing'
+  const status = subscription?.status || 'active'
   const trialEndsAt = subscription?.trial_end_at || null
   const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
   const features = isPlatformAdmin

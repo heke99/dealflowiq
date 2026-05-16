@@ -3,26 +3,9 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
-import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
-import { analyzeImportUrlAction } from '@/app/imports/actions'
+import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 
 type Row = Record<string, any>
-
-const featureLabels: Record<string, string> = {
-  deals: 'Deals',
-  market_search: 'Market Search',
-  rent_analysis: 'Rent Analysis',
-  calculators: 'Calculators',
-  section8_hud: 'Section 8 / HUD',
-  market_opportunities: 'Market & Opportunities',
-  market_source_imports: 'Source Imports',
-  scheduled_market_imports: 'Auto Imports',
-  buyers: 'Buyers',
-  buyer_matching: 'Buyer Matching',
-  brrrr: 'BRRRR',
-  five_year_projection: '5-Year Projection',
-  public_community_deals: 'Public / Community Deals',
-}
 
 function money(value: number | string | null | undefined, compact = false) {
   const parsed = Number(value || 0)
@@ -30,40 +13,66 @@ function money(value: number | string | null | undefined, compact = false) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
-function formatTrialDate(value?: string | null) {
-  if (!value) return 'No trial date set'
-  return new Intl.DateTimeFormat('en', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(value))
+function numberText(value: number | null | undefined) {
+  return new Intl.NumberFormat('en-US').format(Number(value || 0))
 }
 
-function StatCard({ label, value, hint, href }: { label: string; value: string; hint: string; href?: string }) {
+function dateText(value?: string | null) {
+  if (!value) return 'No date set'
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+}
+
+function StatCard({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: 'default' | 'green' | 'amber' | 'red' }) {
+  const tones = {
+    default: 'border-white/10 bg-white/[0.03]',
+    green: 'border-emerald-400/25 bg-emerald-400/10',
+    amber: 'border-amber-400/25 bg-amber-400/10',
+    red: 'border-red-400/25 bg-red-400/10',
+  }
   const content = (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-white/20 hover:bg-white/[0.05]">
+    <div className={`rounded-3xl border p-5 transition hover:border-white/25 hover:bg-white/[0.06] ${tones[tone]}`}>
       <div className="text-sm text-slate-400">{label}</div>
-      <div className="mt-3 text-3xl font-bold">{value}</div>
+      <div className="mt-3 text-3xl font-black tracking-tight">{value}</div>
       <div className="mt-3 text-xs leading-5 text-slate-500">{hint}</div>
     </div>
   )
   return href ? <Link href={href}>{content}</Link> : content
 }
 
-function OpportunityMiniCard({ listing, score, index }: { listing: Row; score: Row; index: number }) {
+function ActionCard({ title, text, href, cta }: { title: string; text: string; href: string; cta: string }) {
+  return (
+    <Link href={href} className="group rounded-3xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-white/25 hover:bg-white/[0.06]">
+      <div className="text-lg font-black text-white">{title}</div>
+      <p className="mt-2 min-h-12 text-sm leading-6 text-slate-400">{text}</p>
+      <div className="mt-5 inline-flex rounded-xl bg-white px-4 py-2 text-sm font-black text-slate-950 group-hover:bg-slate-200">{cta}</div>
+    </Link>
+  )
+}
+
+function OpportunityRow({ listing }: { listing: Row }) {
+  const score = Math.round(Number(listing.latest_deal_score || 0))
+  const rentConfidence = Math.round(Number(listing.latest_rent_confidence_score || 0))
+  const strong = score >= STRONG_OPPORTUNITY_SCORE_THRESHOLD && rentConfidence >= STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD
   return (
     <Link href={`/market/${listing.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/50 p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opportunity #{index + 1}</div>
-          <div className="mt-1 line-clamp-1 font-semibold text-slate-100">{listing.title}</div>
+          <div className="flex flex-wrap gap-2">
+            <span className={strong ? 'rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-100' : 'rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-300'}>{strong ? 'Strong Opportunity' : 'Opportunity'}</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-slate-400">Rent {rentConfidence}</span>
+          </div>
+          <div className="mt-2 line-clamp-1 font-bold text-slate-100">{listing.title || listing.address || 'Market listing'}</div>
           <div className="mt-1 text-xs text-slate-500">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</div>
         </div>
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-center text-emerald-100">
           <div className="text-[10px] uppercase tracking-wide">Score</div>
-          <div className="text-lg font-bold">{Math.round(Number(score.deal_score || 0))}</div>
+          <div className="text-lg font-black">{score}</div>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">
-        <div>Price <span className="block font-semibold text-slate-100">{money(listing.list_price || listing.asking_price, true)}</span></div>
-        <div>Cashflow <span className="block font-semibold text-slate-100">{money(score.estimated_monthly_cashflow, true)}</span></div>
-        <div>HUD gap <span className="block font-semibold text-slate-100">{money(score.hud_rent_gap, true)}</span></div>
+        <div>Price <span className="block font-bold text-slate-100">{money(listing.list_price || listing.asking_price, true)}</span></div>
+        <div>Cashflow <span className="block font-bold text-slate-100">{money(listing.latest_estimated_monthly_cashflow, true)}</span></div>
+        <div>DSCR <span className="block font-bold text-slate-100">{listing.latest_estimated_dscr ? Number(listing.latest_estimated_dscr).toFixed(2) : '—'}</span></div>
       </div>
     </Link>
   )
@@ -73,138 +82,127 @@ export default async function DashboardPage() {
   const workspace = await getCurrentWorkspace()
   const accountType = workspace.access.accountType
   const config = getAccountTypeConfig(accountType)
-  const plan = workspace.access.plan
   const supabase = await createSupabaseServerClient()
+  const orgId = workspace.organization?.id
 
-  const [dealsResult, marketResult, scoresResult, jobsResult, sourcesResult, reviewResult, buyerMatchResult, watchResult, importBatchResult] = workspace.organization?.id
+  const [dealsResult, listingsResult, opportunitiesResult, strongResult, reviewResult, importJobsResult, buyerMatchResult, watchResult, notificationsResult, sourcesResult] = orgId
     ? await Promise.all([
-        supabase.from('deals').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id),
-        supabase.from('market_listings').select('id', { count: 'exact', head: true }).or(`organization_id.eq.${workspace.organization.id},visibility.eq.public`),
-        supabase.from('market_listing_scores').select('*, market_listings(*)').order('deal_score', { ascending: false }).limit(8),
-        supabase.from('market_import_jobs').select('status,items_created,items_updated,items_failed,error_message,created_at').eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('market_sources').select('id,auto_import_enabled,status').eq('organization_id', workspace.organization.id),
-        supabase.from('market_listings').select('deal_status').eq('organization_id', workspace.organization.id).in('deal_status', ['needs_review', 'missing_data', 'low_confidence']).limit(500),
-        supabase.from('buyer_deal_matches').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).gte('match_score', 80),
-        supabase.from('market_watchlist').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).eq('user_id', workspace.user.id),
-        supabase.from('market_url_import_batches').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).in('status', ['analyzed', 'queued', 'importing', 'needs_review']),
+        supabase.from('deals').select('id', { count: 'exact', head: true }).eq('organization_id', orgId),
+        supabase.from('market_listings').select('id', { count: 'exact', head: true }).or(`organization_id.eq.${orgId},visibility.eq.public`),
+        supabase.from('market_listings').select('*').or(`organization_id.eq.${orgId},visibility.eq.public`).gte('latest_deal_score', OPPORTUNITY_SCORE_THRESHOLD).gte('latest_rent_confidence_score', OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD).neq('status', 'archived').order('latest_deal_score', { ascending: false }).limit(6),
+        supabase.from('market_listings').select('id', { count: 'exact', head: true }).or(`organization_id.eq.${orgId},visibility.eq.public`).gte('latest_deal_score', STRONG_OPPORTUNITY_SCORE_THRESHOLD).gte('latest_rent_confidence_score', STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD).neq('status', 'archived'),
+        supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('deal_status', ['needs_review', 'missing_data', 'low_confidence']),
+        supabase.from('market_import_jobs').select('status,items_created,items_updated,items_failed,error_message,created_at,source_url').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(5),
+        supabase.from('buyer_deal_matches').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).gte('match_score', 70),
+        supabase.from('market_watchlist').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('user_id', workspace.user.id),
+        supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).or(`user_id.is.null,user_id.eq.${workspace.user.id}`).is('read_at', null).is('archived_at', null),
+        supabase.from('market_sources').select('id,status,auto_import_enabled', { count: 'exact' }).eq('organization_id', orgId),
       ])
-    : [{ count: 0 }, { count: 0 }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { count: 0 }, { count: 0 }, { count: 0 }]
+    : [{ count: 0 }, { count: 0 }, { data: [] }, { count: 0 }, { count: 0 }, { data: [] }, { count: 0 }, { count: 0 }, { count: 0 }, { data: [], count: 0 }]
 
-  const visibleScores = ((scoresResult.data || []) as Row[]).filter((score) => {
-    const listing = score.market_listings as Row | null
-    if (!listing) return false
-    return listing.visibility === 'public' || listing.organization_id === workspace.organization?.id
-  })
-  const opportunities = visibleScores.filter((score) => Number(score.deal_score || 0) >= OPPORTUNITY_SCORE_THRESHOLD && Number(score.rent_confidence_score || 0) >= OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD)
-  const latestFailedJob = ((jobsResult.data || []) as Row[]).find((job) => job.status === 'failed')
-  const autoSources = ((sourcesResult.data || []) as Row[]).filter((source) => source.auto_import_enabled && source.status === 'active').length
-  const reviewRows = (reviewResult.data || []) as Row[]
-  const needsReviewCount = reviewRows.length
-  const buyerMatchCount = buyerMatchResult.count || 0
-  const watchCount = watchResult.count || 0
-  const queuedImportBatches = importBatchResult.count || 0
-
-  const enabledModules = ['market_opportunities', 'market_source_imports', 'scheduled_market_imports', 'public_community_deals', 'section8_hud', 'calculators']
-    .map((feature) => ({ feature, label: featureLabels[feature] || feature, enabled: Boolean((workspace.access.features as Record<string, boolean | undefined>)[feature]) || Boolean(workspace.access.isPlatformAdmin) }))
+  const opportunities = (opportunitiesResult.data || []) as Row[]
+  const importJobs = (importJobsResult.data || []) as Row[]
+  const failedJobs = importJobs.filter((job) => job.status === 'failed').length
+  const runningJobs = importJobs.filter((job) => ['queued', 'running', 'processing', 'importing'].includes(String(job.status))).length
+  const activeSources = ((sourcesResult.data || []) as Row[]).filter((source) => source.status === 'active' || source.auto_import_enabled).length
 
   return (
-    <AppShell
-      organizationName={workspace.organization?.name}
-      userEmail={workspace.user.email}
-      accountType={accountType}
-      features={workspace.access.features}
-      subscriptionStatus={workspace.access.status}
-      planName={plan?.name}
-      trialEndsAt={workspace.access.trialEndsAt}
-      isPlatformAdmin={workspace.access.isPlatformAdmin}
-    >
-      <div className="flex flex-col gap-8">
-        <section className="overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 sm:p-8">
-          <div className="grid gap-7 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
+    <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
+      <div className="space-y-8">
+        <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-blue-500/10 p-6 sm:p-8">
+          <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
             <div>
-              <div className="text-sm font-medium uppercase tracking-wide text-emerald-300">DealFlowIQ command center</div>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-5xl">{config.title} dashboard</h1>
-              <p className="mt-4 max-w-3xl text-slate-300">Track your own deals, open Market, review 70+ Opportunities and keep source imports running from one simple dashboard.</p>
-              {workspace.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Supabase setup issue: {workspace.error}</div> : null}
-              <div className="mt-6 flex flex-wrap gap-3">
-                <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200">Open Opportunities</Link>
-                <Link href="/market" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Open Market</Link>
-                <Link href="/buy-boxes" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Buy Boxes</Link>
-                <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Import Queue</Link>
-                <Link href="/saved-deals" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">Saved Deals</Link>
-                <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">My Deals</Link>
+              <div className="text-sm font-black uppercase tracking-wide text-emerald-300">DealFlowIQ command center</div>
+              <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Good to see you. Your {config.shortTitle.toLowerCase()} pipeline is ready.</h1>
+              <p className="mt-4 max-w-3xl text-slate-300">Import authorized URLs, review Market, push qualified listings into Opportunities and keep your underwriting assumptions synced across the whole workspace.</p>
+              {workspace.error ? <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Supabase setup issue: {workspace.error}</div> : null}
+              <div className="mt-7 flex flex-wrap gap-3">
+                <Link href="/market?tab=sources" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">Import listings</Link>
+                <Link href="/opportunities" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Review opportunities</Link>
+                <Link href="/buy-boxes" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Buy boxes</Link>
               </div>
             </div>
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-              <h2 className="text-lg font-bold">Quick import</h2>
-              <p className="mt-2 text-sm text-slate-400">Paste a Zillow/Redfin/Realtor search URL. The analyzer extracts location, price filters and creates an in-app import batch.</p>
-              <form action={analyzeImportUrlAction} className="mt-4 space-y-3">
-                <input name="input_url" placeholder="https://www.zillow.com/johnstown-oh-43031/?searchQueryState=..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
-                <input type="hidden" name="visibility" value="private" />
-                <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Analyze URL</button>
-              </form>
+            <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-400">Opportunity rule</div>
+                  <div className="mt-1 text-xl font-black">{OPPORTUNITY_SCORE_THRESHOLD}+ score / {OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD}+ rent confidence</div>
+                </div>
+                <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-emerald-100">
+                  <div className="text-xs uppercase tracking-wide">Strong</div>
+                  <div className="text-2xl font-black">{STRONG_OPPORTUNITY_SCORE_THRESHOLD}+</div>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3 text-sm text-slate-300">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Plan: <span className="font-bold text-white">{workspace.access.plan?.name || 'Trial'}</span></div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Trial ends: <span className="font-bold text-white">{dateText(workspace.access.trialEndsAt)}</span></div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">Unread notifications: <span className="font-bold text-white">{numberText(notificationsResult.count || 0)}</span></div>
+              </div>
             </div>
           </div>
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="My Deals" value={String(dealsResult.count || 0)} hint="Deals you created or converted from Market." href="/deals" />
-          <StatCard label="Market Listings" value={String(marketResult.count || 0)} hint="Imported, public and team-visible listings." href="/market" />
-          <StatCard label="Opportunities 70+" value={String(opportunities.length || 0)} hint="Highest-ranked deals ready for review." href="/opportunities" />
-          <StatCard label="Auto Sources" value={String(autoSources || 0)} hint="Sources scheduled through the worker." href="/market?tab=sources" />
+          <StatCard label="Market listings" value={numberText(listingsResult.count || 0)} hint="All accessible listings in Market." href="/market" />
+          <StatCard label="Opportunities" value={numberText(opportunities.length)} hint="Qualified with current score rules." href="/opportunities" tone="green" />
+          <StatCard label="Strong opportunities" value={numberText(strongResult.count || 0)} hint="85+ score and 65+ rent confidence." href="/opportunities" tone="green" />
+          <StatCard label="Needs review" value={numberText(reviewResult.count || 0)} hint="Missing data, low confidence or manual review." href="/market?tab=needs_review" tone="amber" />
+          <StatCard label="My deals" value={numberText(dealsResult.count || 0)} hint="Saved/manual underwriting deals." href="/deals" />
+          <StatCard label="Saved deals" value={numberText(watchResult.count || 0)} hint="Your personal watchlist." href="/saved-deals" />
+          <StatCard label="Buyer matches" value={numberText(buyerMatchResult.count || 0)} hint="Potential buyer/deal matches." href="/buyers" />
+          <StatCard label="Import health" value={failedJobs ? `${failedJobs} failed` : runningJobs ? `${runningJobs} running` : 'Healthy'} hint={`${activeSources} active/importable source configs.`} href="/market?tab=sources" tone={failedJobs ? 'red' : runningJobs ? 'amber' : 'green'} />
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Needs Review" value={String(needsReviewCount)} hint="Listings that need rent, data or underwriting review." href="/market?tab=needs_review" />
-          <StatCard label="Buyer Matches" value={String(buyerMatchCount)} hint="Strong 80+ buyer-to-listing matches." href="/buyers" />
-          <StatCard label="Saved Deals" value={String(watchCount)} hint="Your personal watchlist and deal pipeline." href="/saved-deals" />
-          <StatCard label="Import Queue" value={String(queuedImportBatches)} hint="Analyzed or queued source URL batches." href="/imports" />
+        <section className="grid gap-5 lg:grid-cols-3">
+          <ActionCard title="Run a source import" text="Paste a direct listing or search URL, preview the first allowed listings and import them into Market." href="/market?tab=sources" cta="Open imports" />
+          <ActionCard title="Review qualified opportunities" text="See listings that meet the current Opportunity rule and jump into underwriting detail." href="/opportunities" cta="Open opportunities" />
+          <ActionCard title="Tune your buy boxes" text="Create filters for areas, price ranges and return targets so new matches surface faster." href="/buy-boxes" cta="Manage buy boxes" />
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold">Top Opportunities</h2>
-                <p className="mt-2 text-sm text-slate-400">Listings scoring 70+ with 50+ rent confidence are Opportunities; 85+/65+ are Strong Opportunities.</p>
+                <h2 className="text-2xl font-black">Top opportunities</h2>
+                <p className="mt-1 text-sm text-slate-500">Best current listings by synced Market score.</p>
               </div>
-              <Link href="/opportunities" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">View all</Link>
+              <Link href="/opportunities" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">View all</Link>
             </div>
-            <div className="mt-5 space-y-3">
-              {opportunities.slice(0, 4).map((score, index) => <OpportunityMiniCard key={score.id} score={score} listing={score.market_listings as Row} index={index} />)}
-              {!opportunities.length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No qualified opportunities yet. Import listings or run your scheduled sources.</div> : null}
+            <div className="mt-5 grid gap-3">
+              {opportunities.length ? opportunities.map((listing) => <OpportunityRow key={listing.id} listing={listing} />) : (
+                <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">
+                  No qualified opportunities yet. Import listings or update analysis inputs to sync scores.
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Market engine status</h2>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <StatCard label="Latest jobs" value={String((jobsResult.data || []).length)} hint="Recent imports and source runs." href="/market?tab=sources" />
-                <StatCard label="Plan" value={plan?.name || 'Trial'} hint={workspace.access.status.replaceAll('_', ' ')} href="/settings/billing" />
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-black">Recent imports</h2>
+                <p className="mt-1 text-sm text-slate-500">Track jobs, errors and created listings.</p>
               </div>
-              {latestFailedJob ? <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-100">Latest import issue: {latestFailedJob.error_message || 'Import failed'}</div> : <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-xs text-emerald-100">No recent import failures.</div>}
+              <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Run import</Link>
             </div>
-
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Unlocked modules</h2>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {enabledModules.map((item) => (
-                  <div key={item.feature} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                    <div className="text-sm font-semibold">{item.label}</div>
-                    <div className={item.enabled ? 'mt-2 text-xs text-emerald-300' : 'mt-2 text-xs text-slate-500'}>{item.enabled ? 'Enabled' : 'Premium / upgrade'}</div>
+            <div className="mt-5 space-y-3">
+              {importJobs.length ? importJobs.map((job, index) => (
+                <div key={`${job.created_at}-${index}`} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-bold capitalize">{String(job.status || 'queued').replaceAll('_', ' ')}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">{job.source_url || 'Manual/import job'}</div>
+                    </div>
+                    <div className="text-right text-xs text-slate-500">{dateText(job.created_at)}</div>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Subscription</h2>
-              <dl className="mt-5 space-y-4 text-sm">
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3"><dt className="text-slate-400">Plan</dt><dd className="font-medium">{plan?.name || 'Not assigned'}</dd></div>
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3"><dt className="text-slate-400">Status</dt><dd className="font-medium capitalize">{workspace.access.status.replaceAll('_', ' ')}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-400">Trial end</dt><dd className="font-medium">{formatTrialDate(workspace.access.trialEndsAt)}</dd></div>
-              </dl>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">
+                    <div>Created <span className="block font-bold text-slate-100">{numberText(job.items_created || 0)}</span></div>
+                    <div>Updated <span className="block font-bold text-slate-100">{numberText(job.items_updated || 0)}</span></div>
+                    <div>Failed <span className="block font-bold text-slate-100">{numberText(job.items_failed || 0)}</span></div>
+                  </div>
+                  {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
+                </div>
+              )) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No import jobs yet.</div>}
             </div>
           </div>
         </section>

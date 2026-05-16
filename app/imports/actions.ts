@@ -188,10 +188,12 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
 
   let inserted = 0
   let failed = 0
+  const isSearchPreview = batch.import_mode === 'search_url'
   for (const entry of previewEntries.slice(0, Math.min(remaining, 10))) {
     const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
     const entrySourceType = typeof entry === 'string' ? sourceType : String(entry.sourceType || sourceType)
     const entrySourceUrl = typeof entry === 'string' ? listingUrl : String(entry.sourceUrl || listingUrl)
+    const order = typeof entry === 'string' ? inserted + failed + 1 : Number(entry.order || inserted + failed + 1)
 
     if (!listingUrl) {
       failed += 1
@@ -199,6 +201,28 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
     }
 
     try {
+      if (isSearchPreview) {
+        await supabase.from('market_import_preview_items').insert({
+          organization_id: workspace.organization.id,
+          import_batch_id: batchId,
+          source_type: entrySourceType,
+          source_url: listingUrl || entrySourceUrl,
+          title: `Listing ${order} from ${policy.label} search`,
+          normalized_listing: {},
+          status: 'new',
+          data_quality: {
+            checklist: [
+              { label: 'Listing URL found', status: 'ok' },
+              { label: 'Details fetched during import', status: 'pending' },
+            ],
+            lightweightPreview: true,
+            policy: providerPolicySnapshot(policy),
+          },
+        })
+        inserted += 1
+        continue
+      }
+
       const normalized = await fetchAndNormalizeMarketUrl(listingUrl, entrySourceType)
       const [duplicate, ignored] = await Promise.all([
         findDuplicateListing(supabase, workspace.organization.id, normalized),
@@ -449,9 +473,14 @@ export async function importPreviewItemsAction(formData: FormData) {
   let failed = 0
   for (const item of items as any[]) {
     try {
-      const normalized = item.normalized_listing || {}
+      const normalized = item.normalized_listing && Object.keys(item.normalized_listing || {}).length
+        ? item.normalized_listing
+        : await fetchAndNormalizeMarketUrl(String(item.source_url || ''), String(item.source_type || sourceType))
+      const duplicate = await findDuplicateListing(supabase, workspace.organization.id, normalized)
+      const ignored = await findIgnoredListing(supabase, workspace.organization.id, normalized, String(item.source_url || ''))
+      if (ignored) throw new Error(`Ignored previously${(ignored as any)?.reason ? ` — ${(ignored as any).reason}` : ''}`)
       const expiresAt = new Date(Date.now() + policy.storageDays * 24 * 60 * 60 * 1000).toISOString()
-      normalized.raw_payload = { ...(normalized.raw_payload || {}), providerPolicy: providerPolicySnapshot(policy), providerDataExpiresAt: expiresAt }
+      normalized.raw_payload = { ...(normalized.raw_payload || {}), providerPolicy: providerPolicySnapshot(policy), providerDataExpiresAt: expiresAt, duplicateListingId: (duplicate as any)?.id || null }
       const result = await upsertMarketListingFromNormalized({
         supabase: supabase as any,
         listing: normalized,

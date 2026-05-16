@@ -4,6 +4,43 @@ import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
 export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'other'
 
+
+
+const SEARCH_DISCOVERY_LIMIT = 10
+const SEARCH_DISCOVERY_TIMEOUT_MS = 15000
+const LISTING_FETCH_TIMEOUT_MS = 15000
+const MAX_SOURCE_HTML_CHARS = 2500000
+
+function timeoutMessage(sourceType: string, mode: 'search' | 'listing', timeoutMs: number) {
+  return `${sourceType} ${mode} import timed out after ${Math.round(timeoutMs / 1000)} seconds. Narrow the search, try a direct listing URL, or retry later.`
+}
+
+async function fetchTextWithTimeout(url: string, params: { sourceType: string; mode: 'search' | 'listing'; timeoutMs: number; headers: Record<string, string> }) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), params.timeoutMs)
+  try {
+    const response = await fetch(url, {
+      headers: params.headers,
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`${params.sourceType} ${params.mode} import returned HTTP ${response.status}. Use authorized access/API or paste the listing manually if the source blocks server fetch.`)
+    }
+
+    const html = await response.text()
+    return html.length > MAX_SOURCE_HTML_CHARS ? html.slice(0, MAX_SOURCE_HTML_CHARS) : html
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(timeoutMessage(params.sourceType, params.mode, params.timeoutMs))
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export type NormalizedMarketListing = {
   source_type: MarketSourceType
   external_listing_id: string | null
@@ -260,49 +297,49 @@ function isLikelyListingUrl(url: string, sourceType: MarketSourceType) {
   return value.includes('/homedetails/') || value.includes('/home/') || value.includes('/realestateandhomes-detail/') || value.includes('/properties/') || value.includes('/listing/')
 }
 
-export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceTypeInput?: string | null, limit = 10) {
+export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceTypeInput?: string | null, limit = SEARCH_DISCOVERY_LIMIT) {
   const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
   const adapter = getMarketSourceAdapter(sourceType)
-  const response = await fetch(inputUrl, {
+  const hardLimit = Math.max(1, Math.min(Number(limit || SEARCH_DISCOVERY_LIMIT), SEARCH_DISCOVERY_LIMIT))
+  const html = await fetchTextWithTimeout(inputUrl, {
+    sourceType,
+    mode: 'search',
+    timeoutMs: SEARCH_DISCOVERY_TIMEOUT_MS,
     headers: {
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'user-agent': adapter.userAgent,
       ...(adapter.referrer ? { referer: adapter.referrer } : {}),
     },
-    cache: 'no-store',
   })
-  if (!response.ok) throw new Error(`${sourceType} search import returned HTTP ${response.status}.`)
-  const html = await response.text()
+
   const urls = new Set<string>()
   for (const pattern of listingUrlPatternsFor(sourceType)) {
+    pattern.lastIndex = 0
     for (const match of html.matchAll(pattern)) {
       const raw = match[1] || match[0]
       const normalized = cleanDiscoveredUrl(raw, inputUrl)
       if (normalized && isLikelyListingUrl(normalized, sourceType)) urls.add(normalized)
-      if (urls.size >= limit) break
+      if (urls.size >= hardLimit) break
     }
-    if (urls.size >= limit) break
+    if (urls.size >= hardLimit) break
   }
-  return [...urls].slice(0, limit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
+
+  return [...urls].slice(0, hardLimit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
 }
 
 export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInput?: string | null): Promise<NormalizedMarketListing> {
   const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
   const adapter = getMarketSourceAdapter(sourceType)
-  const response = await fetch(inputUrl, {
+  const html = await fetchTextWithTimeout(inputUrl, {
+    sourceType,
+    mode: 'listing',
+    timeoutMs: LISTING_FETCH_TIMEOUT_MS,
     headers: {
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'user-agent': adapter.userAgent,
       ...(adapter.referrer ? { referer: adapter.referrer } : {}),
     },
-    cache: 'no-store',
   })
-
-  if (!response.ok) {
-    throw new Error(`${sourceType} import returned HTTP ${response.status}. Use authorized access/API or paste the listing manually if the source blocks server fetch.`)
-  }
-
-  const html = await response.text()
   const jsonLd = findJsonLd(html)
   const nextData = findNextData(html)
   const structuredFacts = extractFromStructuredData([...jsonLd, nextData].filter(Boolean))

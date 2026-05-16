@@ -57,7 +57,7 @@ export function buildConfidenceBreakdown(listing: ListingLike, score?: Record<st
 }
 
 export function estimateMarketRentFromFacts(listing: ListingLike) {
-  const explicit = n(listing.market_rent || listing.estimated_rent || listing.current_rent)
+  const explicit = n(listing.market_rent || listing.estimated_rent)
   const hud = n(listing.hud_rent)
   const sqft = n(listing.sqft)
   const beds = bedroomCount(listing)
@@ -65,7 +65,7 @@ export function estimateMarketRentFromFacts(listing: ListingLike) {
   const signals: string[] = []
   const missing: string[] = []
 
-  if (explicit) signals.push('Existing source rent was present')
+  if (explicit) signals.push('Existing market rent source was present')
   if (!estimate && hud) {
     estimate = hud
     signals.push('HUD/FMR was used as rent baseline')
@@ -211,10 +211,11 @@ export async function applyHudFmrToListing(params: { supabase: SupabaseLike; org
 
 export async function rescoreListingAfterIntelligence(params: { supabase: SupabaseLike; organizationId: string; userId?: string | null; listing: ListingLike }) {
   const score = scoreMarketListing(params.listing)
-  await params.supabase.from('market_listing_scores').insert({
+  const calculatedAt = new Date().toISOString()
+  const { data: insertedScore } = await params.supabase.from('market_listing_scores').insert({
     listing_id: params.listing.id,
     organization_id: params.organizationId,
-    formula_version: 'market-score-v4-rent-intelligence',
+    formula_version: 'market-score-v5-rent-sync',
     deal_score: score.dealScore,
     risk_score: score.riskScore,
     risk_level: score.riskLevel,
@@ -236,13 +237,26 @@ export async function rescoreListingAfterIntelligence(params: { supabase: Supaba
     reasons: score.reasons,
     risks: score.risks,
     missing_fields: score.missingFields,
-  })
+    calculated_at: calculatedAt,
+  }).select('id').single()
   const review = determineDealReviewStatus(score as any, params.listing)
   await params.supabase.from('market_listings').update({
     deal_status: review.dealStatus,
     review_reason: review.reviewReason,
     why_this_deal: review.why,
     status: ['archived', 'converted_to_deal'].includes(String(params.listing.status)) ? params.listing.status : review.listingStatus,
+    latest_score_id: insertedScore?.id || null,
+    latest_deal_score: score.dealScore,
+    latest_rent_confidence_score: score.rentConfidenceScore,
+    latest_source_confidence_score: score.sourceConfidenceScore,
+    latest_data_confidence_score: score.dataConfidenceScore,
+    latest_estimated_monthly_cashflow: score.estimatedMonthlyCashflow,
+    latest_estimated_dscr: score.estimatedDscr,
+    latest_estimated_cap_rate: score.estimatedCapRate,
+    latest_break_even_rent: score.breakEvenRent,
+    latest_score_calculated_at: calculatedAt,
+    data_quality_checklist: buildDataQualityChecklist(params.listing, score as any),
+    confidence_breakdown: buildConfidenceBreakdown(params.listing, score as any),
   }).eq('id', params.listing.id).eq('organization_id', params.organizationId)
   return score
 }

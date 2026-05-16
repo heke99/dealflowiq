@@ -141,10 +141,11 @@ function listingInsertPayload(params: {
 
 export async function insertMarketListingScore(supabase: SupabaseAny, listing: Record<string, any>, organizationId: string | null) {
   const score = scoreMarketListing(listing)
-  const { error } = await supabase.from('market_listing_scores').insert({
+  const calculatedAt = new Date().toISOString()
+  const { data: insertedScore, error } = await supabase.from('market_listing_scores').insert({
     listing_id: listing.id,
     organization_id: organizationId,
-    formula_version: 'market-score-v3',
+    formula_version: 'market-score-v5-rent-sync',
     deal_score: score.dealScore,
     risk_score: score.riskScore,
     risk_level: score.riskLevel,
@@ -166,7 +167,8 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
     reasons: score.reasons,
     risks: score.risks,
     missing_fields: score.missingFields,
-  })
+    calculated_at: calculatedAt,
+  }).select('id').single()
   if (error) throw new Error(error.message)
 
   if (organizationId && listing.id) {
@@ -178,6 +180,16 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
         review_reason: review.reviewReason,
         why_this_deal: review.why,
         status: ['archived', 'converted_to_deal'].includes(String(listing.status)) ? listing.status : review.listingStatus,
+        latest_score_id: insertedScore?.id || null,
+        latest_deal_score: score.dealScore,
+        latest_rent_confidence_score: score.rentConfidenceScore,
+        latest_source_confidence_score: score.sourceConfidenceScore,
+        latest_data_confidence_score: score.dataConfidenceScore,
+        latest_estimated_monthly_cashflow: score.estimatedMonthlyCashflow,
+        latest_estimated_dscr: score.estimatedDscr,
+        latest_estimated_cap_rate: score.estimatedCapRate,
+        latest_break_even_rent: score.breakEvenRent,
+        latest_score_calculated_at: calculatedAt,
       })
       .eq('id', listing.id)
       .eq('organization_id', organizationId)

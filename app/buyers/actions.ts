@@ -401,7 +401,7 @@ export async function runBuyerMatchingAction(formData: FormData) {
 
   const listingIds = (listings || []).map((listing: Row) => listing.id).filter(Boolean)
   const { data: scores } = listingIds.length
-    ? await supabase.from('market_listing_scores').select('*').in('listing_id', listingIds).order('calculated_at', { ascending: false }).limit(500)
+    ? await supabase.from('market_listing_scores').select('*').in('listing_id', listingIds).order('deal_score', { ascending: false }).order('calculated_at', { ascending: false }).limit(500)
     : { data: [] as Row[] }
 
   const scoreByListing = new Map<string, Row>()

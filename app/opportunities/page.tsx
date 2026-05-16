@@ -17,7 +17,7 @@ function imageStyle(url?: string | null) {
 }
 
 function confidence(score: Row) {
-  const data = Number(score.data_confidence || 0)
+  const data = Number(score.data_confidence_score || 0)
   if (data >= 80) return 'High confidence'
   if (data >= 55) return 'Medium confidence'
   return 'Needs review'
@@ -27,7 +27,8 @@ function OpportunityCard({ score }: { score: Row }) {
   const listing = score.market_listings as Row
   const reasons = Array.isArray(score.reasons) ? score.reasons : []
   const risks = Array.isArray(score.risks) ? score.risks : []
-  const dealScore = Math.round(Number(score.deal_score || 0))
+  const dealScore = Math.round(Number(listing.latest_deal_score ?? score.deal_score ?? 0))
+  const rentConfidence = Math.round(Number(listing.latest_rent_confidence_score ?? score.rent_confidence_score ?? 0))
   return (
     <article className="overflow-hidden rounded-3xl border border-emerald-400/20 bg-gradient-to-b from-emerald-400/[0.08] to-white/[0.03] p-4 shadow-2xl shadow-black/20">
       <Link href={`/market/${listing.id}`} className="block">
@@ -49,15 +50,16 @@ function OpportunityCard({ score }: { score: Row }) {
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Price</div><div className="font-bold">{money(listing.list_price || listing.asking_price, true)}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Cashflow</div><div className="font-bold text-emerald-300">{money(score.estimated_monthly_cashflow)}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">DSCR</div><div className="font-bold">{score.estimated_dscr ? Number(score.estimated_dscr).toFixed(2) : '—'}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">HUD gap</div><div className="font-bold text-emerald-300">{money(score.hud_rent_gap)}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Cashflow</div><div className="font-bold text-emerald-300">{money(listing.latest_estimated_monthly_cashflow ?? score.estimated_monthly_cashflow)}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">DSCR</div><div className="font-bold">{(listing.latest_estimated_dscr ?? score.estimated_dscr) ? Number(listing.latest_estimated_dscr ?? score.estimated_dscr).toFixed(2) : '—'}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold text-emerald-300">{rentConfidence}</div></div>
       </div>
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/50 p-4">
         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
           <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-emerald-100">{confidence(score)}</span>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{score.strategy_fit || 'Strategy pending'}</span>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Risk: {score.risk_level || 'medium'}</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence}/100</span>
         </div>
         <div className="mt-3 grid gap-4 md:grid-cols-2">
           <div>
@@ -87,22 +89,27 @@ export default async function OpportunitiesPage() {
     .from('market_listing_scores')
     .select('*, market_listings(*)')
     .gte('deal_score', 80)
+    .gte('rent_confidence_score', 65)
     .order('deal_score', { ascending: false })
-    .limit(500)
+    .limit(60)
 
-  const visibleScores = ((data || []) as Row[]).filter((score) => {
+  const scoreByListing = new Map<string, Row>()
+  for (const score of (data || []) as Row[]) {
     const listing = score.market_listings as Row | null
-    if (!listing || listing.status === 'archived') return false
-    return listing.visibility === 'public' || listing.organization_id === workspace.organization?.id
-  })
-  const byListing = new Map<string, Row>()
-  for (const score of visibleScores) {
-    const listing = score.market_listings as Row | null
-    if (!listing?.id) continue
-    const existing = byListing.get(String(listing.id))
-    if (!existing || Number(score.deal_score || 0) > Number(existing.deal_score || 0)) byListing.set(String(listing.id), score)
+    if (!listing || listing.status === 'archived') continue
+    if (!(listing.visibility === 'public' || listing.organization_id === workspace.organization?.id)) continue
+    const listingId = String(listing.id)
+    const existing = scoreByListing.get(listingId)
+    const currentScore = Number(listing.latest_deal_score ?? score.deal_score ?? 0)
+    const existingListing = existing?.market_listings as Row | null
+    const existingScore = Number(existingListing?.latest_deal_score ?? existing?.deal_score ?? 0)
+    if (!existing || currentScore > existingScore) scoreByListing.set(listingId, score)
   }
-  const scores = [...byListing.values()].sort((a, b) => Number(b.deal_score || 0) - Number(a.deal_score || 0))
+  const scores = Array.from(scoreByListing.values()).sort((a, b) => {
+    const aListing = a.market_listings as Row
+    const bListing = b.market_listings as Row
+    return Number(bListing.latest_deal_score ?? b.deal_score ?? 0) - Number(aListing.latest_deal_score ?? a.deal_score ?? 0)
+  })
 
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={workspace.access.accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
@@ -110,9 +117,9 @@ export default async function OpportunitiesPage() {
         <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-black p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">80+ ranked deals</div>
+              <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">80+ score · 65+ rent confidence</div>
               <h1 className="mt-2 text-4xl font-black tracking-tight">Opportunities</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Only the strongest Market listings belong here. Everything else stays in Market until score, rent confidence and data quality improve.</p>
+              <p className="mt-3 max-w-3xl text-slate-300">Only listings with DealFlowIQ score 80+ and rent confidence 65+ belong here. Everything else stays in Market until score, rent confidence and data quality improve.</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href="/buy-boxes" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link>
@@ -120,7 +127,7 @@ export default async function OpportunitiesPage() {
             </div>
           </div>
         </section>
-        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No 80+ opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. High-score listings will appear here automatically.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
+        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 80+ score and 65+ rent confidence to appear here automatically.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
       </div>
     </AppShell>
   )

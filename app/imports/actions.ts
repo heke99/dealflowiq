@@ -12,6 +12,17 @@ import { upsertMarketListingFromNormalized } from '@/lib/market/importRunner'
 import { runListingRentIntelligence, buildDataQualityChecklist, buildConfidenceBreakdown } from '@/lib/market/rentIntelligenceEngine'
 import { providerPolicyFromRow, providerPolicySnapshot } from '@/lib/market/providerPolicies'
 
+type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>
+type Workspace = Awaited<ReturnType<typeof getCurrentWorkspace>>
+type BatchRow = Record<string, any>
+
+type PreviewResult = {
+  inserted: number
+  failed: number
+  found: number
+  status: 'preview_ready' | 'failed'
+}
+
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
   return value || null
@@ -20,6 +31,237 @@ function text(formData: FormData, key: string) {
 function visibilityValue(formData: FormData) {
   const value = String(formData.get('visibility') || 'private')
   return value === 'team' || value === 'community' || value === 'public' ? value : 'private'
+}
+
+function selectedPreviewIds(formData: FormData) {
+  const all = formData.getAll('preview_item_id').map((value) => String(value || '').trim()).filter(Boolean)
+  const single = String(formData.get('preview_item_ids') || '').split(',').map((value) => value.trim()).filter(Boolean)
+  return [...new Set([...all, ...single])]
+}
+
+function normalizedAddressFor(value: { address?: string | null; city?: string | null; state?: string | null }) {
+  return [value.address, value.city, value.state].filter(Boolean).join(', ').toLowerCase().trim()
+}
+
+async function importPolicyForSource(supabase: SupabaseServer, organizationId: string, sourceType: string) {
+  const { data } = await supabase
+    .from('market_provider_policies')
+    .select('*')
+    .or(`organization_id.eq.${organizationId},organization_id.is.null`)
+    .eq('source_type', sourceType)
+    .order('organization_id', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+  return providerPolicyFromRow(sourceType, data as any)
+}
+
+async function countRecentProviderImports(supabase: SupabaseServer, organizationId: string, sourceType: string) {
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count } = await supabase
+    .from('market_import_audit_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .eq('event_type', 'listing_imported')
+    .gte('created_at', since)
+    .contains('metadata', { sourceType })
+  return count || 0
+}
+
+async function auditImportEvent(supabase: SupabaseServer, params: { organizationId: string; userId?: string | null; batchId?: string | null; listingId?: string | null; eventType: string; message: string; metadata?: Record<string, any> }) {
+  await supabase.from('market_import_audit_events').insert({
+    organization_id: params.organizationId,
+    user_id: params.userId || null,
+    import_batch_id: params.batchId || null,
+    listing_id: params.listingId || null,
+    event_type: params.eventType,
+    message: params.message,
+    metadata: params.metadata || {},
+  })
+}
+
+async function findDuplicateListing(supabase: SupabaseServer, organizationId: string, normalized: any) {
+  if (normalized.source_url) {
+    const { data } = await supabase
+      .from('market_listings')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('source_url', normalized.source_url)
+      .maybeSingle()
+    if (data) return data
+  }
+
+  if (normalized.source_type && normalized.external_listing_id) {
+    const { data } = await supabase
+      .from('market_listings')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('source_type', normalized.source_type)
+      .eq('external_listing_id', normalized.external_listing_id)
+      .maybeSingle()
+    if (data) return data
+  }
+
+  const normalizedAddress = normalizedAddressFor(normalized)
+  if (normalizedAddress && normalized.zip_code) {
+    const { data } = await supabase
+      .from('market_listings')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .ilike('address', normalized.address || '')
+      .eq('zip_code', normalized.zip_code)
+      .maybeSingle()
+    if (data) return data
+  }
+
+  return null
+}
+
+async function findIgnoredListing(supabase: SupabaseServer, organizationId: string, normalized: any, fallbackUrl: string) {
+  const sourceUrl = normalized.source_url || fallbackUrl
+  if (sourceUrl) {
+    const { data } = await supabase
+      .from('market_ignored_listings')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .eq('source_url', sourceUrl)
+      .maybeSingle()
+    if (data) return data
+  }
+
+  const normalizedAddress = normalizedAddressFor(normalized)
+  if (normalizedAddress && normalized.zip_code) {
+    const { data } = await supabase
+      .from('market_ignored_listings')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .eq('normalized_address', normalizedAddress)
+      .eq('zip_code', normalized.zip_code)
+      .maybeSingle()
+    if (data) return data
+  }
+
+  return null
+}
+
+async function createPreviewForBatch(params: { supabase: SupabaseServer; workspace: Workspace; batch: BatchRow }): Promise<PreviewResult> {
+  const { supabase, workspace, batch } = params
+  if (!workspace.organization?.id) throw new Error('Missing organization')
+
+  const batchId = String(batch.id)
+  const sourceType = String(batch.source_type || 'generic')
+  const policy = await importPolicyForSource(supabase, workspace.organization.id, sourceType)
+
+  if (!policy.active) throw new Error(`${policy.label} import is not active. Configure provider policy before live import.`)
+  if (batch.import_mode === 'search_url' && !policy.searchImportAllowed) throw new Error(`${policy.label} search import is not allowed by current provider policy.`)
+  if (batch.import_mode !== 'search_url' && !policy.listingImportAllowed) throw new Error(`${policy.label} listing import is not allowed by current provider policy.`)
+
+  const recent = await countRecentProviderImports(supabase, workspace.organization.id, sourceType)
+  const remaining = Math.max(0, policy.maxListingsPerHour - recent)
+  if (remaining <= 0) {
+    const next = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    await supabase
+      .from('market_url_import_batches')
+      .update({ status: 'rate_limited', next_allowed_import_at: next, policy_snapshot: providerPolicySnapshot(policy) })
+      .eq('id', batchId)
+      .eq('organization_id', workspace.organization.id)
+    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'rate_limit_hit', message: `${policy.label} rate limit reached.`, metadata: { sourceType, maxListingsPerHour: policy.maxListingsPerHour } })
+    throw new Error(`${policy.label} rate limit reached. Try again after the rolling hour window.`)
+  }
+
+  await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'preview_started', message: 'Import preview started.', metadata: { sourceType, policy: providerPolicySnapshot(policy) } })
+
+  const sourceUrl = String(batch.normalized_url || batch.input_url || '')
+  const urls = batch.import_mode === 'search_url'
+    ? await discoverListingUrlsFromSearchUrl(sourceUrl, sourceType, Math.min(remaining, 10))
+    : [sourceUrl]
+
+  const previewEntries = urls as Array<string | { url: string; sourceType?: string | null; sourceUrl?: string | null; order?: number | null }>
+
+  if (!previewEntries.length) throw new Error('No eligible listing URLs were found on the source page.')
+
+  await supabase
+    .from('market_import_preview_items')
+    .delete()
+    .eq('import_batch_id', batchId)
+    .eq('organization_id', workspace.organization.id)
+    .in('status', ['new', 'failed', 'duplicate', 'existing', 'ignored'])
+
+  let inserted = 0
+  let failed = 0
+  for (const entry of previewEntries.slice(0, Math.min(remaining, 10))) {
+    const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
+    const entrySourceType = typeof entry === 'string' ? sourceType : String(entry.sourceType || sourceType)
+    const entrySourceUrl = typeof entry === 'string' ? listingUrl : String(entry.sourceUrl || listingUrl)
+
+    if (!listingUrl) {
+      failed += 1
+      continue
+    }
+
+    try {
+      const normalized = await fetchAndNormalizeMarketUrl(listingUrl, entrySourceType)
+      const [duplicate, ignored] = await Promise.all([
+        findDuplicateListing(supabase, workspace.organization.id, normalized),
+        findIgnoredListing(supabase, workspace.organization.id, normalized, listingUrl),
+      ])
+      const dataQuality = buildDataQualityChecklist(normalized)
+      const status = ignored ? 'ignored' : duplicate ? 'duplicate' : 'new'
+      await supabase.from('market_import_preview_items').insert({
+        organization_id: workspace.organization.id,
+        import_batch_id: batchId,
+        source_type: entrySourceType,
+        source_url: normalized.source_url || listingUrl,
+        external_listing_id: normalized.external_listing_id,
+        title: normalized.title,
+        address: normalized.address,
+        city: normalized.city,
+        state: normalized.state,
+        zip_code: normalized.zip_code,
+        price: normalized.list_price || normalized.asking_price,
+        bedrooms: normalized.bedrooms,
+        bathrooms: normalized.bathrooms,
+        sqft: normalized.sqft,
+        asset_class: ['crexi', 'loopnet'].includes(entrySourceType) ? 'commercial' : 'residential',
+        property_type: normalized.property_type,
+        image_url: normalized.primary_image_url,
+        normalized_listing: normalized as any,
+        status,
+        duplicate_listing_id: (duplicate as any)?.id || null,
+        ignored: Boolean(ignored),
+        ignore_reason: (ignored as any)?.reason || null,
+        data_quality: { checklist: dataQuality, policy: providerPolicySnapshot(policy) },
+      })
+      inserted += 1
+    } catch (error) {
+      failed += 1
+      await supabase.from('market_import_preview_items').insert({
+        organization_id: workspace.organization.id,
+        import_batch_id: batchId,
+        source_type: entrySourceType,
+        source_url: listingUrl || entrySourceUrl,
+        title: listingUrl || entrySourceUrl,
+        normalized_listing: {},
+        status: 'failed',
+        error_message: error instanceof Error ? error.message : 'Preview failed',
+        data_quality: { checklist: [] },
+      })
+    }
+  }
+
+  const expiresAt = new Date(Date.now() + policy.storageDays * 24 * 60 * 60 * 1000).toISOString()
+  const status = failed && !inserted ? 'failed' : 'preview_ready'
+  await supabase.from('market_url_import_batches').update({
+    status,
+    total_found: urls.length,
+    failed_count: failed,
+    policy_snapshot: providerPolicySnapshot(policy),
+    provider_data_expires_at: expiresAt,
+    last_error: failed && !inserted ? 'Preview failed for all eligible URLs.' : null,
+    queue_summary: { ...((batch as any).queue_summary || {}), previewCount: inserted, failedCount: failed, policy: providerPolicySnapshot(policy) },
+  }).eq('id', batchId).eq('organization_id', workspace.organization.id)
+
+  await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'preview_generated', message: `Preview generated with ${inserted} importable listing(s).`, metadata: { found: urls.length, inserted, failed, sourceType } })
+  return { inserted, failed, found: urls.length, status }
 }
 
 export async function analyzeImportUrlAction(formData: FormData) {
@@ -43,13 +285,12 @@ export async function analyzeImportUrlAction(formData: FormData) {
   }
 
   const sourceName = text(formData, 'source_name') || analysis.title
-  const status = analysis.isSearchUrl ? 'queued' : 'analyzed'
   const { data: batch, error } = await supabase.from('market_url_import_batches').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,
     source_type: analysis.sourceType,
     import_mode: analysis.importMode,
-    status,
+    status: 'running',
     input_url: analysis.inputUrl,
     normalized_url: analysis.normalizedUrl,
     source_name: sourceName,
@@ -71,11 +312,11 @@ export async function analyzeImportUrlAction(formData: FormData) {
       regionId: analysis.regionId,
       regionType: analysis.regionType,
       note: analysis.isSearchUrl
-        ? 'Search URL analyzed and queued. Add listing URLs, CSV/API data, or approved feed output to create scored listings.'
-        : 'Listing URL analyzed. Use Market quick import to fetch/normalize one listing when source access is available.',
+        ? 'Search URL analyzed. Real provider preview generation starts immediately under provider policy.'
+        : 'Listing URL analyzed. Real provider preview generation starts immediately under provider policy.',
     },
     visibility,
-  }).select('id').single()
+  }).select('*').single()
 
   if (error || !batch) redirect(`/imports?error=${encodeURIComponent(error?.message || 'Could not create import batch')}`)
 
@@ -101,9 +342,31 @@ export async function analyzeImportUrlAction(formData: FormData) {
     metadata: { sourceType: analysis.sourceType, importMode: analysis.importMode, inputUrl: analysis.normalizedUrl },
   })
 
-  revalidatePath('/imports')
-  revalidatePath('/notifications')
-  redirect(`/imports?batch=${batch.id}&saved=analyzed`)
+  try {
+    const preview = await createPreviewForBatch({ supabase, workspace, batch: batch as any })
+    await createInAppNotification(supabase, {
+      organizationId: workspace.organization.id,
+      userId: workspace.user.id,
+      actorId: workspace.user.id,
+      type: 'import_preview_ready',
+      title: 'Import preview ready',
+      message: `${preview.inserted} listing(s) ready to import from ${analysis.sourceType}.`,
+      relatedEntityType: 'market_url_import_batch',
+      relatedEntityId: batch.id,
+      actionHref: `/imports?batch=${batch.id}`,
+      metadata: { sourceType: analysis.sourceType, found: preview.found, inserted: preview.inserted, failed: preview.failed },
+    })
+    revalidatePath('/imports')
+    revalidatePath('/notifications')
+    redirect(`/imports?batch=${batch.id}&saved=preview`)
+  } catch (previewError) {
+    const message = previewError instanceof Error ? previewError.message : 'Preview generation failed'
+    await supabase.from('market_url_import_batches').update({ status: 'failed', last_error: message }).eq('id', batch.id).eq('organization_id', workspace.organization.id)
+    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId: batch.id, eventType: 'import_failed', message, metadata: { sourceType: analysis.sourceType, importMode: analysis.importMode } })
+    revalidatePath('/imports')
+    revalidatePath('/notifications')
+    redirect(`/imports?batch=${batch.id}&error=${encodeURIComponent(message)}`)
+  }
 }
 
 export async function updateImportBatchStatusAction(formData: FormData) {
@@ -127,49 +390,6 @@ export async function updateImportBatchStatusAction(formData: FormData) {
   redirect(`/imports?batch=${batchId}&saved=status`)
 }
 
-
-async function importPolicyForSource(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, sourceType: string) {
-  const { data } = await supabase
-    .from('market_provider_policies')
-    .select('*')
-    .or(`organization_id.eq.${organizationId},organization_id.is.null`)
-    .eq('source_type', sourceType)
-    .order('organization_id', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle()
-  return providerPolicyFromRow(sourceType, data as any)
-}
-
-async function countRecentProviderImports(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, sourceType: string) {
-  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-  const { count } = await supabase
-    .from('market_import_audit_events')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', organizationId)
-    .eq('event_type', 'listing_imported')
-    .gte('created_at', since)
-    .contains('metadata', { sourceType })
-  return count || 0
-}
-
-async function auditImportEvent(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, params: { organizationId: string; userId?: string | null; batchId?: string | null; listingId?: string | null; eventType: string; message: string; metadata?: Record<string, any> }) {
-  await supabase.from('market_import_audit_events').insert({
-    organization_id: params.organizationId,
-    user_id: params.userId || null,
-    import_batch_id: params.batchId || null,
-    listing_id: params.listingId || null,
-    event_type: params.eventType,
-    message: params.message,
-    metadata: params.metadata || {},
-  })
-}
-
-function selectedPreviewIds(formData: FormData) {
-  const all = formData.getAll('preview_item_id').map((value) => String(value || '').trim()).filter(Boolean)
-  const single = String(formData.get('preview_item_ids') || '').split(',').map((value) => value.trim()).filter(Boolean)
-  return [...new Set([...all, ...single])]
-}
-
 export async function generateImportPreviewAction(formData: FormData) {
   const batchId = String(formData.get('batch_id') || '').trim()
   if (!batchId) redirect('/imports?error=Missing batch id')
@@ -185,109 +405,12 @@ export async function generateImportPreviewAction(formData: FormData) {
     .maybeSingle()
   if (batchError || !batch) redirect(`/imports?error=${encodeURIComponent(batchError?.message || 'Import batch not found')}`)
 
-  const sourceType = String((batch as any).source_type || 'generic')
-  const policy = await importPolicyForSource(supabase, workspace.organization.id, sourceType)
-  if (!policy.active) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(`${policy.label} import is not active. Configure provider policy before live import.`)}`)
-  if ((batch as any).import_mode === 'search_url' && !policy.searchImportAllowed) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(`${policy.label} search import is not allowed by current provider policy.`)}`)
-  if ((batch as any).import_mode !== 'search_url' && !policy.listingImportAllowed) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(`${policy.label} listing import is not allowed by current provider policy.`)}`)
-
-  const recent = await countRecentProviderImports(supabase, workspace.organization.id, sourceType)
-  const remaining = Math.max(0, policy.maxListingsPerHour - recent)
-  if (remaining <= 0) {
-    const next = new Date(Date.now() + 60 * 60 * 1000).toISOString()
-    await supabase.from('market_url_import_batches').update({ status: 'rate_limited', next_allowed_import_at: next, policy_snapshot: providerPolicySnapshot(policy) }).eq('id', batchId)
-    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'rate_limit_hit', message: `${policy.label} rate limit reached.`, metadata: { sourceType, maxListingsPerHour: policy.maxListingsPerHour } })
-    redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(`${policy.label} rate limit reached. Try again after the rolling hour window.`)}`)
-  }
-
   try {
-    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'preview_started', message: 'Import preview started.', metadata: { sourceType, policy: providerPolicySnapshot(policy) } })
-    const discoveredEntries = (batch as any).import_mode === 'search_url'
-      ? await discoverListingUrlsFromSearchUrl((batch as any).normalized_url || (batch as any).input_url, sourceType, Math.min(remaining, 10))
-      : [String((batch as any).normalized_url || (batch as any).input_url)]
-    if (!discoveredEntries.length) throw new Error('No eligible listing URLs were found on the source page.')
-
-    await supabase.from('market_import_preview_items').delete().eq('import_batch_id', batchId).eq('organization_id', workspace.organization.id).in('status', ['new', 'failed', 'duplicate', 'existing', 'ignored'])
-
-    let inserted = 0
-    let failed = 0
-    const previewLimit = Math.min(remaining, 10)
-    for (const entry of discoveredEntries.slice(0, previewLimit)) {
-      const listingUrl = typeof entry === 'string' ? entry : String((entry as any).url || '').trim()
-      const entrySourceType = typeof entry === 'string' ? sourceType : String((entry as any).sourceType || sourceType)
-      const entrySourceUrl = typeof entry === 'string' ? listingUrl : String((entry as any).sourceUrl || listingUrl)
-      if (!listingUrl) {
-        failed += 1
-        continue
-      }
-
-      try {
-        const normalized = await fetchAndNormalizeMarketUrl(listingUrl, entrySourceType)
-        const normalizedAddress = [normalized.address, normalized.city, normalized.state].filter(Boolean).join(', ').toLowerCase()
-        const [{ data: duplicate }, { data: ignored }] = await Promise.all([
-          normalized.source_url
-            ? supabase.from('market_listings').select('id').eq('organization_id', workspace.organization.id).eq('source_url', normalized.source_url).maybeSingle()
-            : Promise.resolve({ data: null }),
-          supabase.from('market_ignored_listings').select('*').eq('organization_id', workspace.organization.id).or(`source_url.eq.${normalized.source_url || listingUrl},and(normalized_address.eq.${normalizedAddress},zip_code.eq.${normalized.zip_code || ''})`).maybeSingle(),
-        ])
-        const dataQuality = buildDataQualityChecklist(normalized)
-        const status = ignored ? 'ignored' : duplicate ? 'duplicate' : 'new'
-        await supabase.from('market_import_preview_items').insert({
-          organization_id: workspace.organization.id,
-          import_batch_id: batchId,
-          source_type: entrySourceType,
-          source_url: normalized.source_url || listingUrl,
-          external_listing_id: normalized.external_listing_id,
-          title: normalized.title,
-          address: normalized.address,
-          city: normalized.city,
-          state: normalized.state,
-          zip_code: normalized.zip_code,
-          price: normalized.list_price || normalized.asking_price,
-          bedrooms: normalized.bedrooms,
-          bathrooms: normalized.bathrooms,
-          sqft: normalized.sqft,
-          asset_class: ['crexi', 'loopnet'].includes(sourceType) ? 'commercial' : 'residential',
-          property_type: normalized.property_type,
-          image_url: normalized.primary_image_url,
-          normalized_listing: normalized as any,
-          status,
-          duplicate_listing_id: (duplicate as any)?.id || null,
-          ignored: Boolean(ignored),
-          ignore_reason: (ignored as any)?.reason || null,
-          data_quality: { checklist: dataQuality, policy: providerPolicySnapshot(policy) },
-        })
-        inserted += 1
-      } catch (error) {
-        failed += 1
-        await supabase.from('market_import_preview_items').insert({
-          organization_id: workspace.organization.id,
-          import_batch_id: batchId,
-          source_type: sourceType,
-          source_url: listingUrl || entrySourceUrl,
-          title: listingUrl || entrySourceUrl,
-          normalized_listing: {},
-          status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Preview failed',
-          data_quality: { checklist: [] },
-        })
-      }
-    }
-
-    const expiresAt = new Date(Date.now() + policy.storageDays * 24 * 60 * 60 * 1000).toISOString()
-    await supabase.from('market_url_import_batches').update({
-      status: failed && inserted ? 'preview_ready' : inserted ? 'preview_ready' : 'failed',
-      total_found: discoveredEntries.length,
-      failed_count: failed,
-      policy_snapshot: providerPolicySnapshot(policy),
-      provider_data_expires_at: expiresAt,
-      queue_summary: { ...((batch as any).queue_summary || {}), previewCount: inserted, failedCount: failed, policy: providerPolicySnapshot(policy) },
-    }).eq('id', batchId).eq('organization_id', workspace.organization.id)
-    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'preview_generated', message: `Preview generated with ${inserted} listing(s).`, metadata: { found: discoveredEntries.length, inserted, failed, sourceType } })
+    await createPreviewForBatch({ supabase, workspace, batch: batch as any })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not generate preview'
     await supabase.from('market_url_import_batches').update({ status: 'failed', last_error: message }).eq('id', batchId).eq('organization_id', workspace.organization.id)
-    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'import_failed', message, metadata: { sourceType } })
+    await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, eventType: 'import_failed', message, metadata: { sourceType: String((batch as any).source_type || 'generic') } })
     redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(message)}`)
   }
 
@@ -319,7 +442,7 @@ export async function importPreviewItemsAction(formData: FormData) {
   }
   const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, 10))
   if (error) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(error.message)}`)
-  if (!items?.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('No importable preview items found.')}`)
+  if (!items?.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('No importable preview items found. Generate preview first, or select rows with status new/duplicate/existing.')}`)
 
   let created = 0
   let updated = 0

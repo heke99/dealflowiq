@@ -13,7 +13,7 @@ import {
   saveOpportunityAction,
 } from '@/app/market/actions'
 import { getMarketSourceAdapters } from '@/lib/market/sourceAdapters'
-import { SubmitButton } from '@/components/forms/SubmitButton'
+import { dealStatusLabel } from '@/lib/market/review'
 
 type Search = Record<string, string | string[] | undefined>
 type Row = Record<string, any>
@@ -22,7 +22,6 @@ const tabs = [
   ['all', 'All Listings'],
   ['public', 'Public'],
   ['community', 'Community'],
-  ['opportunities', 'Opportunities'],
   ['needs_review', 'Needs Review'],
   ['sources', 'Sources'],
 ]
@@ -45,17 +44,6 @@ function dateText(value: string | null | undefined) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
-function numberText(value: number | string | null | undefined) {
-  const parsed = Number(value || 0)
-  if (!parsed) return '—'
-  return parsed.toLocaleString()
-}
-
-function percent(value: number | string | null | undefined) {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return '—'
-  return `${(parsed * 100).toFixed(1)}%`
-}
 
 function initials(title: string) {
   return title.split(/\s+/).filter(Boolean).slice(0, 2).map((item) => item[0]?.toUpperCase()).join('') || 'DF'
@@ -73,6 +61,11 @@ function latestScoreMap(scores: Row[] | null | undefined) {
     if (!existing || currentScore > existingScore || (currentScore === existingScore && currentTime > existingTime)) map.set(id, score)
   }
   return map
+}
+
+function metricFromListingOrScore(listing: Row, score: Row | null | undefined, listingKey: string, scoreKey: string) {
+  const listingValue = listing[listingKey]
+  return listingValue !== null && listingValue !== undefined && listingValue !== '' ? listingValue : score?.[scoreKey]
 }
 
 function watchMap(rows: Row[] | null | undefined) {
@@ -126,7 +119,8 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
 }
 
 function ListingCard({ listing, score, watch }: { listing: Row; score: Row | null; watch: Row | null }) {
-  const dealScore = Math.round(Number(score?.deal_score || 0))
+  const dealScore = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0))
+  const rentConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0))
   const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || listing.address || 'Location pending'
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
@@ -148,14 +142,16 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
         <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {score?.risk_level || 'medium'}</span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence || '—'}</span>
+        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{dealStatusLabel(listing.deal_status)}</span>
         {watch?.status ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{String(watch.status).replaceAll('_', ' ')}</span> : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <Metric label="Price" value={money(listing.list_price || listing.asking_price, true)} />
-        <Metric label="Cashflow" value={money(score?.estimated_monthly_cashflow)} tone={Number(score?.estimated_monthly_cashflow || 0) > 0 ? 'text-emerald-300' : undefined} />
-        <Metric label="HUD gap" value={score?.hud_rent_gap ? `${money(score.hud_rent_gap)}/mo` : '—'} tone={Number(score?.hud_rent_gap || 0) > 0 ? 'text-emerald-300' : undefined} />
-        <Metric label="DSCR" value={score?.estimated_dscr ? Number(score.estimated_dscr).toFixed(2) : '—'} />
+        <Metric label="Cashflow" value={money(metricFromListingOrScore(listing, score, 'latest_estimated_monthly_cashflow', 'estimated_monthly_cashflow'))} tone={Number(metricFromListingOrScore(listing, score, 'latest_estimated_monthly_cashflow', 'estimated_monthly_cashflow') || 0) > 0 ? 'text-emerald-300' : undefined} />
+        <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
+        <Metric label="DSCR" value={metricFromListingOrScore(listing, score, 'latest_estimated_dscr', 'estimated_dscr') ? Number(metricFromListingOrScore(listing, score, 'latest_estimated_dscr', 'estimated_dscr')).toFixed(2) : '—'} />
       </div>
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
@@ -164,6 +160,7 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
           <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{reasons.slice(0, 2).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
         ) : <p className="mt-2 text-xs leading-5 text-slate-500">Add rent, price and ZIP data to improve ranking.</p>}
         {risks.length ? <p className="mt-2 text-xs text-amber-200">Risk: {String(risks[0])}</p> : null}
+        {listing.why_this_deal ? <p className="mt-2 text-xs leading-5 text-slate-400">{listing.why_this_deal}</p> : null}
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -198,7 +195,6 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const state = one(params?.state)
   const zip = one(params?.zip)
   const minScore = Number(one(params?.min_score, activeTab === 'opportunities' ? '80' : '0'))
-  const importJobId = one(params?.import_job_id)
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
   const canImportSources = canUseFeature(workspace.access.features, 'market_source_imports') || Boolean(workspace.access.isPlatformAdmin)
@@ -209,18 +205,17 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   if (city) listingsQuery = listingsQuery.ilike('city', `%${city}%`)
   if (state) listingsQuery = listingsQuery.ilike('state', state)
   if (zip) listingsQuery = listingsQuery.eq('zip_code', zip)
-  if (importJobId) listingsQuery = listingsQuery.eq('import_job_id', importJobId)
   if (activeTab === 'public') listingsQuery = listingsQuery.eq('visibility', 'public')
   if (activeTab === 'community') listingsQuery = listingsQuery.eq('visibility', 'community')
   if (activeTab === 'needs_review') listingsQuery = listingsQuery.eq('status', 'needs_review')
 
   const [listingsResult, scoresResult, watchResult, sourcesResult, jobsResult, queueResult] = await Promise.all([
     listingsQuery,
-    supabase.from('market_listing_scores').select('*').order('calculated_at', { ascending: false }).limit(500),
+    supabase.from('market_listing_scores').select('*').order('deal_score', { ascending: false }).order('calculated_at', { ascending: false }).limit(500),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('organization_id', workspace.organization.id).eq('user_id', workspace.user.id) : Promise.resolve({ data: [] as Row[], error: null }),
     workspace.organization?.id ? supabase.from('market_sources').select('*').eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(30) : Promise.resolve({ data: [] as Row[], error: null }),
     workspace.organization?.id ? supabase.from('market_import_jobs').select('*').eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(12) : Promise.resolve({ data: [] as Row[], error: null }),
-    workspace.organization?.id ? supabase.from('market_source_queue_items').select('id,status,source_id,input_url,last_error,listing_id,attempts,next_attempt_at,completed_at,created_at').eq('organization_id', workspace.organization.id).in('status', ['queued', 'running', 'failed', 'completed']) : Promise.resolve({ data: [] as Row[], error: null }),
+    workspace.organization?.id ? supabase.from('market_source_queue_items').select('id,status,source_id').eq('organization_id', workspace.organization.id).in('status', ['queued', 'running', 'failed']) : Promise.resolve({ data: [] as Row[], error: null }),
   ])
 
   const listings = (listingsResult.data || []) as Row[]
@@ -229,13 +224,19 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const queueRows = (queueResult.data || []) as Row[]
 
   let visibleListings = [...listings]
-  if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => Number(scoresByListing.get(String(listing.id))?.deal_score || 0) >= Math.max(80, minScore))
+  if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => {
+    const score = scoresByListing.get(String(listing.id))
+    return Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0) >= Math.max(80, minScore) && Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0) >= 65
+  })
   if (activeTab === 'saved') visibleListings = visibleListings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
-  visibleListings = visibleListings.filter((listing) => !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
-  visibleListings.sort((a, b) => Number(scoresByListing.get(String(b.id))?.deal_score || 0) - Number(scoresByListing.get(String(a.id))?.deal_score || 0))
+  visibleListings = visibleListings.filter((listing) => listing.status !== 'archived' && !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
+  visibleListings.sort((a, b) => Number(metricFromListingOrScore(b, scoresByListing.get(String(b.id)), 'latest_deal_score', 'deal_score') || 0) - Number(metricFromListingOrScore(a, scoresByListing.get(String(a.id)), 'latest_deal_score', 'deal_score') || 0))
 
   const totalListings = listings.length
-  const opportunityCount = listings.filter((listing) => Number(scoresByListing.get(String(listing.id))?.deal_score || 0) >= 80).length
+  const opportunityCount = listings.filter((listing) => {
+    const score = scoresByListing.get(String(listing.id))
+    return Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0) >= 80 && Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0) >= 65
+  }).length
   const savedCount = listings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || ''))).length
   const runningImports = queueRows.filter((row) => row.status === 'running').length
   const queuedImports = queueRows.filter((row) => row.status === 'queued').length
@@ -260,13 +261,14 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <p className="mt-4 max-w-3xl text-slate-300">One clean place for imported listings, public/community deals and the highest-ranked opportunities. Deals stay in My Deals; Market is where the system finds and ranks new inventory.</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">View Opportunities</Link>
+                <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">URL Import Queue</Link>
                 <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import Sources</Link>
                 <Link href="/deals/new" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Add My Deal</Link>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
               <Metric label="Market" value={String(totalListings)} />
-              <Metric label="80+ Opportunities" value={String(opportunityCount)} tone="text-emerald-300" />
+              <Metric label="Qualified Opportunities" value={String(opportunityCount)} tone="text-emerald-300" />
               <Metric label="Saved" value={String(savedCount)} />
               <Metric label="Queue" value={`${queuedImports} queued / ${runningImports} running`} />
             </div>
@@ -301,15 +303,9 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             </form>
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100 lg:w-72">
               <div className="font-semibold">Opportunity rule</div>
-              <p className="mt-2 text-emerald-100/80">Listings with score 80+ are promoted into Opportunities. Lower scores remain searchable in Market.</p>
+              <p className="mt-2 text-emerald-100/80">Listings need score 80+ and rent confidence 65+ before they are promoted into Opportunities. Lower-confidence deals stay searchable in Market.</p>
             </div>
           </section>
-        ) : null}
-
-        {importJobId && activeTab !== 'sources' ? (
-          <div className="rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4 text-sm text-sky-100">
-            Showing listings imported from job <span className="font-mono">{importJobId.slice(0, 8)}</span>. <Link href="/market?tab=all" className="font-semibold underline">Clear filter</Link>
-          </div>
         ) : null}
 
         {activeTab === 'sources' ? (
@@ -318,8 +314,8 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-xl font-bold">Quick URL import</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. DealFlowIQ imports, normalizes, scores and ranks it immediately.</p>
+                    <h2 className="text-xl font-bold">Quick listing URL import</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. For search URLs like Zillow map searches, use the controlled URL Import Analyzer.</p>
                   </div>
                   {!canImportSources ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Premium</span> : null}
                 </div>
@@ -342,8 +338,9 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                       </select>
                     </label>
                   </div>
-                  <SubmitButton pendingText="Importing listing..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and rank now</SubmitButton>
+                  <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and rank now</button>
                 </form>
+                <Link href="/imports" className="mt-3 inline-flex w-full justify-center rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Analyze search URL instead</Link>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
@@ -387,7 +384,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                     <input type="checkbox" name="auto_import_enabled" defaultChecked className="h-4 w-4" />
                     Run automatically through scheduled worker
                   </label>
-                  <SubmitButton pendingText="Creating source..." className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Create source</SubmitButton>
+                  <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Create source</button>
                 </form>
               </div>
             </div>
@@ -413,27 +410,9 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                           <div>Last: {dateText(source.last_run_at)}</div>
                         </div>
                         {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{source.last_error}</div> : null}
-                        {sourceQueue.length ? (
-                          <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
-                            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Queued import jobs</div>
-                            <div className="mt-2 space-y-2">
-                              {sourceQueue.slice(0, 5).map((item: Row) => (
-                                <div key={item.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-xs">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="truncate text-slate-300">{item.input_url || 'Queued URL'}</span>
-                                    <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-slate-300">{item.status}</span>
-                                  </div>
-                                  <div className="mt-1 text-slate-500">Attempts: {Number(item.attempts || 0)} · Next: {dateText(item.next_attempt_at)}</div>
-                                  {item.last_error ? <div className="mt-1 text-red-200">{item.last_error}</div> : null}
-                                  {item.listing_id ? <Link href={`/market/${item.listing_id}`} className="mt-2 inline-flex text-sky-300 underline">Open imported listing</Link> : null}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
                         <form action={runMarketSourceAction} className="mt-3">
                           <input type="hidden" name="source_id" value={source.id} />
-                          <SubmitButton disabled={!canRunSources} pendingText="Running import..." className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">Run now</SubmitButton>
+                          <button disabled={!canRunSources} className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">Run now</button>
                         </form>
                       </div>
                     )
@@ -445,51 +424,16 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <h2 className="text-xl font-bold">Recent import jobs</h2>
                 <div className="mt-5 space-y-3">
-                  {(jobsResult.data || []).map((job: Row) => {
-                    const summary = (job.source_summary && typeof job.source_summary === 'object' ? job.source_summary : {}) as Row
-                    const previewRows = Array.isArray(summary.previewRows) ? summary.previewRows : []
-                    const listingIds = Array.isArray(job.normalized_listing_ids) ? job.normalized_listing_ids : []
-                    return (
+                  {(jobsResult.data || []).map((job: Row) => (
                     <div key={job.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold text-slate-100">{String(job.job_type || 'import').replaceAll('_', ' ')}</div>
-                          <div className="mt-1 truncate text-xs text-slate-500">{job.input_url || 'No input URL'}</div>
-                        </div>
-                        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${job.status === 'completed' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : job.status === 'failed' ? 'border-red-400/30 bg-red-400/10 text-red-100' : job.status === 'partial' ? 'border-amber-400/30 bg-amber-400/10 text-amber-100' : 'border-sky-400/30 bg-sky-400/10 text-sky-100'}`}>{job.status}</span>
+                        <div className="text-sm font-semibold text-slate-100">{job.job_type.replaceAll('_', ' ')}</div>
+                        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${job.status === 'completed' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : job.status === 'failed' ? 'border-red-400/30 bg-red-400/10 text-red-100' : 'border-amber-400/30 bg-amber-400/10 text-amber-100'}`}>{job.status}</span>
                       </div>
-                      <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-4">
-                        <div>Found: {job.items_found || 0}</div>
-                        <div>Created: {job.items_created || 0}</div>
-                        <div>Updated: {job.items_updated || 0}</div>
-                        <div>Failed: {job.items_failed || 0}</div>
-                      </div>
-                      {summary.topScore !== undefined ? <div className="mt-2 text-xs text-slate-400">Top score: <span className="font-semibold text-slate-100">{Number(summary.topScore || 0)}</span>{Number(summary.topScore || 0) >= 80 ? ' · qualifies for Opportunities' : ' · stays in Market until it reaches 80+'}</div> : null}
-                      {job.error_message ? <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
-                      {previewRows.length ? (
-                        <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
-                          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Batch preview / row results</div>
-                          <div className="mt-2 space-y-2">
-                            {previewRows.slice(0, 10).map((row: Row, index: number) => (
-                              <div key={`${job.id}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-xs">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="truncate font-medium text-slate-200">{row.address || row.title || row.source_url || `Row ${index + 1}`}</span>
-                                  <span className={`shrink-0 rounded-full border px-2 py-0.5 ${row.status === 'failed' ? 'border-red-400/30 text-red-200' : 'border-emerald-400/30 text-emerald-200'}`}>{String(row.status || 'ready')}</span>
-                                </div>
-                                <div className="mt-1 text-slate-500">{[row.city, row.state, row.zip_code].filter(Boolean).join(', ')} · {row.list_price ? money(row.list_price as any, true) : 'price pending'} · {row.bedrooms || '—'} bd / {row.bathrooms || '—'} ba / {row.sqft || '—'} sqft</div>
-                                {row.error ? <div className="mt-1 text-red-200">{String(row.error)}</div> : null}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {listingIds.length ? <Link href={`/market?tab=all&import_job_id=${job.id}`} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-slate-200">View imported listings in Market</Link> : null}
-                        {Number(summary.topScore || 0) >= 80 ? <Link href="/opportunities" className="rounded-xl border border-emerald-400/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/10">View Opportunities</Link> : null}
-                        {job.input_url ? <a href={job.input_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10">Open source</a> : null}
-                      </div>
+                      <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · created {job.items_created || 0} · updated {job.items_updated || 0} · failed {job.items_failed || 0}</div>
+                      {job.error_message ? <div className="mt-2 text-xs text-red-200">{job.error_message}</div> : null}
                     </div>
-                  )})}
+                  ))}
                   {!(jobsResult.data || []).length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No import jobs yet.</div> : null}
                 </div>
               </div>
@@ -499,7 +443,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <p className="mt-2 text-sm text-slate-400">Use this for broker sheets, partner data and batch backfills.</p>
                 <form action={importMarketCsvAction} className="mt-5 space-y-4">
                   <textarea name="csv_text" rows={7} placeholder="title,address,city,state,zip,list_price,market_rent,hud_rent,primary_image_url,source_url" className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
-                  <SubmitButton pendingText="Importing CSV..." className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import CSV</SubmitButton>
+                  <button className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import CSV</button>
                 </form>
               </div>
             </div>

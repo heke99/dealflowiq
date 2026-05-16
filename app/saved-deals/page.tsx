@@ -109,7 +109,7 @@ export default async function SavedDealsPage({ searchParams }: { searchParams?: 
   const { data: watchRows } = await watchQuery
   const listingIds = (watchRows || []).map((row: Row) => row.listing_id).filter(Boolean)
   const { data: scores } = listingIds.length
-    ? await supabase.from('market_listing_scores').select('*').in('listing_id', listingIds).order('calculated_at', { ascending: false }).limit(300)
+    ? await supabase.from('market_listing_scores').select('*').in('listing_id', listingIds).order('deal_score', { ascending: false }).order('calculated_at', { ascending: false }).limit(300)
     : { data: [] as Row[] }
   const scoreMap = latestScoreMap(scores as Row[])
   const { data: buyerMatches } = listingIds.length

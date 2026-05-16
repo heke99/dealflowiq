@@ -67,7 +67,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const buyersEnabled = canUseFeature(workspace.access.features, 'buyer_matching') || Boolean(workspace.access.isPlatformAdmin)
   const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }, { data: rentEstimates }, { data: hudSnapshots }, { data: manualOverrides }] = await Promise.all([
     supabase.from('market_listings').select('*').eq('id', id).maybeSingle(),
-    supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('calculated_at', { ascending: false }).limit(1),
+    supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('deal_score', { ascending: false }).order('calculated_at', { ascending: false }).limit(1),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('listing_id', id).eq('user_id', workspace.user.id).maybeSingle() : Promise.resolve({ data: null }),
     workspace.organization?.id && buyersEnabled ? supabase.from('buyer_deal_matches').select('*, buyers(name, company_name, email, phone, status)').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('match_score', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
     workspace.organization?.id ? supabase.from('market_listing_notes').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
@@ -80,8 +80,8 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   if (!listing) notFound()
   const row = listing as Row
   const score = (scores || [])[0] as Row | undefined
-  const dealScore = Math.round(Number(score?.deal_score || 0))
-  const rentConfidence = Math.round(Number(score?.rent_confidence_score || 0))
+  const dealScore = Math.round(Number(row.latest_deal_score ?? score?.deal_score ?? 0))
+  const rentConfidence = Math.round(Number(row.latest_rent_confidence_score ?? score?.rent_confidence_score ?? 0))
   const isQualifiedOpportunity = dealScore >= 80 && rentConfidence >= 65
   const matches = (buyerMatches || []) as Row[]
   const noteRows = (notes || []) as Row[]
@@ -185,7 +185,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Rent intelligence</h2>
               <div className="mt-5 grid gap-4 md:grid-cols-3">
-                <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent)} />
+                <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent || score?.market_rent)} />
                 <Metric label="HUD/FMR rent" value={money(row.hud_rent)} />
                 <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : 'text-amber-300'} />
               </div>
@@ -291,7 +291,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                 <form action={addListingManualOverrideAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
                   <input type="hidden" name="listing_id" value={row.id} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Manual override</label>
-                  <select name="field_name" defaultValue="market_rent" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="market_rent">Market rent</option><option value="hud_rent">HUD rent</option><option value="current_rent">Current rent</option><option value="list_price">List price</option><option value="rehab_estimate">Rehab estimate</option></select>
+                  <select name="field_name" defaultValue="market_rent" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="market_rent">Market rent</option><option value="hud_rent">HUD rent</option><option value="current_rent">Current rent</option><option value="estimated_rent">Estimated rent</option><option value="list_price">List price</option><option value="rehab_estimate">Rehab estimate</option></select>
                   <input name="new_value" placeholder="New value" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                   <input name="reason" placeholder="Reason" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                   <label className="mt-2 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" name="apply_to_score" defaultChecked /> Apply to score</label>
@@ -312,13 +312,14 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
               <Metric label="Price" value={money(row.list_price || row.asking_price)} />
               <Metric label="Units" value={numberText(row.units || 1)} />
-              <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent)} />
+              <Metric label="Current rent" value={money(row.current_rent)} />
+              <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent || score?.market_rent)} />
               <Metric label="HUD rent" value={money(row.hud_rent)} />
               <Metric label="Stage" value={String(row.deal_stage || 'imported').replaceAll('_', ' ')} />
-              <Metric label="Monthly cashflow" value={money(score?.estimated_monthly_cashflow)} tone={Number(score?.estimated_monthly_cashflow || 0) > 0 ? 'text-emerald-300' : undefined} />
-              <Metric label="DSCR" value={score?.estimated_dscr ? Number(score.estimated_dscr).toFixed(2) : '—'} />
-              <Metric label="Cap rate" value={percent(score?.estimated_cap_rate)} />
-              <Metric label="Break-even rent" value={money(score?.break_even_rent)} />
+              <Metric label="Monthly cashflow" value={money(row.latest_estimated_monthly_cashflow ?? score?.estimated_monthly_cashflow)} tone={Number(row.latest_estimated_monthly_cashflow ?? score?.estimated_monthly_cashflow ?? 0) > 0 ? 'text-emerald-300' : undefined} />
+              <Metric label="DSCR" value={(row.latest_estimated_dscr ?? score?.estimated_dscr) ? Number(row.latest_estimated_dscr ?? score?.estimated_dscr).toFixed(2) : '—'} />
+              <Metric label="Cap rate" value={percent(row.latest_estimated_cap_rate ?? score?.estimated_cap_rate)} />
+              <Metric label="Break-even rent" value={money(row.latest_break_even_rent ?? score?.break_even_rent)} />
             </div>
 
             {buyersEnabled ? (

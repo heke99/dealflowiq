@@ -51,7 +51,7 @@ function listingToDeal(listing: MarketListingLike) {
     asking_price: price,
     arv: positive(listing.arv),
     rehab_estimate: positive(listing.rehab_estimate),
-    current_rent: positive(listing.current_rent ?? listing.estimated_rent),
+    current_rent: positive(listing.current_rent),
     market_rent: positive(listing.market_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent),
     section8_rent: positive(listing.hud_rent ?? listing.section8_rent),
     taxes_annual: positive(listing.taxes_annual),
@@ -85,17 +85,17 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
   const summary = calculateDealUnderwriting(deal, { number_of_units: units })
   const primary = summary.primaryScenario
   const listPrice = summary.purchasePrice
-  const currentRent = positive(listing.current_rent ?? listing.estimated_rent)
-  const marketRent = positive(listing.market_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent)
+  const currentRent = positive(listing.current_rent)
+  const marketRent = positive(listing.market_rent ?? listing.estimated_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent)
   const hudRent = positive(listing.hud_rent ?? listing.section8_rent)
   const marketGap = marketRent && currentRent ? marketRent - currentRent : marketRent && primary.breakEvenRent ? marketRent - primary.breakEvenRent : 0
   const hudGap = hudRent && currentRent ? hudRent - currentRent : hudRent && primary.breakEvenRent ? hudRent - primary.breakEvenRent : 0
 
-  const cashflowScore = clamp((primary.monthlyCashflow + 500) / 15)
-  const dscrScore = primary.dscr === null ? 20 : clamp((primary.dscr - 0.85) * 90)
-  const capRateScore = primary.capRate === null ? 20 : clamp(primary.capRate * 900)
-  const hudScore = clamp((hudGap + 250) / 10)
-  const marketScore = clamp((marketGap + 250) / 10)
+  const cashflowScore = clamp((primary.monthlyCashflow + 600) / 16)
+  const dscrScore = primary.dscr === null ? 18 : clamp((primary.dscr - 0.9) * 95)
+  const capRateScore = primary.capRate === null ? 18 : clamp(primary.capRate * 950)
+  const hudScore = clamp((hudGap + 300) / 11)
+  const marketScore = clamp((marketGap + 300) / 11)
   const dataFields = [listPrice, primary.monthlyRent, units, Number(Boolean(listing.zip_code)), Number(Boolean(listing.address || listing.city)), Number(Boolean(listing.primary_image_url || (Array.isArray(listing.image_urls) && listing.image_urls.length)))]
   const dataConfidenceScore = clamp(dataFields.filter(Boolean).length / dataFields.length * 100)
   const rentConfidenceScore = clamp(
@@ -124,7 +124,16 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
     0,
     65,
   )
-  const dealScore = clamp(cashflowScore * 0.2 + dscrScore * 0.2 + capRateScore * 0.16 + hudScore * 0.14 + marketScore * 0.14 + dataConfidenceScore * 0.16 - riskPenalty * 0.45)
+  const confidenceBlend = (rentConfidenceScore * 0.55) + (sourceConfidenceScore * 0.25) + (dataConfidenceScore * 0.2)
+  const dealScore = clamp(
+    cashflowScore * 0.24 +
+    dscrScore * 0.24 +
+    capRateScore * 0.16 +
+    Math.max(hudScore, marketScore) * 0.12 +
+    dataConfidenceScore * 0.1 +
+    confidenceBlend * 0.14 -
+    riskPenalty * 0.5,
+  )
 
   const reasons: string[] = []
   const risks: string[] = []

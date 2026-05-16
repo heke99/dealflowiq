@@ -380,10 +380,10 @@ export async function importMarketUrlAction(formData: FormData) {
     organization_id: workspace.organization.id,
     source_id: sourceId,
     created_by: workspace.user.id,
-    job_type: searchImport ? 'authorized_search_url' : 'authorized_listing_url',
+    job_type: 'authorized_scrape',
     status: 'running',
     input_url: inputUrl,
-    input_payload: { sourceType, visibility, startedFrom: 'market_import_url_action', searchImport },
+    input_payload: { sourceType, visibility, startedFrom: 'market_import_url_action', searchImport, importMode: searchImport ? 'search_url' : 'listing_url' },
     started_at: new Date().toISOString(),
   }).select('*').single()
 

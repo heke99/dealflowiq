@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { addListingManualOverrideAction, addMarketListingNoteAction, convertListingToDealAction, ignoreMarketListingAction, rescoreMarketListingAction, runListingFullIntelligenceAction, runListingHudLookupAction, runListingMarketRentAction, saveOpportunityAction, updateMarketListingReviewStatusAction, updateMarketListingStageAction } from '@/app/market/actions'
+import { addListingManualOverrideAction, addMarketListingNoteAction, convertListingToDealAction, ignoreMarketListingAction, rescoreMarketListingAction, runListingFullIntelligenceAction, runListingHudLookupAction, runListingMarketRentAction, saveOpportunityAction, updateMarketListingAnalysisInputsAction, updateMarketListingReviewStatusAction, updateMarketListingStageAction } from '@/app/market/actions'
 import { canUseFeature } from '@/lib/billing/features'
 import { dealStatusLabel } from '@/lib/market/review'
 
@@ -182,6 +182,40 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
             </div>
 
 
+            <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.06] p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-emerald-50">Analysis inputs</h2>
+                  <p className="mt-2 text-sm leading-6 text-emerald-50/75">These fields are the source of truth for score, ranking, Market and Opportunities. Saving recalculates the score immediately.</p>
+                </div>
+                <span className="rounded-full border border-emerald-400/25 px-3 py-1 text-xs font-semibold uppercase text-emerald-100">Syncs score</span>
+              </div>
+              <form action={updateMarketListingAnalysisInputsAction} className="mt-5">
+                <input type="hidden" name="listing_id" value={row.id} />
+                <div className="grid gap-3 md:grid-cols-3">
+                  <input name="list_price" defaultValue={row.list_price || ''} placeholder="List price" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="asking_price" defaultValue={row.asking_price || ''} placeholder="Asking price" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="arv" defaultValue={row.arv || ''} placeholder="ARV" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="current_rent" defaultValue={row.current_rent || ''} placeholder="Current rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="market_rent" defaultValue={row.market_rent || row.estimated_rent || ''} placeholder="Market rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="hud_rent" defaultValue={row.hud_rent || ''} placeholder="HUD/FMR rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="target_rent" defaultValue={row.target_rent || ''} placeholder="Target rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="rehab_estimate" defaultValue={row.rehab_estimate || ''} placeholder="Rehab estimate" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="taxes_annual" defaultValue={row.taxes_annual || ''} placeholder="Annual taxes" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="insurance_annual" defaultValue={row.insurance_annual || ''} placeholder="Annual insurance" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="hoa_monthly" defaultValue={row.hoa_monthly || ''} placeholder="Monthly HOA" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="utilities_monthly" defaultValue={row.utilities_monthly || ''} placeholder="Monthly utilities" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="capex_monthly" defaultValue={row.capex_monthly || ''} placeholder="Monthly capex" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="vacancy_percent" defaultValue={row.vacancy_percent || ''} placeholder="Vacancy %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="management_percent" defaultValue={row.management_percent || ''} placeholder="Management %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="down_payment_percent" defaultValue={row.down_payment_percent || ''} placeholder="Down payment %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="interest_rate_percent" defaultValue={row.interest_rate_percent || ''} placeholder="Interest rate %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="loan_term_months" defaultValue={row.loan_term_months || ''} placeholder="Loan term months" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                </div>
+                <button className="mt-4 rounded-xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-200">Update analysis & sync score</button>
+              </form>
+            </div>
+
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Rent intelligence</h2>
               <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -291,7 +325,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
                 <form action={addListingManualOverrideAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
                   <input type="hidden" name="listing_id" value={row.id} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Manual override</label>
-                  <select name="field_name" defaultValue="market_rent" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="market_rent">Market rent</option><option value="hud_rent">HUD rent</option><option value="current_rent">Current rent</option><option value="estimated_rent">Estimated rent</option><option value="list_price">List price</option><option value="rehab_estimate">Rehab estimate</option></select>
+                  <select name="field_name" defaultValue="market_rent" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="market_rent">Market rent</option><option value="hud_rent">HUD rent</option><option value="current_rent">Current rent</option><option value="estimated_rent">Estimated rent</option><option value="target_rent">Target rent</option><option value="list_price">List price</option><option value="rehab_estimate">Rehab estimate</option></select>
                   <input name="new_value" placeholder="New value" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                   <input name="reason" placeholder="Reason" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                   <label className="mt-2 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" name="apply_to_score" defaultChecked /> Apply to score</label>
@@ -315,6 +349,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               <Metric label="Current rent" value={money(row.current_rent)} />
               <Metric label="Market rent" value={money(row.market_rent || row.estimated_rent || score?.market_rent)} />
               <Metric label="HUD rent" value={money(row.hud_rent)} />
+              <Metric label="Target rent" value={money(row.target_rent)} />
               <Metric label="Stage" value={String(row.deal_stage || 'imported').replaceAll('_', ' ')} />
               <Metric label="Monthly cashflow" value={money(row.latest_estimated_monthly_cashflow ?? score?.estimated_monthly_cashflow)} tone={Number(row.latest_estimated_monthly_cashflow ?? score?.estimated_monthly_cashflow ?? 0) > 0 ? 'text-emerald-300' : undefined} />
               <Metric label="DSCR" value={(row.latest_estimated_dscr ?? score?.estimated_dscr) ? Number(row.latest_estimated_dscr ?? score?.estimated_dscr).toFixed(2) : '—'} />

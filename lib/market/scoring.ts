@@ -52,7 +52,8 @@ function listingToDeal(listing: MarketListingLike) {
     arv: positive(listing.arv),
     rehab_estimate: positive(listing.rehab_estimate),
     current_rent: positive(listing.current_rent),
-    market_rent: positive(listing.market_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent),
+    market_rent: positive(listing.market_rent ?? listing.estimated_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent),
+    target_rent: positive(listing.target_rent),
     section8_rent: positive(listing.hud_rent ?? listing.section8_rent),
     taxes_annual: positive(listing.taxes_annual),
     insurance_annual: positive(listing.insurance_annual),
@@ -87,8 +88,10 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
   const listPrice = summary.purchasePrice
   const currentRent = positive(listing.current_rent)
   const marketRent = positive(listing.market_rent ?? listing.estimated_rent ?? listing.estimated_market_rent ?? listing.recommended_market_rent)
+  const targetRent = positive(listing.target_rent)
   const hudRent = positive(listing.hud_rent ?? listing.section8_rent)
-  const marketGap = marketRent && currentRent ? marketRent - currentRent : marketRent && primary.breakEvenRent ? marketRent - primary.breakEvenRent : 0
+  const upsideRent = targetRent || marketRent
+  const marketGap = upsideRent && currentRent ? upsideRent - currentRent : upsideRent && primary.breakEvenRent ? upsideRent - primary.breakEvenRent : 0
   const hudGap = hudRent && currentRent ? hudRent - currentRent : hudRent && primary.breakEvenRent ? hudRent - primary.breakEvenRent : 0
 
   const cashflowScore = clamp((primary.monthlyCashflow + 600) / 16)
@@ -99,7 +102,7 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
   const dataFields = [listPrice, primary.monthlyRent, units, Number(Boolean(listing.zip_code)), Number(Boolean(listing.address || listing.city)), Number(Boolean(listing.primary_image_url || (Array.isArray(listing.image_urls) && listing.image_urls.length)))]
   const dataConfidenceScore = clamp(dataFields.filter(Boolean).length / dataFields.length * 100)
   const rentConfidenceScore = clamp(
-    (marketRent || hudRent || currentRent ? 35 : 0) +
+    (marketRent || targetRent || hudRent || currentRent ? 35 : 0) +
     (Boolean(listing.zip_code) ? 20 : 0) +
     (Boolean(listing.bedrooms ?? listing.beds) ? 15 : 0) +
     (Boolean(listing.sqft) ? 10 : 0) +
@@ -186,7 +189,7 @@ export function scoreMarketListing(listing: MarketListingLike, options?: { dscrT
     estimatedDscr: primary.dscr,
     estimatedCapRate: primary.capRate,
     hudRent,
-    marketRent,
+    marketRent: marketRent || targetRent,
     selectedRent: primary.monthlyRent,
     rentGap: Math.round(marketGap),
     hudRentGap: Math.round(hudGap),

@@ -592,16 +592,15 @@ export async function rescoreMarketListingAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   const supabase = await createSupabaseServerClient()
-  const { data: listing, error } = await supabase
-    .from('market_listings')
-    .select('*')
-    .eq('id', listingId)
-    .maybeSingle()
-  if (error || !listing) redirect(`/market?error=${encodeURIComponent(error?.message || 'Listing not found')}`)
-  await insertScoreForListing(supabase, listing as any, (listing as any).organization_id || workspace.organization.id)
+  try {
+    await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
+  } catch (error) {
+    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Rescore failed')}`)
+  }
   revalidatePath('/market')
+  revalidatePath('/opportunities')
   revalidatePath(`/market/${listingId}`)
-  redirect('/opportunities?saved=rescore')
+  redirect(`/market/${listingId}?saved=rescore`)
 }
 
 export async function saveOpportunityAction(formData: FormData) {
@@ -1013,6 +1012,98 @@ async function loadOrgListing(supabase: Awaited<ReturnType<typeof createSupabase
   return data as Record<string, any>
 }
 
+
+const ANALYSIS_NUMERIC_FIELDS = [
+  'list_price',
+  'asking_price',
+  'arv',
+  'rehab_estimate',
+  'current_rent',
+  'market_rent',
+  'estimated_rent',
+  'target_rent',
+  'hud_rent',
+  'taxes_annual',
+  'insurance_annual',
+  'hoa_monthly',
+  'utilities_monthly',
+  'capex_monthly',
+  'vacancy_percent',
+  'management_percent',
+  'down_payment_percent',
+  'interest_rate_percent',
+  'loan_term_months',
+  'dscr_min_threshold',
+] as const
+
+function numericPatchFromFormData(formData: FormData) {
+  const patch: Record<string, number | null> = {}
+  for (const field of ANALYSIS_NUMERIC_FIELDS) {
+    if (!formData.has(field)) continue
+    const raw = String(formData.get(field) || '').trim()
+    patch[field] = raw ? numberValue(formData, field) : null
+  }
+  if (patch.market_rent != null && patch.estimated_rent == null) patch.estimated_rent = patch.market_rent
+  return patch
+}
+
+async function rescoreAndSyncListing(params: { supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>; organizationId: string; userId?: string | null; listingId: string }) {
+  const listing = await loadOrgListing(params.supabase, params.listingId, params.organizationId)
+  const score = await rescoreListingAfterIntelligence({ supabase: params.supabase, organizationId: params.organizationId, userId: params.userId || null, listing })
+  const refreshed = await loadOrgListing(params.supabase, params.listingId, params.organizationId)
+  await params.supabase
+    .from('market_listings')
+    .update({
+      data_quality_checklist: buildDataQualityChecklist(refreshed, score),
+      confidence_breakdown: buildConfidenceBreakdown(refreshed, score),
+      analysis_last_saved_at: new Date().toISOString(),
+      analysis_last_saved_by: params.userId || null,
+    })
+    .eq('id', params.listingId)
+    .eq('organization_id', params.organizationId)
+  return { listing: refreshed, score }
+}
+
+export async function updateMarketListingAnalysisInputsAction(formData: FormData) {
+  const listingId = String(formData.get('listing_id') || '').trim()
+  if (!listingId) redirect('/market?error=Missing listing id')
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  const supabase = await createSupabaseServerClient()
+  try {
+    const patch = numericPatchFromFormData(formData)
+    if (!Object.keys(patch).length) throw new Error('No analysis inputs were submitted.')
+    const { error } = await supabase
+      .from('market_listings')
+      .update({
+        ...patch,
+        review_reason: 'Analysis inputs were manually updated and score was recalculated.',
+        analysis_last_saved_at: new Date().toISOString(),
+        analysis_last_saved_by: workspace.user.id,
+      })
+      .eq('id', listingId)
+      .eq('organization_id', workspace.organization.id)
+    if (error) throw new Error(error.message)
+
+    const { listing, score } = await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
+    await recordMarketListingActivity(supabase, {
+      organizationId: workspace.organization.id,
+      listingId,
+      actorId: workspace.user.id,
+      eventType: 'analysis_inputs_updated',
+      title: 'Analysis inputs updated',
+      description: `Inputs saved. Score is now ${Math.round(Number(score.dealScore || 0))}/100 and rent confidence is ${Math.round(Number(score.rentConfidenceScore || 0))}/100.`,
+      metadata: { changedFields: Object.keys(patch), score, listingId: listing.id },
+    })
+  } catch (error) {
+    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Analysis inputs failed to save')}`)
+  }
+  revalidatePath('/market')
+  revalidatePath('/opportunities')
+  revalidatePath(`/market/${listingId}`)
+  redirect(`/market/${listingId}?saved=analysis_inputs`)
+}
+
 export async function runListingMarketRentAction(formData: FormData) {
   const listingId = String(formData.get('listing_id') || '').trim()
   if (!listingId) redirect('/market?error=Missing listing id')
@@ -1075,7 +1166,7 @@ export async function addListingManualOverrideAction(formData: FormData) {
   if (!listingId || !newValue) redirect(`/market/${listingId || ''}?error=${encodeURIComponent('Manual override needs a value.')}`)
   const parsedOverrideValue = Number(newValue.replace(/[$,\s]/g, ''))
   if (!Number.isFinite(parsedOverrideValue) || parsedOverrideValue < 0) redirect(`/market/${listingId}?error=${encodeURIComponent('Manual override value must be a valid positive number.')}`)
-  const safeField = ['market_rent', 'hud_rent', 'current_rent', 'estimated_rent', 'list_price', 'asking_price', 'rehab_estimate', 'taxes_annual', 'insurance_annual'].includes(fieldName) ? fieldName : 'market_rent'
+  const safeField = ['market_rent', 'hud_rent', 'current_rent', 'estimated_rent', 'target_rent', 'list_price', 'asking_price', 'arv', 'rehab_estimate', 'taxes_annual', 'insurance_annual', 'hoa_monthly', 'utilities_monthly', 'capex_monthly', 'vacancy_percent', 'management_percent', 'down_payment_percent', 'interest_rate_percent', 'loan_term_months', 'dscr_min_threshold'].includes(fieldName) ? fieldName : 'market_rent'
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   const supabase = await createSupabaseServerClient()
@@ -1091,9 +1182,7 @@ export async function addListingManualOverrideAction(formData: FormData) {
     await recordMarketListingActivity(supabase, { organizationId: workspace.organization.id, listingId, actorId: workspace.user.id, eventType: 'manual_override_added', title: 'Manual override added', description: `${safeField} changed from ${oldValue || 'blank'} to ${newValue}. ${reason}`, metadata: { fieldName: safeField, oldValue, newValue: parsedOverrideValue, applyToScore } })
     await createInAppNotification(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, actorId: workspace.user.id, type: 'manual_override_changed', title: 'Manual override changed score inputs', message: `${safeField} changed to ${parsedOverrideValue}.`, relatedEntityType: 'market_listing', relatedEntityId: listingId, actionHref: `/market/${listingId}`, metadata: { fieldName: safeField, oldValue, newValue: parsedOverrideValue } })
     if (applyToScore) {
-      const refreshed = updatedListing || await loadOrgListing(supabase, listingId, workspace.organization.id)
-      const score = await rescoreListingAfterIntelligence({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listing: refreshed })
-      await supabase.from('market_listings').update({ data_quality_checklist: buildDataQualityChecklist(refreshed, score), confidence_breakdown: buildConfidenceBreakdown(refreshed, score) }).eq('id', listingId).eq('organization_id', workspace.organization.id)
+      await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
     }
   } catch (error) {
     redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Manual override failed')}`)

@@ -85,30 +85,56 @@ function OpportunityCard({ score }: { score: Row }) {
 export default async function OpportunitiesPage() {
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
-  const { data } = await supabase
-    .from('market_listing_scores')
-    .select('*, market_listings(*)')
-    .gte('deal_score', 80)
-    .gte('rent_confidence_score', 65)
-    .order('deal_score', { ascending: false })
-    .limit(60)
+
+  let query = supabase
+    .from('market_listings')
+    .select('*')
+    .gte('latest_deal_score', 80)
+    .gte('latest_rent_confidence_score', 65)
+    .neq('status', 'archived')
+    .order('latest_deal_score', { ascending: false })
+    .limit(80)
+
+  if (workspace.organization?.id) {
+    query = query.or(`organization_id.eq.${workspace.organization.id},visibility.eq.public`)
+  } else {
+    query = query.eq('visibility', 'public')
+  }
+
+  const { data: listingsData } = await query
+  const listingIds = ((listingsData || []) as Row[]).map((listing) => String(listing.id))
+  const { data: scoreRows } = listingIds.length
+    ? await supabase
+        .from('market_listing_scores')
+        .select('*')
+        .in('listing_id', listingIds)
+        .order('deal_score', { ascending: false })
+        .order('calculated_at', { ascending: false })
+        .limit(300)
+    : { data: [] as Row[] }
 
   const scoreByListing = new Map<string, Row>()
-  for (const score of (data || []) as Row[]) {
-    const listing = score.market_listings as Row | null
-    if (!listing || listing.status === 'archived') continue
-    if (!(listing.visibility === 'public' || listing.organization_id === workspace.organization?.id)) continue
-    const listingId = String(listing.id)
+  for (const score of (scoreRows || []) as Row[]) {
+    const listingId = String(score.listing_id)
     const existing = scoreByListing.get(listingId)
-    const currentScore = Number(listing.latest_deal_score ?? score.deal_score ?? 0)
-    const existingListing = existing?.market_listings as Row | null
-    const existingScore = Number(existingListing?.latest_deal_score ?? existing?.deal_score ?? 0)
-    if (!existing || currentScore > existingScore) scoreByListing.set(listingId, score)
+    if (!existing || Number(score.deal_score || 0) > Number(existing.deal_score || 0)) scoreByListing.set(listingId, score)
   }
-  const scores = Array.from(scoreByListing.values()).sort((a, b) => {
-    const aListing = a.market_listings as Row
-    const bListing = b.market_listings as Row
-    return Number(bListing.latest_deal_score ?? b.deal_score ?? 0) - Number(aListing.latest_deal_score ?? a.deal_score ?? 0)
+
+  const scores = ((listingsData || []) as Row[]).map((listing) => {
+    const score = scoreByListing.get(String(listing.id)) || {}
+    return {
+      ...score,
+      id: score.id || `listing-${listing.id}`,
+      listing_id: listing.id,
+      deal_score: listing.latest_deal_score ?? score.deal_score ?? 0,
+      rent_confidence_score: listing.latest_rent_confidence_score ?? score.rent_confidence_score ?? 0,
+      data_confidence_score: listing.latest_data_confidence_score ?? score.data_confidence_score ?? 0,
+      source_confidence_score: listing.latest_source_confidence_score ?? score.source_confidence_score ?? 0,
+      estimated_monthly_cashflow: listing.latest_estimated_monthly_cashflow ?? score.estimated_monthly_cashflow ?? 0,
+      estimated_dscr: listing.latest_estimated_dscr ?? score.estimated_dscr ?? null,
+      estimated_cap_rate: listing.latest_estimated_cap_rate ?? score.estimated_cap_rate ?? null,
+      market_listings: listing,
+    }
   })
 
   return (

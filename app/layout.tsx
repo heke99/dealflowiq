@@ -4,16 +4,12 @@ import './globals.css'
 export const metadata: Metadata = {
   title: {
     default: 'DealFlowIQ',
-    template: '%s | DealFlowIQ',
+    template: '%s · DealFlowIQ',
   },
-  description: 'DealFlowIQ real estate underwriting and deal discovery platform.',
+  description: 'Real estate deal sourcing, underwriting, rent intelligence and buyer matching for investors and communities.',
 }
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>

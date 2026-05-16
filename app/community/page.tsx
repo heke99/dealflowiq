@@ -2,140 +2,164 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { canUseFeature } from '@/lib/billing/features'
+import { createCommunityInviteAction, createCommunityTeamAction, revokeCommunityInviteAction } from '@/app/community/actions'
 
 type Row = Record<string, any>
 
-function numberText(value: number | null | undefined) {
-  return new Intl.NumberFormat('en-US').format(Number(value || 0))
+type CommunityPageProps = {
+  searchParams?: Promise<{ error?: string; message?: string; code?: string }> | { error?: string; message?: string; code?: string }
 }
 
-function money(value: number | string | null | undefined, compact = false) {
-  const parsed = Number(value || 0)
-  if (!parsed) return '—'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
+function fmtDate(value?: string | null) {
+  if (!value) return 'No expiry'
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }
 
-function StageCard({ label, value, hint, href }: { label: string; value: string; hint: string; href: string }) {
-  return (
-    <Link href={href} className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 transition hover:border-white/25 hover:bg-white/[0.06]">
-      <div className="text-sm text-slate-400">{label}</div>
-      <div className="mt-3 text-3xl font-black">{value}</div>
-      <div className="mt-3 text-xs leading-5 text-slate-500">{hint}</div>
-    </Link>
-  )
+function inviteLink(code: string) {
+  return `/signup?invite=${encodeURIComponent(code)}`
 }
 
-function DealRow({ listing }: { listing: Row }) {
-  return (
-    <Link href={`/market/${listing.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/50 p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="line-clamp-1 font-bold text-white">{listing.title || listing.address || 'Community listing'}</div>
-          <div className="mt-1 text-xs text-slate-500">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</div>
-          <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-wide">
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-slate-300">{listing.visibility || 'community'}</span>
-            <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-emerald-100">Score {Math.round(Number(listing.latest_deal_score || 0))}</span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-slate-300">Rent {Math.round(Number(listing.latest_rent_confidence_score || 0))}</span>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-sm text-slate-500">Price</div>
-          <div className="font-black text-white">{money(listing.list_price || listing.asking_price, true)}</div>
-        </div>
-      </div>
-    </Link>
-  )
+function StatusPill({ value }: { value: string }) {
+  const tone = value === 'active' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : value === 'accepted' ? 'border-blue-400/30 bg-blue-400/10 text-blue-100' : 'border-slate-400/20 bg-slate-400/10 text-slate-200'
+  return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${tone}`}>{value.replaceAll('_', ' ')}</span>
 }
 
-export default async function CommunityDashboardPage() {
+export default async function CommunityPage({ searchParams }: CommunityPageProps) {
+  const params = await Promise.resolve(searchParams || {})
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
   const orgId = workspace.organization?.id
-  const hasCommunityAccess = canUseFeature(workspace.access.features, 'community_members') || canUseFeature(workspace.access.features, 'public_community_deals') || workspace.access.accountType === 'community_guru_owner' || workspace.access.isPlatformAdmin
+  const role = workspace.membership?.role
+  const canManage = Boolean(['owner', 'admin'].includes(role || '') || workspace.access.isPlatformAdmin)
 
-  const [communityListingsResult, publicListingsResult, buyerMatchResult, savedResult, recentListingsResult, needsReviewResult] = orgId
+  const [teamsResult, invitesResult, membersResult] = orgId
     ? await Promise.all([
-        supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('visibility', 'community'),
-        supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('visibility', 'public'),
-        supabase.from('buyer_deal_matches').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).gte('match_score', 70),
-        supabase.from('market_watchlist').select('id', { count: 'exact', head: true }).eq('organization_id', orgId),
-        supabase.from('market_listings').select('*').eq('organization_id', orgId).in('visibility', ['community', 'public']).order('created_at', { ascending: false }).limit(8),
-        supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('deal_status', ['needs_review', 'missing_data', 'low_confidence']).in('visibility', ['community', 'public']),
+        supabase.from('community_teams').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }),
+        supabase.from('community_invites').select('*, community_teams(name)').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(25),
+        supabase.from('organization_members').select('id,role,status,created_at,profiles:user_id(email,full_name)').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(25),
       ])
-    : [{ count: 0 }, { count: 0 }, { count: 0 }, { count: 0 }, { data: [] }, { count: 0 }]
+    : [{ data: [] }, { data: [] }, { data: [] }]
 
-  const recentListings = (recentListingsResult.data || []) as Row[]
+  const teams = (teamsResult.data || []) as Row[]
+  const invites = (invitesResult.data || []) as Row[]
+  const members = (membersResult.data || []) as Row[]
+  const activeInvites = invites.filter((invite) => invite.status === 'active').length
+  const acceptedInvites = invites.filter((invite) => invite.status === 'accepted').length
 
   return (
-    <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={workspace.access.accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
+    <AppShell
+      organizationName={workspace.organization?.name}
+      userEmail={workspace.user.email}
+      accountType={workspace.access.accountType}
+      features={workspace.access.features}
+      subscriptionStatus={workspace.access.status}
+      planName={workspace.access.plan?.name}
+      trialEndsAt={workspace.access.trialEndsAt}
+      isPlatformAdmin={workspace.access.isPlatformAdmin}
+    >
       <div className="space-y-8">
-        <section className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-purple-500/15 via-slate-950 to-emerald-500/10 p-6 sm:p-8">
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 sm:p-8">
           <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
             <div>
-              <div className="text-sm font-black uppercase tracking-wide text-purple-300">Community workspace</div>
-              <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">A better deal room for your members and team.</h1>
-              <p className="mt-4 max-w-3xl text-slate-300">Publish community deals, review submitted opportunities, match buyers and keep every public-facing listing backed by real underwriting data.</p>
-              {!hasCommunityAccess ? (
-                <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
-                  Community features are not enabled on this workspace yet. You can still review the dashboard structure and upgrade when ready.
-                </div>
+              <div className="text-sm font-semibold uppercase tracking-wide text-emerald-300">Community growth center</div>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-5xl">Invite members into the right community team.</h1>
+              <p className="mt-4 max-w-3xl text-slate-300">
+                Create invite codes, optionally send email invites, and let members sign up into the correct DealFlowIQ community and team automatically.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link href="/signup" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Preview signup</Link>
+                <Link href="/dashboard" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Back to dashboard</Link>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-sm text-slate-400">Members</div><div className="mt-2 text-3xl font-bold">{members.length}</div></div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-sm text-slate-400">Active invites</div><div className="mt-2 text-3xl font-bold">{activeInvites}</div></div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-sm text-slate-400">Teams</div><div className="mt-2 text-3xl font-bold">{teams.length}</div></div>
+            </div>
+          </div>
+        </section>
+
+        {params.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{decodeURIComponent(params.error)}</div> : null}
+        {params.message ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{decodeURIComponent(params.message)}{params.code ? <span className="ml-2 font-mono font-bold">{params.code}</span> : null}</div> : null}
+
+        <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Create invite</h2>
+              <p className="mt-2 text-sm text-slate-400">Send by email when configured, or create a code/link you can copy and share manually.</p>
+              {canManage ? (
+                <form action={createCommunityInviteAction} className="mt-5 space-y-4">
+                  <label className="block"><span className="text-sm font-medium text-slate-300">Email address</span><input name="email" type="email" placeholder="member@example.com" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/30" /></label>
+                  <label className="block"><span className="text-sm font-medium text-slate-300">Full name</span><input name="full_name" placeholder="Optional" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/30" /></label>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block"><span className="text-sm font-medium text-slate-300">Team</span><select name="team_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30"><option value="">No team</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+                    <label className="block"><span className="text-sm font-medium text-slate-300">Role</span><select name="role" defaultValue="member" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30"><option value="member">Member</option><option value="viewer">Viewer</option><option value="buyer">Buyer</option><option value="acquisition_manager">Acquisition manager</option><option value="disposition_manager">Disposition manager</option><option value="admin">Admin</option></select></label>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block"><span className="text-sm font-medium text-slate-300">Max uses</span><input name="max_uses" type="number" min="1" max="500" defaultValue="1" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30" /></label>
+                    <label className="block"><span className="text-sm font-medium text-slate-300">Expires in days</span><input name="expires_in_days" type="number" min="1" max="365" defaultValue="14" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30" /></label>
+                  </div>
+                  <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 text-sm text-slate-300"><input name="send_email" type="checkbox" className="mt-1" /><span><span className="font-semibold text-white">Send email invite</span><br /><span className="text-slate-500">Requires RESEND_API_KEY. Without it, DealFlowIQ still creates the invite code and signup link.</span></span></label>
+                  <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Create invite</button>
+                </form>
+              ) : <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">Only owners and admins can create invites.</div>}
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Create team</h2>
+              <p className="mt-2 text-sm text-slate-400">Teams make invite codes smarter. A member who signs up with a team invite is assigned immediately.</p>
+              {canManage ? (
+                <form action={createCommunityTeamAction} className="mt-5 space-y-4">
+                  <input name="name" placeholder="Ohio Buyers, Beginner Cohort, VIP Group..." className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  <textarea name="description" placeholder="Optional team description" rows={3} className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Create team</button>
+                </form>
               ) : null}
-              <div className="mt-7 flex flex-wrap gap-3">
-                <Link href="/market?tab=community" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">View community deals</Link>
-                <Link href="/market?tab=sources" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Import listings</Link>
-                <Link href="/buyers" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Buyer CRM</Link>
-              </div>
-            </div>
-            <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-              <h2 className="text-xl font-black">Community operating model</h2>
-              <div className="mt-5 space-y-3 text-sm text-slate-300">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><span className="font-bold text-white">1. Source</span> listings from approved providers or internal submissions.</div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><span className="font-bold text-white">2. Review</span> rent, HUD/FMR, DSCR and confidence before publishing.</div>
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><span className="font-bold text-white">3. Match</span> buyers and members with the deals that fit their buy boxes.</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <StageCard label="Community deals" value={numberText(communityListingsResult.count || 0)} hint="Listings visible to community members." href="/market?tab=community" />
-          <StageCard label="Public deals" value={numberText(publicListingsResult.count || 0)} hint="Published externally/publicly." href="/market?tab=public" />
-          <StageCard label="Needs review" value={numberText(needsReviewResult.count || 0)} hint="Quality checks before publishing." href="/market?tab=needs_review" />
-          <StageCard label="Buyer matches" value={numberText(buyerMatchResult.count || 0)} hint="Potential community/buyer fit." href="/buyers" />
-          <StageCard label="Saved" value={numberText(savedResult.count || 0)} hint="Watchlisted by workspace users." href="/saved-deals" />
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-black">Latest community/public listings</h2>
-                <p className="mt-1 text-sm text-slate-500">Listings that can be reviewed for members, buyers or public deal rooms.</p>
-              </div>
-              <Link href="/market?tab=community" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Open Market</Link>
-            </div>
-            <div className="mt-5 space-y-3">
-              {recentListings.length ? recentListings.map((listing) => <DealRow key={listing.id} listing={listing} />) : (
-                <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No community/public deals yet. Import listings or publish reviewed deals to community visibility.</div>
-              )}
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-            <h2 className="text-2xl font-black">Make the community feel premium</h2>
-            <div className="mt-5 space-y-3">
-              {[
-                ['Publish only after review', 'Use Needs Review until rent, HUD/FMR and deal score are verified.'],
-                ['Keep deal context visible', 'Show why a deal is strong, what is missing and what buyers should verify.'],
-                ['Use in-app alerts first', 'No email/SMS yet. Keep member and buyer notifications inside DealFlowIQ.'],
-                ['Protect source data', 'Keep provider source links, expiry banners and retention cleanup visible.'],
-              ].map(([title, text]) => (
-                <div key={title} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
-                  <div className="font-bold text-white">{title}</div>
-                  <div className="mt-2 text-sm leading-6 text-slate-400">{text}</div>
-                </div>
-              ))}
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-bold">Recent invites</h2><p className="mt-2 text-sm text-slate-400">Copy code or link. Members land in the right community and team on signup.</p></div><div className="text-sm text-slate-400">Accepted: {acceptedInvites}</div></div>
+              <div className="mt-5 space-y-3">
+                {invites.map((invite) => {
+                  const code = String(invite.invite_code || '')
+                  return (
+                    <div key={invite.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="font-mono text-lg font-bold tracking-wider text-white">{code}</div>
+                          <div className="mt-1 text-sm text-slate-400">{invite.email || 'Reusable code'}{invite.community_teams?.name ? ` · ${invite.community_teams.name}` : ''}</div>
+                        </div>
+                        <StatusPill value={invite.status} />
+                      </div>
+                      <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-4">
+                        <div>Role <span className="block text-slate-200">{String(invite.role).replaceAll('_', ' ')}</span></div>
+                        <div>Uses <span className="block text-slate-200">{invite.accepted_count}/{invite.max_uses}</span></div>
+                        <div>Email <span className="block text-slate-200">{String(invite.delivery_status).replaceAll('_', ' ')}</span></div>
+                        <div>Expires <span className="block text-slate-200">{fmtDate(invite.expires_at)}</span></div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2 text-sm">
+                        <Link href={inviteLink(code)} className="rounded-xl border border-white/10 px-3 py-2 font-semibold text-slate-100 hover:bg-white/10">Open signup link</Link>
+                        {invite.status === 'active' && canManage ? <form action={revokeCommunityInviteAction}><input type="hidden" name="invite_id" value={invite.id} /><button className="rounded-xl border border-red-400/20 px-3 py-2 font-semibold text-red-100 hover:bg-red-400/10">Revoke</button></form> : null}
+                      </div>
+                      {invite.delivery_error ? <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-100">Email note: {invite.delivery_error}</div> : null}
+                    </div>
+                  )
+                })}
+                {!invites.length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No invites yet. Create a code or email invite to start adding members.</div> : null}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Members</h2>
+              <div className="mt-5 space-y-3">
+                {members.map((member) => {
+                  const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles
+                  return <div key={member.id} className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-sm"><div><div className="font-semibold text-white">{profile?.full_name || profile?.email || 'Member'}</div><div className="mt-1 text-slate-500">{profile?.email}</div></div><div className="text-right"><div className="capitalize text-slate-200">{String(member.role).replaceAll('_', ' ')}</div><div className="mt-1 text-xs text-slate-500">{member.status}</div></div></div>
+                })}
+                {!members.length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No members yet.</div> : null}
+              </div>
             </div>
           </div>
         </section>

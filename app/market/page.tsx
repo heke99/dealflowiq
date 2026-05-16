@@ -14,6 +14,7 @@ import {
 } from '@/app/market/actions'
 import { getMarketSourceAdapters } from '@/lib/market/sourceAdapters'
 import { dealStatusLabel } from '@/lib/market/review'
+import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 
 type Search = Record<string, string | string[] | undefined>
 type Row = Record<string, any>
@@ -194,7 +195,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const city = one(params?.city)
   const state = one(params?.state)
   const zip = one(params?.zip)
-  const minScore = Number(one(params?.min_score, activeTab === 'opportunities' ? '80' : '0'))
+  const minScore = Number(one(params?.min_score, activeTab === 'opportunities' ? String(OPPORTUNITY_SCORE_THRESHOLD) : '0'))
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
   const canImportSources = canUseFeature(workspace.access.features, 'market_source_imports') || Boolean(workspace.access.isPlatformAdmin)
@@ -226,7 +227,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   let visibleListings = [...listings]
   if (activeTab === 'opportunities') visibleListings = visibleListings.filter((listing) => {
     const score = scoresByListing.get(String(listing.id))
-    return Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0) >= Math.max(80, minScore) && Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0) >= 65
+    return Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0) >= Math.max(OPPORTUNITY_SCORE_THRESHOLD, minScore) && Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0) >= OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD
   })
   if (activeTab === 'saved') visibleListings = visibleListings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
   visibleListings = visibleListings.filter((listing) => listing.status !== 'archived' && !['ignored', 'passed'].includes(String(watchByListing.get(String(listing.id))?.status || '')))
@@ -235,7 +236,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
   const totalListings = listings.length
   const opportunityCount = listings.filter((listing) => {
     const score = scoresByListing.get(String(listing.id))
-    return Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0) >= 80 && Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0) >= 65
+    return Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0) >= OPPORTUNITY_SCORE_THRESHOLD && Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0) >= OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD
   }).length
   const savedCount = listings.filter((listing) => ['saved', 'watching', 'contacted', 'converted_to_deal'].includes(String(watchByListing.get(String(listing.id))?.status || ''))).length
   const runningImports = queueRows.filter((row) => row.status === 'running').length
@@ -303,7 +304,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             </form>
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-100 lg:w-72">
               <div className="font-semibold">Opportunity rule</div>
-              <p className="mt-2 text-emerald-100/80">Listings need score 80+ and rent confidence 65+ before they are promoted into Opportunities. Lower-confidence deals stay searchable in Market.</p>
+              <p className="mt-2 text-emerald-100/80">Listings need score 70+ and rent confidence 50+ before they are promoted into Opportunities. Strong Opportunities need 85+ score and 65+ rent confidence.</p>
             </div>
           </section>
         ) : null}
@@ -345,7 +346,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
 
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <h2 className="text-xl font-bold">Create auto source</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-400">Add URLs once. The scheduled worker keeps checking them, updating listings and pushing 80+ deals into Opportunities.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">Add URLs once. The scheduled worker keeps checking them, updating listings and pushing qualified 70+ deals into Opportunities.</p>
                 <form action={createMarketSourceAction} className="mt-5 grid gap-4">
                   <Field label="Source name" name="source_name" placeholder="Tucson Zillow Watchlist" />
                   <label className="block">
@@ -360,7 +361,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                   </label>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Max URLs per run" name="max_urls_per_run" type="number" placeholder="5" />
-                    <Field label="Opportunity threshold" name="opportunity_score_threshold" type="number" placeholder="80" />
+                    <Field label="Opportunity threshold" name="opportunity_score_threshold" type="number" placeholder="70" />
                     <label className="block">
                       <span className="text-sm font-medium text-slate-300">Schedule</span>
                       <select name="schedule_frequency" defaultValue="hourly" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
@@ -400,7 +401,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <div className="font-semibold text-slate-100">{source.source_name}</div>
-                            <div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{source.source_type} · {source.schedule_frequency} · threshold {Number(source.opportunity_score_threshold || 80)}</div>
+                            <div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{source.source_type} · {source.schedule_frequency} · threshold {Number(source.opportunity_score_threshold || OPPORTUNITY_SCORE_THRESHOLD)}</div>
                           </div>
                           <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${source.auto_import_enabled ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : 'border-white/10 bg-white/5 text-slate-300'}`}>{source.auto_import_enabled ? 'Auto' : 'Manual'}</span>
                         </div>

@@ -69,8 +69,8 @@ export async function createBuyBoxAction(formData: FormData) {
   const name = text(formData, 'name') || 'Untitled Buy Box'
   const sourceUrls = urlList(formData, 'source_urls')
   const schedule = scheduleFrequencyValue(formData)
-  const minDealScore = integerValue(formData, 'min_deal_score') || 80
-  const minRentConfidence = integerValue(formData, 'min_rent_confidence') || 65
+  const minDealScore = integerValue(formData, 'min_deal_score') || 70
+  const minRentConfidence = integerValue(formData, 'min_rent_confidence') || 50
   const propertyTypes = csvList(formData, 'property_types')
   const sources = csvList(formData, 'sources')
 
@@ -160,8 +160,8 @@ export async function updateBuyBoxAction(formData: FormData) {
 
   const sourceUrls = urlList(formData, 'source_urls')
   const schedule = scheduleFrequencyValue(formData)
-  const minDealScore = integerValue(formData, 'min_deal_score') || 80
-  const minRentConfidence = integerValue(formData, 'min_rent_confidence') || 65
+  const minDealScore = integerValue(formData, 'min_deal_score') || 70
+  const minRentConfidence = integerValue(formData, 'min_rent_confidence') || 50
 
   const { error } = await supabase.from('market_buy_boxes').update({
     name: text(formData, 'name') || 'Untitled Buy Box',

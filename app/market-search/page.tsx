@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -147,7 +148,7 @@ export default async function MarketSearchPage({ searchParams }: { searchParams?
                       <div>Updated: {job.items_updated || 0}</div>
                       <div>Failed: {job.items_failed || 0}</div>
                     </div>
-                    {summary.topScore !== undefined ? <div className="mt-2 text-xs text-slate-400">Top score: <span className="font-semibold text-slate-100">{Number(summary.topScore || 0)}</span>{Number(summary.topScore || 0) >= 80 ? ' · qualifies for Opportunities' : ' · visible in Market'}</div> : null}
+                    {summary.topScore !== undefined ? <div className="mt-2 text-xs text-slate-400">Top score: <span className="font-semibold text-slate-100">{Number(summary.topScore || 0)}</span>{Number(summary.topScore || 0) >= OPPORTUNITY_SCORE_THRESHOLD ? ' · qualifies for Opportunities' : ' · visible in Market'}</div> : null}
                     {job.error_message ? <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
                     {previewRows.length ? (
                       <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
@@ -168,7 +169,7 @@ export default async function MarketSearchPage({ searchParams }: { searchParams?
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {listingIds.length ? <Link href={`/market?tab=all&import_job_id=${job.id}`} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-slate-200">View imported listings in Market</Link> : null}
-                      {Number(summary.topScore || 0) >= 80 ? <Link href="/opportunities" className="rounded-xl border border-emerald-400/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/10">View Opportunities</Link> : null}
+                      {Number(summary.topScore || 0) >= OPPORTUNITY_SCORE_THRESHOLD ? <Link href="/opportunities" className="rounded-xl border border-emerald-400/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/10">View Opportunities</Link> : null}
                     </div>
                     <div className="mt-2 text-xs text-slate-500">Created {dateText(job.created_at)}</div>
                   </div>

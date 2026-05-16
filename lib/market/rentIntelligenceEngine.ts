@@ -1,6 +1,7 @@
 import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
 import { scoreMarketListing } from '@/lib/market/scoring'
 import { determineDealReviewStatus } from '@/lib/market/review'
+import { classifyOpportunity } from '@/lib/market/opportunityRules'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
 
@@ -240,6 +241,7 @@ export async function rescoreListingAfterIntelligence(params: { supabase: Supaba
     calculated_at: calculatedAt,
   }).select('id').single()
   const review = determineDealReviewStatus(score as any, params.listing)
+  const rank = classifyOpportunity(score.dealScore, score.rentConfidenceScore, Array.isArray(score.missingFields) && score.missingFields.length > 0)
   await params.supabase.from('market_listings').update({
     deal_status: review.dealStatus,
     review_reason: review.reviewReason,
@@ -255,6 +257,9 @@ export async function rescoreListingAfterIntelligence(params: { supabase: Supaba
     latest_estimated_cap_rate: score.estimatedCapRate,
     latest_break_even_rent: score.breakEvenRent,
     latest_score_calculated_at: calculatedAt,
+    latest_opportunity_rank: rank.rank,
+    latest_opportunity_rank_label: rank.label,
+    latest_opportunity_rank_reason: rank.reason,
     data_quality_checklist: buildDataQualityChecklist(params.listing, score as any),
     confidence_breakdown: buildConfidenceBreakdown(params.listing, score as any),
   }).eq('id', params.listing.id).eq('organization_id', params.organizationId)

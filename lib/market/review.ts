@@ -1,4 +1,5 @@
 import type { MarketSourceType } from '@/lib/market/sourceConnectors'
+import { classifyOpportunity } from '@/lib/market/opportunityRules'
 
 type ScoreLike = Record<string, any>
 type ListingLike = Record<string, any>
@@ -37,43 +38,45 @@ export function determineDealReviewStatus(score: ScoreLike | null | undefined, l
     }
   }
 
-  if (dealScore >= 70 && rentConfidence < 65) {
-    return {
-      dealStatus: 'low_confidence',
-      reviewReason: 'Deal score is promising, but rent confidence is below the 65/100 promotion gate.',
-      listingStatus: 'needs_review',
-      why: 'This deal could be interesting, but rent assumptions need review before it should be treated as a real opportunity.',
-    }
-  }
+  const rank = classifyOpportunity(dealScore, rentConfidence, missingFields.length > 0)
 
-  if (dealScore >= 80 && rentConfidence >= 65) {
+  if (rank.isOpportunity) {
     const strengths = []
     if (cashflow > 0) strengths.push('estimated cashflow is positive')
     if (dscr >= 1.2) strengths.push('DSCR looks bankable')
     if (capRate >= 0.07) strengths.push('cap rate is above a common investor target')
-    const reason = strengths.length ? strengths.slice(0, 2).join(' and ') : 'score and rent confidence meet promotion gates'
+    const reason = strengths.length ? strengths.slice(0, 2).join(' and ') : rank.reason
     return {
       dealStatus: 'ready',
-      reviewReason: 'Deal score and rent confidence meet Opportunity rules.',
+      reviewReason: rank.reason,
       listingStatus: 'opportunity',
-      why: `This deal is strong because ${reason}. Verify source data before making an offer.`,
+      why: `${rank.label}: this deal ranks well because ${reason}. Verify source data before making an offer.`,
     }
   }
 
-  if (sourceConfidence < 45 || rentConfidence < 45) {
+  if (rank.shouldNeedsReview || sourceConfidence < 45 || rentConfidence < 50) {
     return {
       dealStatus: 'low_confidence',
-      reviewReason: 'Source or rent confidence is low.',
+      reviewReason: rank.reason,
       listingStatus: 'needs_review',
-      why: 'This deal needs review because the imported/source-derived data is not strong enough yet.',
+      why: 'This deal needs review because the score is interesting but rent/source confidence or imported data is not strong enough yet.',
+    }
+  }
+
+  if (rank.shouldWatchlist) {
+    return {
+      dealStatus: 'needs_review',
+      reviewReason: rank.reason,
+      listingStatus: currentListingStatus === 'converted_to_deal' ? 'converted_to_deal' : 'active',
+      why: 'This listing belongs on the watchlist until inputs, rent confidence or underwriting assumptions improve.',
     }
   }
 
   return {
     dealStatus: 'needs_review',
-    reviewReason: 'Deal has enough data to review, but does not meet Opportunity gates yet.',
+    reviewReason: 'Deal does not meet Watchlist or Opportunity gates yet.',
     listingStatus: currentListingStatus === 'converted_to_deal' ? 'converted_to_deal' : 'active',
-    why: 'This listing is worth reviewing, but it needs a stronger score, better rent confidence, or cleaner assumptions before promotion.',
+    why: 'This listing is worth keeping in Market, but it needs a stronger score, better rent confidence, or cleaner assumptions before promotion.',
   }
 }
 

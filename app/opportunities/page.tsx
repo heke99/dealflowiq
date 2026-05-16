@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
+import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 
 type Row = Record<string, any>
 
@@ -29,6 +30,7 @@ function OpportunityCard({ score }: { score: Row }) {
   const risks = Array.isArray(score.risks) ? score.risks : []
   const dealScore = Math.round(Number(listing.latest_deal_score ?? score.deal_score ?? 0))
   const rentConfidence = Math.round(Number(listing.latest_rent_confidence_score ?? score.rent_confidence_score ?? 0))
+  const rank = classifyOpportunity(dealScore, rentConfidence, Array.isArray(score.missing_fields) && score.missing_fields.length > 0)
   return (
     <article className="overflow-hidden rounded-3xl border border-emerald-400/20 bg-gradient-to-b from-emerald-400/[0.08] to-white/[0.03] p-4 shadow-2xl shadow-black/20">
       <Link href={`/market/${listing.id}`} className="block">
@@ -44,7 +46,7 @@ function OpportunityCard({ score }: { score: Row }) {
           <p className="mt-1 text-sm text-slate-400">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</p>
         </div>
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-emerald-100">
-          <div className="text-[10px] font-bold uppercase tracking-wide">Score</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide">{rank.label}</div>
           <div className="text-3xl font-black">{dealScore}</div>
         </div>
       </div>
@@ -89,8 +91,8 @@ export default async function OpportunitiesPage() {
   let query = supabase
     .from('market_listings')
     .select('*')
-    .gte('latest_deal_score', 80)
-    .gte('latest_rent_confidence_score', 65)
+    .gte('latest_deal_score', OPPORTUNITY_SCORE_THRESHOLD)
+    .gte('latest_rent_confidence_score', OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD)
     .neq('status', 'archived')
     .order('latest_deal_score', { ascending: false })
     .limit(80)
@@ -143,9 +145,9 @@ export default async function OpportunitiesPage() {
         <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-black p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">80+ score · 65+ rent confidence</div>
+              <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">70+ score · 50+ rent confidence</div>
               <h1 className="mt-2 text-4xl font-black tracking-tight">Opportunities</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Only listings with DealFlowIQ score 80+ and rent confidence 65+ belong here. Everything else stays in Market until score, rent confidence and data quality improve.</p>
+              <p className="mt-3 max-w-3xl text-slate-300">Listings with DealFlowIQ score 70+ and rent confidence 50+ appear here. 85+ score with 65+ rent confidence is marked as Strong Opportunity.</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href="/buy-boxes" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link>
@@ -153,7 +155,7 @@ export default async function OpportunitiesPage() {
             </div>
           </div>
         </section>
-        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 80+ score and 65+ rent confidence to appear here automatically.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
+        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
       </div>
     </AppShell>
   )

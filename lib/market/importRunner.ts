@@ -3,6 +3,7 @@ import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
 import { determineDealReviewStatus } from '@/lib/market/review'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
+import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { applyAutomatedRentIntelligence } from '@/lib/market/rentAutomation'
 import {
   buildNormalizedListingKey,
@@ -173,6 +174,7 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
 
   if (organizationId && listing.id) {
     const review = determineDealReviewStatus(score as any, listing)
+    const rank = classifyOpportunity(score.dealScore, score.rentConfidenceScore, Array.isArray(score.missingFields) && score.missingFields.length > 0)
     await supabase
       .from('market_listings')
       .update({
@@ -190,6 +192,9 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
         latest_estimated_cap_rate: score.estimatedCapRate,
         latest_break_even_rent: score.breakEvenRent,
         latest_score_calculated_at: calculatedAt,
+        latest_opportunity_rank: rank.rank,
+        latest_opportunity_rank_label: rank.label,
+        latest_opportunity_rank_reason: rank.reason,
       })
       .eq('id', listing.id)
       .eq('organization_id', organizationId)
@@ -328,7 +333,7 @@ function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string
   if (!buyBox) {
     return {
       matchScore: score.dealScore,
-      matchedStatus: score.dealScore >= threshold && score.rentConfidenceScore >= 65 ? 'opportunity' : 'matched',
+      matchedStatus: score.dealScore >= threshold && score.rentConfidenceScore >= OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD ? 'opportunity' : 'matched',
       reasons: score.reasons,
       risks: score.risks,
       snapshot: { threshold, source: 'source_without_buy_box' },
@@ -346,7 +351,7 @@ function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string
   const city = String(listing.city || '').toLowerCase()
   const state = String(listing.state || '').toLowerCase()
   const zip = String(listing.zip_code || '').toLowerCase()
-  const minRentConfidence = Number(buyBox.min_rent_confidence || 65)
+  const minRentConfidence = Number(buyBox.min_rent_confidence || OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD)
 
   if (buyBox.city || buyBox.state || buyBox.zip_code) {
     const cityOk = !buyBox.city || city === String(buyBox.city).toLowerCase()
@@ -506,7 +511,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
   const urls = queuedItems.length ? queuedItems.map((item: any) => item.input_url) : configuredUrls.slice(0, maxUrls)
   const queueItemByUrl = new Map<string, any>()
   for (const item of queuedItems) queueItemByUrl.set(String(item.input_url), item)
-  const threshold = Number(source.opportunity_score_threshold ?? settings.opportunity_score_threshold ?? 80)
+  const threshold = Number(source.opportunity_score_threshold ?? settings.opportunity_score_threshold ?? OPPORTUNITY_SCORE_THRESHOLD)
   const { data: buyBox } = source.buy_box_id
     ? await supabase.from('market_buy_boxes').select('*').eq('id', source.buy_box_id).maybeSingle()
     : { data: null }

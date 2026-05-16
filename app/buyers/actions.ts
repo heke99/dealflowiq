@@ -264,7 +264,7 @@ function scoreBuyerListingMatch(buyer: Row, listing: Row, score: Row | null): Ma
 
   if (dealScore >= 80) {
     points += 10
-    reasons.push('DealFlowIQ score is 80+.')
+    reasons.push('DealFlowIQ score is Opportunity-level.')
   } else if (dealScore > 0 && dealScore < 65) {
     points -= 8
     risks.push('DealFlowIQ score is below strong-opportunity range.')

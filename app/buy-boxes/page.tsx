@@ -32,8 +32,8 @@ function BuyBoxCard({ buyBox }: { buyBox: Row }) {
         <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${buyBox.status === 'active' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : 'border-white/10 bg-white/5 text-slate-300'}`}>{buyBox.status}</span>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Min score</div><div className="font-bold">{buyBox.min_deal_score || 80}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold">{buyBox.min_rent_confidence || 65}+</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Min score</div><div className="font-bold">{buyBox.min_deal_score || 70}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold">{buyBox.min_rent_confidence || 50}+</div></div>
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Last found</div><div className="font-bold">{buyBox.last_results_count || 0}</div></div>
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Opportunities</div><div className="font-bold text-emerald-300">{buyBox.last_opportunities_count || 0}</div></div>
       </div>
@@ -54,7 +54,7 @@ export default async function BuyBoxesPage() {
   const [{ data: buyBoxes }, { count: opportunityCount }, { count: sourceCount }] = workspace.organization?.id
     ? await Promise.all([
         supabase.from('market_buy_boxes').select('*').eq('organization_id', workspace.organization.id).neq('status', 'archived').order('created_at', { ascending: false }),
-        supabase.from('market_listing_scores').select('id', { count: 'exact', head: true }).gte('deal_score', 80),
+        supabase.from('market_listing_scores').select('id', { count: 'exact', head: true }).gte('deal_score', 70),
         supabase.from('market_sources').select('id', { count: 'exact', head: true }).eq('organization_id', workspace.organization.id).eq('auto_import_enabled', true),
       ])
     : [{ data: [] as Row[] }, { count: 0 }, { count: 0 }]
@@ -72,7 +72,7 @@ export default async function BuyBoxesPage() {
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">Buy boxes</div><div className="text-2xl font-black">{(buyBoxes || []).length}</div></div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">Auto sources</div><div className="text-2xl font-black">{sourceCount || 0}</div></div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">80+ deals</div><div className="text-2xl font-black text-emerald-300">{opportunityCount || 0}</div></div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">70+ deals</div><div className="text-2xl font-black text-emerald-300">{opportunityCount || 0}</div></div>
             </div>
           </div>
         </section>
@@ -86,7 +86,7 @@ export default async function BuyBoxesPage() {
               <textarea name="description" rows={2} placeholder="What should this buy box find?" className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
               <div className="grid gap-4 sm:grid-cols-3"><Field label="City" name="city" placeholder="Tucson" /><Field label="State" name="state" placeholder="AZ" /><Field label="ZIP" name="zip_code" placeholder="85741" /></div>
               <Field label="Property types" name="property_types" placeholder="Duplex, Triplex, Fourplex" />
-              <div className="grid gap-4 sm:grid-cols-3"><Field label="Max price" name="max_price" type="number" placeholder="500000" /><Field label="Min score" name="min_deal_score" type="number" defaultValue="80" /><Field label="Min rent confidence" name="min_rent_confidence" type="number" defaultValue="65" /></div>
+              <div className="grid gap-4 sm:grid-cols-3"><Field label="Max price" name="max_price" type="number" placeholder="500000" /><Field label="Min score" name="min_deal_score" type="number" defaultValue="70" /><Field label="Min rent confidence" name="min_rent_confidence" type="number" defaultValue="50" /></div>
               <div className="grid gap-4 sm:grid-cols-3"><Field label="Min cashflow" name="min_cashflow" type="number" placeholder="250" /><Field label="Min DSCR" name="min_dscr" type="number" placeholder="1.2" /><Field label="Min HUD gap" name="min_hud_rent_gap" type="number" placeholder="300" /></div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block"><span className="text-sm font-medium text-slate-300">Strategy</span><select name="strategy" defaultValue="section8" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100"><option value="section8">Section 8</option><option value="buy_hold">Buy & Hold</option><option value="brrrr">BRRRR</option><option value="flip">Fix & Flip</option><option value="wholesale">Wholesale</option><option value="commercial">Commercial</option></select></label>

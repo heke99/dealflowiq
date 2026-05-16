@@ -14,7 +14,9 @@ import { runListingRentIntelligence, applyMarketRentEstimateToListing, applyHudF
 import {
   buildNormalizedListingKey,
   detectSourceType,
+  discoverListingUrlsFromSearchUrl,
   fetchAndNormalizeMarketUrl,
+  isSearchResultsUrl,
   parseMarketCsvText,
   type NormalizedMarketListing,
 } from '@/lib/market/sourceConnectors'
@@ -370,40 +372,89 @@ export async function importMarketUrlAction(formData: FormData) {
   const visibility = visibilityValue(formData)
   const sourceId = text(formData, 'source_id')
   const requestedSourceType = sourceTypeValue(formData)
-  const sourceType = requestedSourceType === 'manual' ? detectSourceType(inputUrl) : requestedSourceType
+  const sourceType = requestedSourceType === 'manual' || requestedSourceType === 'manual_url' ? detectSourceType(inputUrl) : requestedSourceType
   const supabase = await createSupabaseServerClient()
+  const searchImport = isSearchResultsUrl(inputUrl)
 
   const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
     organization_id: workspace.organization.id,
     source_id: sourceId,
     created_by: workspace.user.id,
-    job_type: sourceType === 'manual_url' ? 'manual_url' : 'authorized_scrape',
+    job_type: searchImport ? 'authorized_search_url' : 'authorized_listing_url',
     status: 'running',
     input_url: inputUrl,
-    input_payload: { sourceType, visibility, startedFrom: 'market_import_url_action' },
+    input_payload: { sourceType, visibility, startedFrom: 'market_import_url_action', searchImport },
     started_at: new Date().toISOString(),
   }).select('*').single()
 
   if (jobError || !job) redirect(`/market?tab=sources&error=${encodeURIComponent(jobError?.message || 'Could not create import job')}`)
 
-  try {
-    const normalized = await fetchAndNormalizeMarketUrl(inputUrl, String(sourceType))
-    const result = await upsertNormalizedListing({
-      supabase,
-      listing: normalized,
-      organizationId: workspace.organization.id,
-      userId: workspace.user.id,
-      sourceId,
-      importJobId: job.id,
-      visibility,
-    })
+  const previewRows: Record<string, any>[] = []
+  const listingIds: string[] = []
+  let created = 0
+  let updated = 0
+  let failed = 0
+  let found = 0
+  let topScore = 0
 
+  try {
+    const discovered = searchImport
+      ? await discoverListingUrlsFromSearchUrl(inputUrl, String(sourceType), 10)
+      : [{ url: inputUrl, sourceType, sourceUrl: inputUrl, order: 1 }]
+    found = discovered.length
+    if (!discovered.length) throw new Error('No eligible listing URLs were found on the source page.')
+
+    for (const entry of discovered.slice(0, 10)) {
+      const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
+      const entrySourceType = typeof entry === 'string' ? String(sourceType) : String(entry.sourceType || sourceType)
+      if (!listingUrl) continue
+      try {
+        const normalized = await fetchAndNormalizeMarketUrl(listingUrl, entrySourceType)
+        const result = await upsertNormalizedListing({
+          supabase,
+          listing: normalized,
+          organizationId: workspace.organization.id,
+          userId: workspace.user.id,
+          sourceId,
+          importJobId: job.id,
+          visibility,
+        })
+        listingIds.push(String(result.listing.id))
+        if (result.created) created += 1
+        else updated += 1
+        const score = Number(result.listing.latest_deal_score || 0)
+        topScore = Math.max(topScore, score)
+        previewRows.push({
+          status: result.created ? 'created' : 'updated',
+          listing_id: result.listing.id,
+          source_url: listingUrl,
+          address: result.listing.address || result.listing.title,
+          city: result.listing.city,
+          state: result.listing.state,
+          zip_code: result.listing.zip_code,
+          list_price: result.listing.list_price || result.listing.asking_price,
+          bedrooms: result.listing.bedrooms,
+          bathrooms: result.listing.bathrooms,
+          sqft: result.listing.sqft,
+          score,
+        })
+      } catch (rowError) {
+        failed += 1
+        previewRows.push({ status: 'failed', source_url: listingUrl, error: rowError instanceof Error ? rowError.message : 'Import failed' })
+      }
+    }
+
+    const finalStatus = failed && (created + updated) ? 'partially_imported' : failed ? 'failed' : 'completed'
     await supabase.from('market_import_jobs').update({
-      status: 'completed',
+      status: finalStatus,
       finished_at: new Date().toISOString(),
-      items_found: 1,
-      items_created: result.created ? 1 : 0,
-      items_updated: result.created ? 0 : 1,
+      items_found: found,
+      items_created: created,
+      items_updated: updated,
+      items_failed: failed,
+      normalized_listing_ids: listingIds,
+      source_summary: { previewRows, topScore, searchImport, sourceType, message: `${created} created · ${updated} updated · ${failed} failed.` },
+      error_message: finalStatus === 'failed' ? 'All listing imports failed. Open job details for row errors.' : null,
     }).eq('id', job.id)
 
     await supabase.from('audit_logs').insert({
@@ -412,22 +463,29 @@ export async function importMarketUrlAction(formData: FormData) {
       event_type: 'market_import.url.completed',
       entity_type: 'market_import_job',
       entity_id: job.id,
-      metadata: { sourceType, inputUrl, listingId: result.listing.id, created: result.created },
+      metadata: { sourceType, inputUrl, listingIds, created, updated, failed, found, topScore, searchImport },
     })
 
     revalidatePath('/market')
+    revalidatePath('/market-search')
+    revalidatePath('/opportunities')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not import listing URL'
+    const message = error instanceof Error ? error.message : 'Could not import URL'
     await supabase.from('market_import_jobs').update({
       status: 'failed',
       finished_at: new Date().toISOString(),
-      items_failed: 1,
+      items_found: found,
+      items_created: created,
+      items_updated: updated,
+      items_failed: Math.max(failed, 1),
+      normalized_listing_ids: listingIds,
+      source_summary: { previewRows, topScore, searchImport, sourceType },
       error_message: message,
     }).eq('id', job.id)
-    redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
+    redirect(`/market?tab=sources&import_job_id=${job.id}&error=${encodeURIComponent(message)}`)
   }
 
-  redirect('/opportunities?saved=imported')
+  redirect(`/market?tab=all&import_job_id=${job.id}&saved=imported`)
 }
 
 export async function importMarketCsvAction(formData: FormData) {

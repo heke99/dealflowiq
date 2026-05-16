@@ -15,6 +15,7 @@ import {
 import { getMarketSourceAdapters } from '@/lib/market/sourceAdapters'
 import { dealStatusLabel } from '@/lib/market/review'
 import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import { SubmitButton } from '@/components/forms/SubmitButton'
 
 type Search = Record<string, string | string[] | undefined>
 type Row = Record<string, any>
@@ -385,7 +386,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                     <input type="checkbox" name="auto_import_enabled" defaultChecked className="h-4 w-4" />
                     Run automatically through scheduled worker
                   </label>
-                  <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Create source</button>
+                  <SubmitButton pendingText="Creating source..." className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Create source</SubmitButton>
                 </form>
               </div>
             </div>
@@ -413,7 +414,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                         {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{source.last_error}</div> : null}
                         <form action={runMarketSourceAction} className="mt-3">
                           <input type="hidden" name="source_id" value={source.id} />
-                          <button disabled={!canRunSources} className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">Run now</button>
+                          <SubmitButton disabled={!canRunSources} pendingText="Running source..." className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">Run now</SubmitButton>
                         </form>
                       </div>
                     )
@@ -444,7 +445,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <p className="mt-2 text-sm text-slate-400">Use this for broker sheets, partner data and batch backfills.</p>
                 <form action={importMarketCsvAction} className="mt-5 space-y-4">
                   <textarea name="csv_text" rows={7} placeholder="title,address,city,state,zip,list_price,market_rent,hud_rent,primary_image_url,source_url" className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
-                  <button className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import CSV</button>
+                  <SubmitButton pendingText="Importing CSV..." className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import CSV</SubmitButton>
                 </form>
               </div>
             </div>

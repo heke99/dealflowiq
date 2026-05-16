@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { analyzeImportUrlAction, generateImportPreviewAction, importPreviewItemsAction, runProviderCleanupAction, skipPreviewItemsAction, updateImportBatchStatusAction } from '@/app/imports/actions'
+import { SubmitButton } from '@/components/forms/SubmitButton'
 
 type Row = Record<string, any>
 type Search = Record<string, string | string[] | undefined>
@@ -39,17 +40,17 @@ function BatchActions({ batch }: { batch: Row }) {
     <div className="flex flex-wrap gap-2">
       <form action={generateImportPreviewAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
-        <button className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Generate / refresh preview</button>
+        <SubmitButton pendingText="Generating preview..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Generate / refresh preview</SubmitButton>
       </form>
       <form action={importPreviewItemsAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
         <input type="hidden" name="import_first_10" value="true" />
-        <button className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import first 10 preview rows</button>
+        <SubmitButton pendingText="Importing first 10..." className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import first 10 preview rows</SubmitButton>
       </form>
       <form action={updateImportBatchStatusAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
         <input type="hidden" name="status" value="needs_review" />
-        <button className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Mark needs review</button>
+        <SubmitButton pendingText="Updating status..." className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Mark needs review</SubmitButton>
       </form>
     </div>
   )
@@ -170,7 +171,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                     <option value="public">Public</option>
                   </select>
                 </label>
-                <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Analyze and generate preview</button>
+                <SubmitButton pendingText="Analyzing URL and building preview..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Analyze and generate preview</SubmitButton>
               </form>
             </div>
 
@@ -182,7 +183,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Retention cleanup</h2><p className="mt-2 text-sm text-slate-400">Provider data is cleaned after its policy retention period. DealFlowIQ analysis, scores, notes and source links stay.</p></div><form action={runProviderCleanupAction}><button className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Run cleanup now</button></form></div>
+              <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Retention cleanup</h2><p className="mt-2 text-sm text-slate-400">Provider data is cleaned after its policy retention period. DealFlowIQ analysis, scores, notes and source links stay.</p></div><form action={runProviderCleanupAction}><SubmitButton pendingText="Running cleanup..." className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Run cleanup now</SubmitButton></form></div>
               <div className="mt-5 space-y-2">
                 {expiringRows.map((row) => <Link key={row.id} href={`/market/${row.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm hover:bg-white/5"><span className="font-semibold text-white">{row.title}</span><span className="ml-2 text-xs text-slate-500">expires {dateText(row.provider_data_expires_at)}</span></Link>)}
                 {!expiringRows.length ? <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No provider data expiring soon.</div> : null}
@@ -215,7 +216,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                   <form action={importPreviewItemsAction}>
                     <input type="hidden" name="batch_id" value={selectedBatchId} />
                     <input type="hidden" name="import_first_10" value="true" />
-                    <button className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Import first 10</button>
+                    <SubmitButton pendingText="Importing first 10..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Import first 10</SubmitButton>
                   </form>
                 </div>
                 <form action={importPreviewItemsAction} className="mt-5 space-y-3">
@@ -235,7 +236,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                       </div>
                     </label>
                   ))}
-                  {previewRows.length ? <div className="flex flex-wrap gap-2"><button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import selected</button><button formAction={skipPreviewItemsAction} className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Skip selected</button></div> : <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No preview rows yet. Open a batch and click Generate / refresh preview, or paste a new URL above.</div>}
+                  {previewRows.length ? <div className="flex flex-wrap gap-2"><SubmitButton pendingText="Importing selected..." className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import selected</SubmitButton><SubmitButton formAction={skipPreviewItemsAction} pendingText="Skipping selected..." className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Skip selected</SubmitButton></div> : <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No preview rows yet. Open a batch and click Generate / refresh preview, or paste a new URL above.</div>}
                 </form>
               </div>
             ) : null}

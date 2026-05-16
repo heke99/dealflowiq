@@ -66,7 +66,7 @@ export default async function MarketSearchPage({ searchParams }: { searchParams?
               <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Market</div>
               <h1 className="mt-2 text-3xl font-bold">Source imports & deal discovery</h1>
               <p className="mt-3 max-w-3xl text-slate-300">
-                Paste an authorized listing URL or search URL. DealFlowIQ imports up to the allowed provider limit, scores the listings, and keeps anything below 80 in Market instead of incorrectly sending it to Opportunities.
+                Paste an authorized listing URL or search URL. DealFlowIQ imports up to the allowed provider limit, scores the listings, and keeps non-qualified listings in Market and sends only qualified 70+/50-confidence listings to Opportunities.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Badge>Live import</Badge>

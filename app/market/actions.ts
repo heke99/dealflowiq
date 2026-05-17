@@ -438,6 +438,11 @@ export async function importMarketUrlAction(formData: FormData) {
       metadata: { sourceType, inputUrl, listingIds, created, updated, failed, found, topScore, searchImport },
     })
 
+    if (!listingIds.length && failed > 0) {
+      const firstError = String((previewRows.find((row) => row.status === 'failed') as any)?.error || 'All listing imports failed. Check the source URL or provider access.')
+      throw new Error(firstError)
+    }
+
     revalidatePath('/market')
     revalidatePath('/market-search')
     revalidatePath('/opportunities')

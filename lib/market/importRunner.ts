@@ -9,7 +9,9 @@ import { buildConfidenceBreakdown, buildDataQualityChecklist } from '@/lib/marke
 import {
   buildNormalizedListingKey,
   detectSourceType,
+  discoverListingUrlsFromSearchUrl,
   fetchAndNormalizeMarketUrl,
+  isSearchResultsUrl,
   type NormalizedMarketListing,
 } from '@/lib/market/sourceConnectors'
 
@@ -573,67 +575,114 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     }
 
     try {
-      const normalized = await fetchAndNormalizeMarketUrl(inputUrl, String(detectedSource))
-      const result = await upsertMarketListingFromNormalized({
-        supabase,
-        listing: normalized,
-        organizationId: source.organization_id,
-        userId: source.created_by,
-        sourceId: source.id,
-        importJobId: job.id,
-        visibility: source.default_visibility || settings.default_visibility || 'private',
-      })
-      if (result.created) created += 1
-      else updated += 1
-      topScore = Math.max(topScore, result.score.dealScore)
-      listingIds.push(result.listing.id)
+      const candidates = isSearchResultsUrl(inputUrl)
+        ? await discoverListingUrlsFromSearchUrl(inputUrl, String(detectedSource), maxUrls)
+        : [{ url: inputUrl, sourceType: detectedSource, sourceUrl: inputUrl, order: 1 }]
 
-      const criteriaMatch = evaluateBuyBoxCriteria((buyBox as SourceRow | null) || null, result.listing, result.score, threshold)
-      if (criteriaMatch.matchedStatus === 'opportunity') {
-        opportunities += 1
-        await supabase.from('market_listings').update({ status: 'opportunity' }).eq('id', result.listing.id)
+      let jobCreated = 0
+      let jobUpdated = 0
+      let jobFailed = 0
+      let jobOpportunities = 0
+      const jobListingIds: string[] = []
+      const rowErrors: string[] = []
+      const rowSummaries: Record<string, any>[] = []
+
+      for (const candidate of candidates.slice(0, maxUrls)) {
+        const listingUrl = typeof candidate === 'string' ? candidate : String((candidate as any).url || '').trim()
+        const candidateSource = typeof candidate === 'string' ? String(detectedSource) : String((candidate as any).sourceType || detectedSource)
+        if (!listingUrl) continue
+        try {
+          const normalized = await fetchAndNormalizeMarketUrl(listingUrl, candidateSource)
+          const result = await upsertMarketListingFromNormalized({
+            supabase,
+            listing: normalized,
+            organizationId: source.organization_id,
+            userId: source.created_by,
+            sourceId: source.id,
+            importJobId: job.id,
+            visibility: source.default_visibility || settings.default_visibility || 'private',
+          })
+          if (result.created) {
+            created += 1
+            jobCreated += 1
+          } else {
+            updated += 1
+            jobUpdated += 1
+          }
+          topScore = Math.max(topScore, result.score.dealScore)
+          listingIds.push(result.listing.id)
+          jobListingIds.push(result.listing.id)
+
+          const criteriaMatch = evaluateBuyBoxCriteria((buyBox as SourceRow | null) || null, result.listing, result.score, threshold)
+          if (criteriaMatch.matchedStatus === 'opportunity') {
+            opportunities += 1
+            jobOpportunities += 1
+            await supabase.from('market_listings').update({ status: 'opportunity' }).eq('id', result.listing.id)
+          }
+
+          if (source.buy_box_id) {
+            await supabase.from('market_buy_box_matches').upsert({
+              organization_id: source.organization_id,
+              buy_box_id: source.buy_box_id,
+              listing_id: result.listing.id,
+              source_id: source.id,
+              deal_score: result.score.dealScore,
+              rent_confidence: result.score.rentConfidenceScore,
+              rent_confidence_score: result.score.rentConfidenceScore,
+              match_score: criteriaMatch.matchScore,
+              matched_status: criteriaMatch.matchedStatus,
+              reasons: criteriaMatch.reasons,
+              risks: criteriaMatch.risks,
+              criteria_snapshot: criteriaMatch.snapshot,
+              matched_at: new Date().toISOString(),
+            }, { onConflict: 'buy_box_id,listing_id' })
+          }
+
+          rowSummaries.push({
+            status: result.created ? 'created' : 'updated',
+            listingId: result.listing.id,
+            sourceUrl: listingUrl,
+            title: result.listing.title,
+            score: result.score.dealScore,
+            rentConfidenceScore: result.score.rentConfidenceScore,
+            opportunity: criteriaMatch.matchedStatus === 'opportunity',
+          })
+        } catch (rowError) {
+          jobFailed += 1
+          failed += 1
+          const rowMessage = rowError instanceof Error ? rowError.message : 'Source row import failed'
+          rowErrors.push(rowMessage)
+          rowSummaries.push({ status: 'failed', sourceUrl: listingUrl, error: rowMessage })
+        }
       }
 
-      if (source.buy_box_id) {
-        await supabase.from('market_buy_box_matches').upsert({
-          organization_id: source.organization_id,
-          buy_box_id: source.buy_box_id,
-          listing_id: result.listing.id,
-          source_id: source.id,
-          deal_score: result.score.dealScore,
-          rent_confidence: result.score.rentConfidenceScore,
-          rent_confidence_score: result.score.rentConfidenceScore,
-          match_score: criteriaMatch.matchScore,
-          matched_status: criteriaMatch.matchedStatus,
-          reasons: criteriaMatch.reasons,
-          risks: criteriaMatch.risks,
-          criteria_snapshot: criteriaMatch.snapshot,
-          matched_at: new Date().toISOString(),
-        }, { onConflict: 'buy_box_id,listing_id' })
-      }
-
+      const jobStatus = jobFailed && (jobCreated + jobUpdated) ? 'partial' : jobFailed ? 'failed' : 'completed'
       await supabase.from('market_import_jobs').update({
-        status: 'completed',
+        status: jobStatus,
         finished_at: new Date().toISOString(),
-        items_found: 1,
-        items_created: result.created ? 1 : 0,
-        items_updated: result.created ? 0 : 1,
-        items_failed: 0,
-        normalized_listing_ids: [result.listing.id],
+        items_found: candidates.length,
+        items_created: jobCreated,
+        items_updated: jobUpdated,
+        items_failed: jobFailed,
+        normalized_listing_ids: jobListingIds,
+        error_message: jobStatus === 'failed' ? rowErrors[0] || 'All listing imports failed.' : null,
         source_summary: {
-          score: result.score.dealScore,
-          opportunity: criteriaMatch.matchedStatus === 'opportunity',
-          matchScore: criteriaMatch.matchScore,
-          rentConfidenceScore: result.score.rentConfidenceScore,
+          score: topScore,
+          opportunities: jobOpportunities,
+          searchImport: isSearchResultsUrl(inputUrl),
           sourceType: detectedSource,
+          rows: rowSummaries.slice(0, 40),
+          errors: rowErrors.slice(0, 5),
         },
       }).eq('id', job.id)
+
       if (queueItem?.id) {
         await supabase.from('market_source_queue_items').update({
-          status: 'completed',
-          listing_id: result.listing.id,
-          last_error: null,
-          completed_at: new Date().toISOString(),
+          status: jobStatus === 'failed' ? 'failed' : 'completed',
+          listing_id: jobListingIds[0] || null,
+          last_error: rowErrors[0] || null,
+          completed_at: jobStatus === 'failed' ? null : new Date().toISOString(),
+          next_attempt_at: jobStatus === 'failed' ? retryAt(Number(queueItem.attempts || 0) + 1) : null,
         }).eq('id', queueItem.id)
       }
     } catch (error) {

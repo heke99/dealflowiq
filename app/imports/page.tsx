@@ -135,7 +135,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
           <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
             <div>
               <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">Batch 12I.2 · Real provider import workflow</div>
-              <h1 className="mt-2 text-4xl font-black tracking-tight">URL Import Analyzer</h1>
+              <h1 className="mt-2 text-4xl font-black tracking-tight">URL Import Center</h1>
               <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. InvestorLift is supported as a live provider with a 40 listings/hour policy. DealFlowIQ analyzes the URL, creates a real provider preview, then imports selected listings under provider policy and rate limits. No demo mode. No email/SMS.</p>
             </div>
             <div className="grid grid-cols-3 gap-3">
@@ -151,8 +151,8 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
         <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <section className="space-y-6">
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Start real import</h2>
-              <p className="mt-2 text-sm text-slate-400">This now runs the preview step immediately. For search URLs, eligible provider listing URLs are fetched into preview under that provider’s hourly cap. For direct listing URLs, the listing appears as one preview row.</p>
+              <h2 className="text-xl font-bold">Import URL now</h2>
+              <p className="mt-2 text-sm text-slate-400">Paste a provider URL. DealFlowIQ analyzes it, imports available listing rows, scores them, and redirects to the first imported listing. Preview rows remain available for review if something needs manual attention.</p>
               <form action={analyzeImportUrlAction} className="mt-5 space-y-4">
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Provider URL</span>
@@ -171,7 +171,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                     <option value="public">Public</option>
                   </select>
                 </label>
-                <SubmitButton pendingText="Analyzing URL and building preview..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Analyze and generate preview</SubmitButton>
+                <SubmitButton pendingText="Importing and building listing..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and open listing</SubmitButton>
               </form>
             </div>
 

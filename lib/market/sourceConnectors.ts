@@ -7,8 +7,8 @@ export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'real
 
 
 const SEARCH_DISCOVERY_LIMIT = 40
-const SEARCH_DISCOVERY_TIMEOUT_MS = 15000
-const LISTING_FETCH_TIMEOUT_MS = 15000
+const SEARCH_DISCOVERY_TIMEOUT_MS = 9000
+const LISTING_FETCH_TIMEOUT_MS = 9000
 const MAX_SOURCE_HTML_CHARS = 2500000
 
 function timeoutMessage(sourceType: string, mode: 'search' | 'listing', timeoutMs: number) {
@@ -252,7 +252,7 @@ function extractMoneyByLabels(html: string, labels: string[]) {
 function fallbackNormalizedListing(inputUrl: string, sourceType: MarketSourceType, reason: string): NormalizedMarketListing {
   return {
     source_type: sourceType,
-    external_listing_id: firstMatch(inputUrl, [/\/(?:deal|deals|property|properties|listing|listings)\/([A-Za-z0-9_-]{4,})/i, /[?&](?:id|dealId|propertyId|listingId)=([A-Za-z0-9_-]{4,})/i]),
+    external_listing_id: firstMatch(inputUrl, [/\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/([A-Za-z0-9_-]{4,})/i, /[?&](?:id|dealId|propertyId|listingId)=([A-Za-z0-9_-]{4,})/i]),
     source_url: inputUrl,
     title: `${getMarketSourceAdapter(sourceType).label} listing pending review`,
     address: null,
@@ -356,8 +356,8 @@ export function isSearchResultsUrl(inputUrl: string | null | undefined) {
   const url = String(inputUrl || '').toLowerCase()
   if (!url.startsWith('http')) return false
   if (url.includes('investorlift.')) {
-    if (/\/(?:deal|deals|property|properties|listing|listings)\/[a-z0-9_-]{4,}/i.test(url)) return false
-    if (url.includes('/search') || url.includes('/inventory') || url.includes('/deals?') || url.includes('/properties?') || url.includes('/listings?')) return true
+    if (/\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/[a-z0-9_-]{4,}/i.test(url)) return false
+    if (url.includes('/search') || url.includes('/inventory') || url.includes('/marketplace') || url.includes('/dashboard') || url.includes('/deals?') || url.includes('/properties?') || url.includes('/listings?')) return true
   }
   if (url.includes('searchquerystate=')) return true
   if (url.includes('/homes/') || url.includes('/for-sale/') || url.includes('/realestateandhomes-search/')) return true
@@ -380,7 +380,7 @@ function listingUrlPatternsFor(sourceType: MarketSourceType) {
   if (sourceType === 'realtor') return [/href=["']([^"']*\/realestateandhomes-detail\/[^"']+)["']/gi, /https?:\\?\/\\?\/www\.realtor\.com\\?\/realestateandhomes-detail\\?\/[^"'\\]+/gi]
   if (sourceType === 'crexi') return [/href=["']([^"']*\/properties\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.crexi\.com\\?\/properties\\?\/[0-9]+[^"'\\]*/gi]
   if (sourceType === 'loopnet') return [/href=["']([^"']*\/Listing\/[^"']+\/[0-9]+\/?[^"']*)["']/gi, /https?:\\?\/\\?\/www\.loopnet\.com\\?\/Listing\\?\/[^"'\\]+?\\?\/[0-9]+/gi]
-  if (sourceType === 'investorlift') return [/href=["']([^"']*\/(?:deal|deals|property|properties|listing|listings)\/[A-Za-z0-9_-]{4,}[^"']*)["']/gi, /https?:\\?\/\\?\/[^"'\\]*investorlift\.[^"'\\]+?\\?\/(?:deal|deals|property|properties|listing|listings)\\?\/[A-Za-z0-9_-]{4,}[^"'\\]*/gi]
+  if (sourceType === 'investorlift') return [/href=["']([^"']*\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/[A-Za-z0-9_-]{4,}[^"']*)["']/gi, /https?:\\?\/\\?\/[^"'\\]*investorlift\.[^"'\\]+?\\?\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\\?\/[A-Za-z0-9_-]{4,}[^"'\\]*/gi, /["'](https?:\\?\/\\?\/[^"'\\]*investorlift\.[^"'\\]+?(?:deal|property|listing)[^"'\\]{6,})["']/gi]
   return [/href=["']([^"']*(?:homedetails|realestateandhomes-detail|\/home\/|\/properties\/|\/Listing\/)[^"']*)["']/gi]
 }
 
@@ -400,7 +400,7 @@ function isLikelyListingUrl(url: string, sourceType: MarketSourceType) {
   if (sourceType === 'realtor') return value.includes('/realestateandhomes-detail/')
   if (sourceType === 'crexi') return value.includes('/properties/')
   if (sourceType === 'loopnet') return value.includes('/listing/')
-  if (sourceType === 'investorlift') return /\/(deal|deals|property|properties|listing|listings)\/[a-z0-9_-]{4,}/i.test(value)
+  if (sourceType === 'investorlift') return /\/(deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/[a-z0-9_-]{4,}/i.test(value) || /(?:dealid|propertyid|listingid|id)=([a-z0-9_-]{4,})/i.test(value)
   return value.includes('/homedetails/') || value.includes('/home/') || value.includes('/realestateandhomes-detail/') || value.includes('/properties/') || value.includes('/listing/')
 }
 
@@ -408,16 +408,27 @@ export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceT
   const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
   const adapter = getMarketSourceAdapter(sourceType)
   const hardLimit = Math.max(1, Math.min(Number(limit || SEARCH_DISCOVERY_LIMIT), SEARCH_DISCOVERY_LIMIT))
-  const html = await fetchTextWithTimeout(inputUrl, {
-    sourceType,
-    mode: 'search',
-    timeoutMs: SEARCH_DISCOVERY_TIMEOUT_MS,
-    headers: {
-      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'user-agent': adapter.userAgent,
-      ...(adapter.referrer ? { referer: adapter.referrer } : {}),
-    },
-  })
+  let html = ''
+  try {
+    html = await fetchTextWithTimeout(inputUrl, {
+      sourceType,
+      mode: 'search',
+      timeoutMs: SEARCH_DISCOVERY_TIMEOUT_MS,
+      headers: {
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent': adapter.userAgent,
+        ...(adapter.referrer ? { referer: adapter.referrer } : {}),
+      },
+    })
+  } catch (error) {
+    return [{
+      url: inputUrl,
+      sourceType,
+      sourceUrl: inputUrl,
+      order: 1,
+      fallbackReason: error instanceof Error ? error.message : 'Source search page was not fetchable from the server',
+    }]
+  }
 
   const urls = new Set<string>()
   for (const pattern of listingUrlPatternsFor(sourceType)) {
@@ -431,7 +442,17 @@ export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceT
     if (urls.size >= hardLimit) break
   }
 
-  return [...urls].slice(0, hardLimit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
+  const discovered = [...urls].slice(0, hardLimit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
+  if (!discovered.length) {
+    return [{
+      url: inputUrl,
+      sourceType,
+      sourceUrl: inputUrl,
+      order: 1,
+      fallbackReason: 'No listing links were exposed in the source page HTML; importing the submitted URL for review instead.',
+    }]
+  }
+  return discovered
 }
 
 export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInput?: string | null): Promise<NormalizedMarketListing> {

@@ -27,7 +27,7 @@ const adapters: Record<string, MarketSourceAdapter> = {
     searchUrlHint: 'Paste authorized InvestorLift property, deal, listing or marketplace URLs. This connector is live-only and follows the configured 40 listings/hour policy.',
     urlExamples: ['https://investorlift.com/...', 'https://app.investorlift.com/...'],
     importNotes: ['Best for wholesale/off-market opportunities and disposition pipelines.', 'The adapter captures source URL, price, ARV/rehab hints, contact details when present, and DealFlowIQ scoring is layered on top.'],
-    listingIdPatterns: [/propertyId["'\s:]+([A-Za-z0-9_-]{5,})/i, /listingId["'\s:]+([A-Za-z0-9_-]{5,})/i, /dealId["'\s:]+([A-Za-z0-9_-]{5,})/i, /\/(?:property|properties|deal|deals|listing|listings)\/([A-Za-z0-9_-]{5,})/i],
+    listingIdPatterns: [/propertyId["'\s:]+([A-Za-z0-9_-]{5,})/i, /listingId["'\s:]+([A-Za-z0-9_-]{5,})/i, /dealId["'\s:]+([A-Za-z0-9_-]{5,})/i, /opportunityId["'\s:]+([A-Za-z0-9_-]{5,})/i, /\/(?:property|properties|property-detail|deal|deals|listing|listings|opportunity|opportunities)\/([A-Za-z0-9_-]{4,})/i, /[?&](?:propertyId|listingId|dealId|id)=([A-Za-z0-9_-]{4,})/i],
     priceKeys: ['askingPrice', 'price', 'purchasePrice', 'assignmentFee', 'listPrice'],
     rentKeys: ['rent', 'monthlyRent', 'marketRent'],
     brokerKeys: ['seller', 'dispositionManager', 'contactName', 'agentName', 'brokerName'],

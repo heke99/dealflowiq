@@ -471,6 +471,7 @@ export async function importPreviewItemsAction(formData: FormData) {
   let created = 0
   let updated = 0
   let failed = 0
+  let firstImportedListingId: string | null = null
   for (const item of items as any[]) {
     try {
       const normalized = item.normalized_listing && Object.keys(item.normalized_listing || {}).length
@@ -505,6 +506,7 @@ export async function importPreviewItemsAction(formData: FormData) {
         data_quality_checklist: buildDataQualityChecklist(refreshed || result.listing, score),
         confidence_breakdown: buildConfidenceBreakdown(refreshed || result.listing, score),
       }).eq('id', result.listing.id).eq('organization_id', workspace.organization.id)
+      if (!firstImportedListingId) firstImportedListingId = String(result.listing.id)
       await supabase.from('market_import_preview_items').update({ status: 'imported', imported_listing_id: result.listing.id, imported_at: new Date().toISOString() }).eq('id', item.id)
       await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, listingId: result.listing.id, eventType: 'listing_imported', message: result.created ? 'Listing imported.' : 'Listing updated from import.', metadata: { sourceType, sourceUrl: item.source_url } })
       if (result.created) created += 1
@@ -537,6 +539,7 @@ export async function importPreviewItemsAction(formData: FormData) {
   revalidatePath('/imports')
   revalidatePath('/market')
   revalidatePath('/notifications')
+  if (firstImportedListingId) redirect(`/market/${firstImportedListingId}?saved=imported&batch=${batchId}&imported_count=${created + updated}`)
   redirect(`/imports?batch=${batchId}&saved=imported`)
 }
 

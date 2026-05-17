@@ -6,7 +6,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
-import { runMarketSourceNow } from '@/lib/market/importRunner'
+import { runMarketSourceNow, upsertMarketListingFromNormalized } from '@/lib/market/importRunner'
 import { determineDealReviewStatus } from '@/lib/market/review'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
@@ -285,7 +285,8 @@ async function upsertNormalizedListing(params: {
   importJobId?: string | null
   visibility?: string
 }) {
-  const payload = listingInsertPayload({
+  const result = await upsertMarketListingFromNormalized({
+    supabase: params.supabase as any,
     listing: params.listing,
     organizationId: params.organizationId,
     userId: params.userId,
@@ -294,55 +295,7 @@ async function upsertNormalizedListing(params: {
     visibility: params.visibility,
   })
 
-  const dedupeKey = buildNormalizedListingKey(payload as NormalizedMarketListing)
-  let existing: any = null
-  if (payload.source_url) {
-    const { data } = await params.supabase
-      .from('market_listings')
-      .select('id')
-      .eq('organization_id', params.organizationId)
-      .eq('source_url', payload.source_url)
-      .maybeSingle()
-    existing = data
-  }
-  if (!existing?.id && payload.external_listing_id) {
-    const { data } = await params.supabase
-      .from('market_listings')
-      .select('id')
-      .eq('organization_id', params.organizationId)
-      .eq('source_type', payload.source_type)
-      .eq('external_listing_id', payload.external_listing_id)
-      .maybeSingle()
-    existing = data
-  }
-
-  const rawPayload = {
-    ...(typeof payload.raw_payload === 'object' && payload.raw_payload ? payload.raw_payload : {}),
-    dedupeKey,
-  }
-
-  if (existing?.id) {
-    const { data, error } = await params.supabase
-      .from('market_listings')
-      .update({ ...payload, raw_payload: rawPayload })
-      .eq('id', existing.id)
-      .select('*')
-      .single()
-    if (error || !data) throw new Error(error?.message || 'Could not update imported listing')
-    await insertScoreForListing(params.supabase, data as any, params.organizationId)
-    await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing updated from import', description: 'Existing market listing was updated from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
-    return { listing: data as any, created: false }
-  }
-
-  const { data, error } = await params.supabase
-    .from('market_listings')
-    .insert({ ...payload, raw_payload: rawPayload })
-    .select('*')
-    .single()
-  if (error || !data) throw new Error(error?.message || 'Could not create imported listing')
-  await insertScoreForListing(params.supabase, data as any, params.organizationId)
-  await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing imported', description: 'New market listing was created from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
-  return { listing: data as any, created: true }
+  return { listing: result.listing as any, created: result.created, score: result.score }
 }
 
 function requireSourceImports(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
@@ -541,6 +494,7 @@ export async function importMarketUrlAction(formData: FormData) {
     redirect(`/market?tab=sources&import_job_id=${job.id}&error=${encodeURIComponent(message)}`)
   }
 
+  if (listingIds[0]) redirect(`/market/${listingIds[0]}?saved=imported&import_job_id=${job.id}&imported_count=${created + updated}`)
   redirect(`/market?tab=all&import_job_id=${job.id}&saved=imported`)
 }
 
@@ -566,12 +520,13 @@ export async function importMarketCsvAction(formData: FormData) {
   }).select('*').single()
   if (jobError || !job) redirect(`/market?tab=sources&error=${encodeURIComponent(jobError?.message || 'Could not create CSV import job')}`)
 
+  let created = 0
+  let updated = 0
+  let failed = 0
+  const listingIds: string[] = []
   try {
     const listings = parseMarketCsvText(rawCsv, 'csv')
     if (!listings.length) throw new Error('No valid CSV rows found. Include a header row, for example: title,address,city,state,zip,list_price,market_rent,primary_image_url')
-    let created = 0
-    let updated = 0
-    let failed = 0
     for (const listing of listings.slice(0, 100)) {
       try {
         const result = await upsertNormalizedListing({
@@ -583,6 +538,7 @@ export async function importMarketCsvAction(formData: FormData) {
           importJobId: job.id,
           visibility,
         })
+        listingIds.push(String(result.listing.id))
         if (result.created) created += 1
         else updated += 1
       } catch {
@@ -597,6 +553,7 @@ export async function importMarketCsvAction(formData: FormData) {
       items_created: created,
       items_updated: updated,
       items_failed: failed,
+      normalized_listing_ids: listingIds,
       error_message: failed ? `${failed} rows failed during import.` : null,
     }).eq('id', job.id)
 
@@ -611,6 +568,7 @@ export async function importMarketCsvAction(formData: FormData) {
     redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
   }
 
+  if (listingIds[0]) redirect(`/market/${listingIds[0]}?saved=csv_imported&imported_count=${created + updated}`)
   redirect('/opportunities?saved=csv_imported')
 }
 
@@ -673,6 +631,7 @@ export async function createMarketListingAction(formData: FormData) {
     if (existing?.id) redirect(`/market?tab=all&error=${encodeURIComponent('That source URL already exists in Market.')}`)
   }
 
+  let importedListingId: string | null = null
   try {
     const result = await upsertNormalizedListing({
       supabase,
@@ -690,6 +649,7 @@ export async function createMarketListingAction(formData: FormData) {
       entity_id: result.listing.id,
       metadata: { source_type: result.listing.source_type, source_url: result.listing.source_url },
     })
+    importedListingId = String(result.listing.id)
 
     revalidatePath('/market')
   } catch (error) {
@@ -697,6 +657,7 @@ export async function createMarketListingAction(formData: FormData) {
     redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
   }
 
+  if (importedListingId) redirect(`/market/${importedListingId}?saved=listing`)
   redirect('/market?tab=all&saved=listing')
 }
 

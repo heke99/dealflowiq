@@ -1,4 +1,4 @@
-import { detectSourceType, type MarketSourceType } from '@/lib/market/sourceConnectors'
+import { detectSourceType, isSearchResultsUrl, type MarketSourceType } from '@/lib/market/sourceConnectors'
 import { inferImportMode } from '@/lib/market/review'
 
 type JsonRecord = Record<string, any>
@@ -86,9 +86,10 @@ export function analyzeMarketUrl(inputUrl: string): MarketUrlAnalysis {
   const sourceType = detectSourceType(url.toString())
   const searchState = parseJson(url.searchParams.get('searchQueryState')) || parseJson(url.searchParams.get('search_query_state'))
   const zillowSearch = sourceType === 'zillow' && Boolean(searchState)
+  const investorLiftSearch = sourceType === 'investorlift' && isSearchResultsUrl(url.toString())
   const genericSearch = /search|forsale|for-sale|real-estate|homes-for-sale|map/i.test(url.pathname) || Boolean(url.searchParams.get('q') || url.searchParams.get('location'))
-  const isSearchUrl = Boolean(zillowSearch || genericSearch)
-  const isListingUrl = !isSearchUrl && /homedetails|property|listing|real-estate\//i.test(url.pathname)
+  const isSearchUrl = Boolean(zillowSearch || investorLiftSearch || genericSearch)
+  const isListingUrl = !isSearchUrl && /homedetails|property|properties|property-detail|deal|deals|listing|listings|opportunity|opportunities|real-estate\//i.test(url.pathname)
 
   const filterState = (searchState?.filterState || {}) as JsonRecord
   const price = (filterState.price || filterState.priceFilter || {}) as JsonRecord

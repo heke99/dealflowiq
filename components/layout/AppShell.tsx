@@ -1,7 +1,5 @@
 import Link from 'next/link'
 import { signOutAction } from '@/lib/auth/actions'
-import { NotificationBell } from '@/components/layout/NotificationBell'
-import { MessageBell } from '@/components/layout/MessageBell'
 import type { FeatureMap, FeatureKey } from '@/lib/billing/features'
 import { canUseFeature, featureLabels } from '@/lib/billing/features'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
@@ -56,20 +54,16 @@ export function AppShell({
     { href: '/community', label: 'Community', visible: true, core: true },
     { href: '/market', label: 'Market', visible: true, feature: 'market_opportunities', core: true },
     { href: '/opportunities', label: 'Opportunities', visible: true, feature: 'market_opportunities', core: true },
-    { href: '/messages', label: 'Messages', visible: true, core: true },
-    { href: '/notifications', label: 'Notifications', visible: true, core: true },
     { href: '/buy-boxes', label: 'Buy Boxes', visible: true, feature: 'scheduled_market_imports' },
     { href: '/saved-deals', label: 'Saved Deals', visible: true, feature: 'market_opportunities', core: true },
     { href: '/deals', label: 'My Deals', visible: true, feature: 'deals', core: true },
-    { href: '/market-search', label: 'Source Imports', visible: true, feature: 'market_source_imports' },
+    { href: '/imports', label: 'Imports', visible: true, feature: 'market_source_imports' },
     { href: '/rent-analysis', label: 'Rent Analysis', visible: true, feature: 'rent_analysis', core: true },
     { href: '/calculators', label: 'Calculators', visible: true, feature: 'calculators', core: true },
     { href: '/buyers', label: 'Buyers', visible: true, feature: 'buyers' },
     { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
     { href: '/settings/underwriting', label: 'Underwriting Defaults', visible: true, core: true },
     { href: '/settings', label: 'Settings', visible: true, core: true },
-    { href: '/admin', label: 'Admin Overview', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
-    { href: '/admin/users', label: 'Admin Users', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
   ]
@@ -92,8 +86,8 @@ export function AppShell({
           <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/70 p-3">
             <div className="text-xs uppercase tracking-wide text-slate-500">Account type</div>
             <div className="mt-1 text-sm font-semibold">{config.title}</div>
-            <div className="mt-2 text-xs text-slate-500">{isPlatformAdmin ? 'Platform admin · no billing limits' : `${planName || 'Free'} · ${subscriptionStatus || 'free'}`}</div>
-            {!isPlatformAdmin && trialDate ? <div className="mt-1 text-xs text-emerald-300">Trial ends {trialDate}</div> : null}
+            <div className="mt-2 text-xs text-slate-500">{planName || 'Plan pending'} · {subscriptionStatus || 'trialing'}</div>
+            {trialDate ? <div className="mt-1 text-xs text-emerald-300">Trial ends {trialDate}</div> : null}
           </div>
         </div>
 
@@ -123,32 +117,12 @@ export function AppShell({
       </aside>
 
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 hidden border-b border-white/10 bg-slate-950/85 px-6 py-4 backdrop-blur lg:block">
-          <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workspace</div>
-              <div className="text-sm font-bold text-slate-200">{organizationName || 'DealFlowIQ'} · {planName || 'Free'}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <MessageBell />
-              <NotificationBell />
-              <form action={signOutAction}>
-                <button className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">Sign out</button>
-              </form>
-            </div>
-          </div>
-        </header>
-
         <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between gap-4">
             <Link href="/dashboard" className="font-bold">DealFlowIQ</Link>
-            <div className="flex items-center gap-2">
-              <MessageBell />
-              <NotificationBell />
-              <form action={signOutAction}>
-                <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
-              </form>
-            </div>
+            <form action={signOutAction}>
+              <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
+            </form>
           </div>
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
             {nav.map((item) => {

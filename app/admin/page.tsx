@@ -47,7 +47,7 @@ export default async function AdminDashboardPage() {
   }
 
   const orgId = workspace.organization?.id
-  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult, notificationsResult, usersResult, orgsResult, communitiesResult, paidSubscriptionsResult] = await Promise.all([
+  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult, notificationsResult] = await Promise.all([
     supabase.from('billing_plans').select('id', { count: 'exact', head: true }),
     supabase.from('admin_access_invites').select('id,email,organization_name,account_type,role,status,expires_at,created_at,billing_plans(name)').order('created_at', { ascending: false }).limit(8),
     supabase.from('admin_access_invites').select('id', { count: 'exact', head: true }).eq('status', 'active'),
@@ -55,10 +55,6 @@ export default async function AdminDashboardPage() {
     orgId ? supabase.from('market_import_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('status', 'failed') : Promise.resolve({ count: 0 }),
     orgId ? supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId) : Promise.resolve({ count: 0 }),
     orgId ? supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).is('read_at', null).is('archived_at', null) : Promise.resolve({ count: 0 }),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }),
-    supabase.from('organizations').select('id', { count: 'exact', head: true }),
-    supabase.from('community_teams').select('id', { count: 'exact', head: true }),
-    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).in('status', ['active', 'paid', 'trialing', 'comped']),
   ])
 
   const jobs = (jobsResult.data || []) as Row[]
@@ -75,22 +71,17 @@ export default async function AdminDashboardPage() {
               <p className="mt-3 max-w-3xl text-slate-300">Manage plans, invites, access grants and import health from one operator view. This area should feel like a real SaaS control center, not a developer-only backend.</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link href="/admin/users" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">View users</Link>
-              <Link href="/admin/access" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create invite</Link>
+              <Link href="/admin/access" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">Create invite</Link>
               <Link href="/admin/plans" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Manage plans</Link>
             </div>
           </div>
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat label="Users" value={numberText(usersResult.count || 0)} hint="All registered platform users." href="/admin/users" tone="green" />
-          <Stat label="Organizations" value={numberText(orgsResult.count || 0)} hint="Companies/workspaces on the platform." href="/admin/users" />
-          <Stat label="Communities" value={numberText(communitiesResult.count || 0)} hint="Community/team spaces created." href="/community" />
-          <Stat label="Active access" value={numberText(paidSubscriptionsResult.count || 0)} hint="Paid, comped or trialing subscriptions." href="/admin/plans" tone="green" />
           <Stat label="Plans" value={numberText(plansResult.count || 0)} hint="Billing plans configured in platform." href="/admin/plans" />
           <Stat label="Active invites" value={numberText(activeInvitesResult.count || 0)} hint="Outstanding access grants." href="/admin/access" tone="green" />
           <Stat label="Workspace listings" value={numberText(listingsResult.count || 0)} hint="Listings in this admin workspace." href="/market" />
-          <Stat label="Failed imports" value={numberText(failedJobsResult.count || 0)} hint="Import issues needing operator review." href="/market?tab=sources" tone={(failedJobsResult.count || 0) > 0 ? 'red' : 'green'} />
+          <Stat label="Failed imports" value={numberText(failedJobsResult.count || 0)} hint="Import issues needing operator review." href="/imports" tone={(failedJobsResult.count || 0) > 0 ? 'red' : 'green'} />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
@@ -127,7 +118,7 @@ export default async function AdminDashboardPage() {
                 <h2 className="text-2xl font-black">Import health</h2>
                 <p className="mt-1 text-sm text-slate-500">Recent provider jobs and issues.</p>
               </div>
-              <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Sources</Link>
+              <Link href="/imports" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Sources</Link>
             </div>
             <div className="mt-5 space-y-3">
               {jobs.length ? jobs.map((job, index) => (

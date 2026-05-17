@@ -6,7 +6,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
-import { runMarketSourceNow, upsertMarketListingFromNormalized as upsertListingViaImportEngine } from '@/lib/market/importRunner'
+import { runMarketSourceNow } from '@/lib/market/importRunner'
 import { determineDealReviewStatus } from '@/lib/market/review'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
@@ -40,7 +40,7 @@ function integerValue(formData: FormData, key: string) {
 
 function sourceTypeValue(formData: FormData) {
   const value = String(formData.get('source_type') || 'manual')
-  return ['manual', 'manual_url', 'zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'investorlift', 'csv', 'partner_api', 'mls_feed', 'public_deal', 'community_deal', 'other'].includes(value) ? value : 'manual'
+  return ['manual', 'manual_url', 'zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'mls_feed', 'public_deal', 'community_deal', 'other'].includes(value) ? value : 'manual'
 }
 
 function accessModeValue(formData: FormData) {
@@ -72,7 +72,7 @@ function sourceUrlsValue(formData: FormData) {
     .split(/[\n,]+/)
     .map((item) => item.trim())
     .filter((item) => item.startsWith('http://') || item.startsWith('https://'))
-    .slice(0, 40)
+    .slice(0, 25)
 }
 
 function checkboxValue(formData: FormData, key: string) {
@@ -175,7 +175,7 @@ async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createS
     risks: score.risks,
     missing_fields: score.missingFields,
     calculated_at: calculatedAt,
-  }).select('*').single()
+  }).select('id').single()
 
   const review = determineDealReviewStatus(score as any, listing)
   if (listing.id && organizationId) {
@@ -248,8 +248,7 @@ async function upsertNormalizedListing(params: {
   importJobId?: string | null
   visibility?: string
 }) {
-  return upsertListingViaImportEngine({
-    supabase: params.supabase as any,
+  const payload = listingInsertPayload({
     listing: params.listing,
     organizationId: params.organizationId,
     userId: params.userId,
@@ -257,11 +256,61 @@ async function upsertNormalizedListing(params: {
     importJobId: params.importJobId,
     visibility: params.visibility,
   })
+
+  const dedupeKey = buildNormalizedListingKey(payload as NormalizedMarketListing)
+  let existing: any = null
+  if (payload.source_url) {
+    const { data } = await params.supabase
+      .from('market_listings')
+      .select('id')
+      .eq('organization_id', params.organizationId)
+      .eq('source_url', payload.source_url)
+      .maybeSingle()
+    existing = data
+  }
+  if (!existing?.id && payload.external_listing_id) {
+    const { data } = await params.supabase
+      .from('market_listings')
+      .select('id')
+      .eq('organization_id', params.organizationId)
+      .eq('source_type', payload.source_type)
+      .eq('external_listing_id', payload.external_listing_id)
+      .maybeSingle()
+    existing = data
+  }
+
+  const rawPayload = {
+    ...(typeof payload.raw_payload === 'object' && payload.raw_payload ? payload.raw_payload : {}),
+    dedupeKey,
+  }
+
+  if (existing?.id) {
+    const { data, error } = await params.supabase
+      .from('market_listings')
+      .update({ ...payload, raw_payload: rawPayload })
+      .eq('id', existing.id)
+      .select('*')
+      .single()
+    if (error || !data) throw new Error(error?.message || 'Could not update imported listing')
+    await insertScoreForListing(params.supabase, data as any, params.organizationId)
+    await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing updated from import', description: 'Existing market listing was updated from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
+    return { listing: data as any, created: false }
+  }
+
+  const { data, error } = await params.supabase
+    .from('market_listings')
+    .insert({ ...payload, raw_payload: rawPayload })
+    .select('*')
+    .single()
+  if (error || !data) throw new Error(error?.message || 'Could not create imported listing')
+  await insertScoreForListing(params.supabase, data as any, params.organizationId)
+  await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing imported', description: 'New market listing was created from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
+  return { listing: data as any, created: true }
 }
 
 function requireSourceImports(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
   if (!canUseFeature(workspace.access.features, 'market_source_imports')) {
-    redirect(`/market?tab=sources&error=${encodeURIComponent('Source imports are a premium feature. Upgrade to import URLs, CSV feeds and external market sources.')}`)
+    redirect(`/imports?error=${encodeURIComponent('Source imports are a premium feature. Upgrade to import URLs, CSV feeds and external market sources.')}`)
   }
 }
 
@@ -274,15 +323,10 @@ export async function createMarketSourceAction(formData: FormData) {
   const sourceName = text(formData, 'source_name') || `${sourceTypeValue(formData)} source`
   const sourceUrls = sourceUrlsValue(formData)
   const defaultVisibility = visibilityValue(formData)
-  const selectedSourceTypeRaw = sourceTypeValue(formData)
-  const selectedSourceType = ['manual', 'manual_url'].includes(selectedSourceTypeRaw) && sourceUrls[0]
-    ? detectSourceType(sourceUrls[0])
-    : selectedSourceTypeRaw
-  const maxUrlsPerRun = Math.min(selectedSourceType === 'investorlift' ? 40 : 25, Math.max(1, integerValue(formData, 'max_urls_per_run') || (selectedSourceType === 'investorlift' ? 40 : 5)))
   const { data: source, error } = await supabase.from('market_sources').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,
-    source_type: selectedSourceType,
+    source_type: sourceTypeValue(formData),
     source_name: sourceName,
     access_mode: accessModeValue(formData),
     status: 'active',
@@ -296,13 +340,13 @@ export async function createMarketSourceAction(formData: FormData) {
       note: text(formData, 'note'),
       source_url: sourceUrls[0] || null,
       source_urls: sourceUrls,
-      max_urls_per_run: maxUrlsPerRun,
+      max_urls_per_run: integerValue(formData, 'max_urls_per_run') || 5,
       default_visibility: defaultVisibility,
       opportunity_score_threshold: scoreThresholdValue(formData),
       createdFrom: 'market_sources_ui',
     },
-  }).select('*').single()
-  if (error || !source) redirect(`/market?tab=sources&error=${encodeURIComponent(error?.message || 'Could not create source')}`)
+  }).select('id').single()
+  if (error || !source) redirect(`/imports?error=${encodeURIComponent(error?.message || 'Could not create source')}`)
 
   if (sourceUrls.length) {
     await supabase.from('market_source_queue_items').upsert(sourceUrls.map((inputUrl) => ({
@@ -315,26 +359,7 @@ export async function createMarketSourceAction(formData: FormData) {
   }
 
   revalidatePath('/market')
-  revalidatePath('/opportunities')
-
-  if (sourceUrls.length) {
-    let runResult: any = null
-    try {
-      // Source creation should prove the import path and redirect to the first listing.
-      // Larger source batches can run from the source runner/scheduler; doing 40 external
-      // fetches during the create form submit is too fragile for an interactive action.
-      runResult = await runMarketSourceNow(source as any, { maxUrls: 1 })
-    } catch (runError) {
-      redirect(`/market?tab=sources&source_id=${source.id}&error=${encodeURIComponent(runError instanceof Error ? runError.message : 'Source was saved but import failed.')}`)
-    }
-    const firstListingId = Array.isArray(runResult?.listingIds) ? runResult.listingIds[0] : null
-    if (firstListingId) redirect(`/market/${firstListingId}?saved=source_imported`)
-    if (runResult?.failed && !runResult?.created && !runResult?.updated) {
-      redirect(`/market?tab=sources&source_id=${source.id}&error=${encodeURIComponent((runResult?.errors?.[0] || runResult?.message || 'Source was saved but no listing could be imported.'))}`)
-    }
-  }
-
-  redirect('/market?tab=sources&saved=source')
+  redirect('/imports?saved=source')
 }
 
 export async function importMarketUrlAction(formData: FormData) {
@@ -343,7 +368,7 @@ export async function importMarketUrlAction(formData: FormData) {
   requireSourceImports(workspace)
 
   const inputUrl = text(formData, 'input_url')
-  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/market?tab=sources&error=${encodeURIComponent('Enter a valid source URL.')}`)
+  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=${encodeURIComponent('Enter a valid source URL.')}`)
   const visibility = visibilityValue(formData)
   const sourceId = text(formData, 'source_id')
   const requestedSourceType = sourceTypeValue(formData)
@@ -362,7 +387,7 @@ export async function importMarketUrlAction(formData: FormData) {
     started_at: new Date().toISOString(),
   }).select('*').single()
 
-  if (jobError || !job) redirect(`/market?tab=sources&error=${encodeURIComponent(jobError?.message || 'Could not create import job')}`)
+  if (jobError || !job) redirect(`/imports?error=${encodeURIComponent(jobError?.message || 'Could not create import job')}`)
 
   const previewRows: Record<string, any>[] = []
   const listingIds: string[] = []
@@ -374,12 +399,12 @@ export async function importMarketUrlAction(formData: FormData) {
 
   try {
     const discovered = searchImport
-      ? await discoverListingUrlsFromSearchUrl(inputUrl, String(sourceType), sourceType === 'investorlift' ? 40 : 10)
+      ? await discoverListingUrlsFromSearchUrl(inputUrl, String(sourceType), 10)
       : [{ url: inputUrl, sourceType, sourceUrl: inputUrl, order: 1 }]
     found = discovered.length
     if (!discovered.length) throw new Error('No eligible listing URLs were found on the source page.')
 
-    for (const entry of discovered.slice(0, sourceType === 'investorlift' ? 40 : 10)) {
+    for (const entry of discovered.slice(0, 10)) {
       const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
       const entrySourceType = typeof entry === 'string' ? String(sourceType) : String(entry.sourceType || sourceType)
       if (!listingUrl) continue
@@ -397,7 +422,7 @@ export async function importMarketUrlAction(formData: FormData) {
         listingIds.push(String(result.listing.id))
         if (result.created) created += 1
         else updated += 1
-        const score = Number((result as any).score?.dealScore ?? result.listing.latest_deal_score ?? 0)
+        const score = Number(result.listing.latest_deal_score || 0)
         topScore = Math.max(topScore, score)
         previewRows.push({
           status: result.created ? 'created' : 'updated',
@@ -419,7 +444,7 @@ export async function importMarketUrlAction(formData: FormData) {
       }
     }
 
-    const finalStatus = failed && (created + updated) ? 'partial' : failed ? 'failed' : 'completed'
+    const finalStatus = failed && (created + updated) ? 'partially_imported' : failed ? 'failed' : 'completed'
     await supabase.from('market_import_jobs').update({
       status: finalStatus,
       finished_at: new Date().toISOString(),
@@ -441,13 +466,8 @@ export async function importMarketUrlAction(formData: FormData) {
       metadata: { sourceType, inputUrl, listingIds, created, updated, failed, found, topScore, searchImport },
     })
 
-    if (!listingIds.length && failed > 0) {
-      const firstError = String((previewRows.find((row) => row.status === 'failed') as any)?.error || 'All listing imports failed. Check the source URL or provider access.')
-      throw new Error(firstError)
-    }
-
     revalidatePath('/market')
-    revalidatePath('/market-search')
+    revalidatePath('/imports')
     revalidatePath('/opportunities')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not import URL'
@@ -462,10 +482,10 @@ export async function importMarketUrlAction(formData: FormData) {
       source_summary: { previewRows, topScore, searchImport, sourceType },
       error_message: message,
     }).eq('id', job.id)
-    redirect(`/market?tab=sources&import_job_id=${job.id}&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?import_job_id=${job.id}&error=${encodeURIComponent(message)}`)
   }
 
-  redirect(listingIds[0] ? `/market/${listingIds[0]}?import_job_id=${job.id}&saved=imported` : `/market?tab=all&import_job_id=${job.id}&saved=imported`)
+  redirect(`/market?tab=all&import_job_id=${job.id}&saved=imported`)
 }
 
 export async function importMarketCsvAction(formData: FormData) {
@@ -474,7 +494,7 @@ export async function importMarketCsvAction(formData: FormData) {
   requireSourceImports(workspace)
 
   const rawCsv = String(formData.get('csv_text') || '').trim()
-  if (!rawCsv) redirect(`/market?tab=sources&error=${encodeURIComponent('Paste CSV text first.')}`)
+  if (!rawCsv) redirect(`/imports?error=${encodeURIComponent('Paste CSV text first.')}`)
   const visibility = visibilityValue(formData)
   const sourceId = text(formData, 'source_id')
   const supabase = await createSupabaseServerClient()
@@ -488,9 +508,8 @@ export async function importMarketCsvAction(formData: FormData) {
     input_payload: { visibility, rowPreview: rawCsv.slice(0, 500) },
     started_at: new Date().toISOString(),
   }).select('*').single()
-  if (jobError || !job) redirect(`/market?tab=sources&error=${encodeURIComponent(jobError?.message || 'Could not create CSV import job')}`)
+  if (jobError || !job) redirect(`/imports?error=${encodeURIComponent(jobError?.message || 'Could not create CSV import job')}`)
 
-  const listingIds: string[] = []
   try {
     const listings = parseMarketCsvText(rawCsv, 'csv')
     if (!listings.length) throw new Error('No valid CSV rows found. Include a header row, for example: title,address,city,state,zip,list_price,market_rent,primary_image_url')
@@ -508,7 +527,6 @@ export async function importMarketCsvAction(formData: FormData) {
           importJobId: job.id,
           visibility,
         })
-        listingIds.push(String(result.listing.id))
         if (result.created) created += 1
         else updated += 1
       } catch {
@@ -523,7 +541,6 @@ export async function importMarketCsvAction(formData: FormData) {
       items_created: created,
       items_updated: updated,
       items_failed: failed,
-      normalized_listing_ids: listingIds,
       error_message: failed ? `${failed} rows failed during import.` : null,
     }).eq('id', job.id)
 
@@ -535,10 +552,10 @@ export async function importMarketCsvAction(formData: FormData) {
       finished_at: new Date().toISOString(),
       error_message: message,
     }).eq('id', job.id)
-    redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?error=${encodeURIComponent(message)}`)
   }
 
-  redirect(listingIds[0] ? `/market/${listingIds[0]}?saved=csv_imported` : '/market?tab=all&saved=csv_imported')
+  redirect('/opportunities?saved=csv_imported')
 }
 
 export async function createMarketListingAction(formData: FormData) {
@@ -619,11 +636,12 @@ export async function createMarketListingAction(formData: FormData) {
     })
 
     revalidatePath('/market')
-    redirect(`/market/${result.listing.id}?saved=listing`)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not create market listing'
-    redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?error=${encodeURIComponent(message)}`)
   }
+
+  redirect('/market?tab=all&saved=listing')
 }
 
 export async function rescoreMarketListingAction(formData: FormData) {
@@ -772,12 +790,12 @@ export async function convertListingToDealAction(formData: FormData) {
 
 export async function runMarketSourceAction(formData: FormData) {
   const sourceId = String(formData.get('source_id') || '').trim()
-  if (!sourceId) redirect('/market?tab=sources&error=Missing source id')
+  if (!sourceId) redirect('/imports?error=Missing source id')
 
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   if (!canUseFeature(workspace.access.features, 'scheduled_market_imports') && !workspace.access.isPlatformAdmin) {
-    redirect(`/market?tab=sources&error=${encodeURIComponent('Scheduled/source runs are a premium feature.')}`)
+    redirect(`/imports?error=${encodeURIComponent('Scheduled/source runs are a premium feature.')}`)
   }
 
   const supabase = await createSupabaseServerClient()
@@ -787,19 +805,17 @@ export async function runMarketSourceAction(formData: FormData) {
     .eq('id', sourceId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (error || !source) redirect(`/market?tab=sources&error=${encodeURIComponent(error?.message || 'Source not found')}`)
+  if (error || !source) redirect(`/imports?error=${encodeURIComponent(error?.message || 'Source not found')}`)
 
-  let runResult: any = null
   try {
-    const configuredMax = source.source_type === 'investorlift' ? 40 : Number((source.settings as any)?.max_urls_per_run || 5) || 5
-    runResult = await runMarketSourceNow(source as any, { maxUrls: Math.min(configuredMax, 5) })
+    await runMarketSourceNow(source as any, { maxUrls: 5 })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run market source'
-    redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?error=${encodeURIComponent(message)}`)
   }
 
   revalidatePath('/market')
-  redirect(Array.isArray((runResult as any).listingIds) && (runResult as any).listingIds[0] ? `/market/${(runResult as any).listingIds[0]}?saved=source_run` : '/market?tab=sources&saved=source_run')
+  redirect('/opportunities?saved=source_run')
 }
 
 export async function publishDealToMarketAction(formData: FormData) {

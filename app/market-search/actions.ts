@@ -13,7 +13,7 @@ function text(formData: FormData, key: string) {
 
 function sourceType(formData: FormData) {
   const value = String(formData.get('source_type') || 'other')
-  return ['zillow', 'investorlift', 'crexi', 'apartments', 'realtor', 'redfin', 'csv', 'licensed_api', 'other'].includes(value) ? value : 'other'
+  return ['zillow', 'crexi', 'apartments', 'realtor', 'redfin', 'investorlift', 'csv', 'licensed_api', 'other'].includes(value) ? value : 'other'
 }
 
 export async function createMarketSourceImportAction(formData: FormData) {

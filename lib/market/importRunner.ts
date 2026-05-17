@@ -5,54 +5,17 @@ import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
 import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { applyAutomatedRentIntelligence } from '@/lib/market/rentAutomation'
-import { buildDataQualityChecklist, buildConfidenceBreakdown } from '@/lib/market/rentIntelligenceEngine'
+import { buildConfidenceBreakdown, buildDataQualityChecklist } from '@/lib/market/rentIntelligenceEngine'
 import {
   buildNormalizedListingKey,
   detectSourceType,
   fetchAndNormalizeMarketUrl,
   type NormalizedMarketListing,
 } from '@/lib/market/sourceConnectors'
-import { providerPolicyFromRow, providerPolicySnapshot } from '@/lib/market/providerPolicies'
 
 type SupabaseAny = ReturnType<typeof createSupabaseAdminClient>
 
 type SourceRow = Record<string, any>
-
-
-async function importPolicyForSource(supabase: SupabaseAny, organizationId: string, sourceType: string) {
-  const { data } = await supabase
-    .from('market_provider_policies')
-    .select('*')
-    .or(`organization_id.eq.${organizationId},organization_id.is.null`)
-    .eq('source_type', sourceType)
-    .order('organization_id', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle()
-  return providerPolicyFromRow(sourceType, data as any)
-}
-
-async function countRecentProviderImports(supabase: SupabaseAny, organizationId: string, sourceType: string) {
-  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-  const { count } = await supabase
-    .from('market_import_audit_events')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', organizationId)
-    .eq('event_type', 'listing_imported')
-    .gte('created_at', since)
-    .contains('metadata', { sourceType })
-  return count || 0
-}
-
-async function auditImportEvent(supabase: SupabaseAny, params: { organizationId: string; userId?: string | null; listingId?: string | null; eventType: string; message: string; metadata?: Record<string, any> }) {
-  await supabase.from('market_import_audit_events').insert({
-    organization_id: params.organizationId,
-    user_id: params.userId || null,
-    listing_id: params.listingId || null,
-    event_type: params.eventType,
-    message: params.message,
-    metadata: params.metadata || {},
-  })
-}
 
 function asArrayOfUrls(settings: Record<string, any>) {
   const values = [settings.source_url, settings.sourceUrl, settings.url]
@@ -67,7 +30,7 @@ function asArrayOfUrls(settings: Record<string, any>) {
     if (typeof value === 'string') value.split(/[\n,]+/).forEach((item) => urls.add(item.trim()))
   }
 
-  return [...urls].filter((item) => item.startsWith('http://') || item.startsWith('https://')).slice(0, 25)
+  return [...urls].filter((item) => item.startsWith('http://') || item.startsWith('https://')).slice(0, 40)
 }
 
 
@@ -229,12 +192,12 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
         latest_estimated_dscr: score.estimatedDscr,
         latest_estimated_cap_rate: score.estimatedCapRate,
         latest_break_even_rent: score.breakEvenRent,
+        data_quality_checklist: buildDataQualityChecklist(listing, score as any),
+        confidence_breakdown: buildConfidenceBreakdown(listing, score as any),
         latest_score_calculated_at: calculatedAt,
         latest_opportunity_rank: rank.rank,
         latest_opportunity_rank_label: rank.label,
         latest_opportunity_rank_reason: rank.reason,
-        data_quality_checklist: buildDataQualityChecklist(listing, score as any),
-        confidence_breakdown: buildConfidenceBreakdown(listing, score as any),
       })
       .eq('id', listing.id)
       .eq('organization_id', organizationId)
@@ -336,9 +299,8 @@ export async function upsertMarketListingFromNormalized(params: {
     await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data as any, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
     const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
     const score = await insertMarketListingScore(params.supabase, (refreshed || data) as any, params.organizationId)
-    const { data: finalListing } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
     await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing updated from source run', description: 'Existing listing was refreshed by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
-    return { listing: (finalListing || refreshed || data) as any, created: false, score }
+    return { listing: (refreshed || data) as any, created: false, score }
   }
 
   const { data, error } = await params.supabase
@@ -350,9 +312,8 @@ export async function upsertMarketListingFromNormalized(params: {
   await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data as any, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
   const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
   const score = await insertMarketListingScore(params.supabase, (refreshed || data) as any, params.organizationId)
-  const { data: finalListing } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
   await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing imported from source run', description: 'New listing was created by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
-  return { listing: (finalListing || refreshed || data) as any, created: true, score }
+  return { listing: (refreshed || data) as any, created: true, score }
 }
 
 
@@ -546,35 +507,10 @@ function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string
 export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?: number }) {
   const supabase = createSupabaseAdminClient()
   const settings = (source.settings && typeof source.settings === 'object' ? source.settings : {}) as Record<string, any>
-  const sourceTypeForPolicy = String(source.source_type || 'manual_url')
-  const policy = await importPolicyForSource(supabase, source.organization_id, sourceTypeForPolicy)
-  if (!policy.active) {
-    const message = `${policy.label} import is not active. Configure provider policy before running this source.`
-    await supabase.from('market_sources').update({
-      status: 'needs_auth',
-      last_error: message,
-      last_failure_at: new Date().toISOString(),
-      last_run_at: new Date().toISOString(),
-      next_run_at: nextRunFor(source.schedule_frequency),
-    }).eq('id', source.id)
-    return { sourceId: source.id, found: 0, created: 0, updated: 0, failed: 1, opportunities: 0, topScore: 0, listingIds: [], errors: [message] }
-  }
-  const recentProviderImports = await countRecentProviderImports(supabase, source.organization_id, sourceTypeForPolicy)
-  const remainingProviderImports = Math.max(0, policy.maxListingsPerHour - recentProviderImports)
-  if (remainingProviderImports <= 0) {
-    const message = `${policy.label} rate limit reached. Try again after the rolling hour window.`
-    await supabase.from('market_sources').update({
-      status: 'active',
-      last_error: message,
-      last_failure_at: new Date().toISOString(),
-      last_run_at: new Date().toISOString(),
-      next_run_at: nextRunFor(source.schedule_frequency),
-    }).eq('id', source.id)
-    return { sourceId: source.id, found: 0, created: 0, updated: 0, failed: 1, opportunities: 0, topScore: 0, listingIds: [], errors: [message] }
-  }
-  const providerDefaultMaxUrls = String(source.source_type || '').toLowerCase() === 'investorlift' ? 40 : 5
-  const configuredMaxUrls = options?.maxUrls || Number(settings.max_urls_per_run || providerDefaultMaxUrls) || providerDefaultMaxUrls
-  const maxUrls = Math.min(configuredMaxUrls, remainingProviderImports)
+  const configuredSourceType = String(source.source_type || '')
+  const providerDefaultMax = configuredSourceType === 'investorlift' ? 40 : 5
+  const providerCap = configuredSourceType === 'investorlift' ? 40 : 25
+  const maxUrls = Math.max(1, Math.min(Number(options?.maxUrls || settings.max_urls_per_run || providerDefaultMax) || providerDefaultMax, providerCap))
   const configuredUrls = asArrayOfUrls(settings)
   await seedSourceQueueFromSettings(supabase, source, configuredUrls)
   const queuedItems = await loadQueuedUrls(supabase, source, maxUrls)
@@ -615,7 +551,9 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
         last_attempt_at: new Date().toISOString(),
       }).eq('id', queueItem.id)
     }
-    const detectedSource = source.source_type || detectSourceType(inputUrl)
+    const detectedSource = configuredSourceType && !['manual', 'manual_url', 'other'].includes(configuredSourceType)
+      ? configuredSourceType
+      : detectSourceType(inputUrl)
     const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
       organization_id: source.organization_id,
       source_id: source.id,
@@ -624,7 +562,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       job_type: source.access_mode === 'api' ? 'api_sync' : source.access_mode === 'feed' ? 'source_run' : 'authorized_scrape',
       status: 'running',
       input_url: inputUrl,
-      input_payload: { sourceType: detectedSource, scheduled: true, threshold, policy: providerPolicySnapshot(policy) },
+      input_payload: { sourceType: detectedSource, scheduled: true, threshold },
       started_at: new Date().toISOString(),
     }).select('*').single()
 
@@ -649,14 +587,6 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       else updated += 1
       topScore = Math.max(topScore, result.score.dealScore)
       listingIds.push(result.listing.id)
-      await auditImportEvent(supabase, {
-        organizationId: source.organization_id,
-        userId: source.created_by || null,
-        listingId: result.listing.id,
-        eventType: 'listing_imported',
-        message: result.created ? 'Listing imported from scheduled source.' : 'Listing updated from scheduled source.',
-        metadata: { sourceType: detectedSource, sourceId: source.id, inputUrl },
-      })
 
       const criteriaMatch = evaluateBuyBoxCriteria((buyBox as SourceRow | null) || null, result.listing, result.score, threshold)
       if (criteriaMatch.matchedStatus === 'opportunity') {
@@ -783,7 +713,7 @@ export async function runScheduledMarketImports(options?: { limitSources?: numbe
 
   const results = []
   for (const source of sources || []) {
-    results.push(await runMarketSourceNow(source as SourceRow, options?.maxUrlsPerSource ? { maxUrls: options.maxUrlsPerSource } : undefined))
+    results.push(await runMarketSourceNow(source as SourceRow, { maxUrls: options?.maxUrlsPerSource || (source.source_type === 'investorlift' ? 40 : 5) }))
   }
 
   return {

@@ -172,7 +172,7 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
 
   const sourceUrl = String(batch.normalized_url || batch.input_url || '')
   const urls = batch.import_mode === 'search_url'
-    ? await discoverListingUrlsFromSearchUrl(sourceUrl, sourceType, Math.min(remaining, policy.maxListingsPerHour))
+    ? await discoverListingUrlsFromSearchUrl(sourceUrl, sourceType, Math.min(remaining, sourceType === 'investorlift' ? 40 : 10))
     : [sourceUrl]
 
   const previewEntries = urls as Array<string | { url: string; sourceType?: string | null; sourceUrl?: string | null; order?: number | null }>
@@ -189,7 +189,7 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
   let inserted = 0
   let failed = 0
   const isSearchPreview = batch.import_mode === 'search_url'
-  for (const entry of previewEntries.slice(0, Math.min(remaining, policy.maxListingsPerHour))) {
+  for (const entry of previewEntries.slice(0, Math.min(remaining, sourceType === 'investorlift' ? 40 : 10))) {
     const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
     const entrySourceType = typeof entry === 'string' ? sourceType : String(entry.sourceType || sourceType)
     const entrySourceUrl = typeof entry === 'string' ? listingUrl : String(entry.sourceUrl || listingUrl)
@@ -464,14 +464,14 @@ export async function importPreviewItemsAction(formData: FormData) {
     if (!ids.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('Select at least one preview item to import.')}`)
     query = query.in('id', ids)
   }
-  const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, policy.maxListingsPerHour))
+  const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, sourceType === 'investorlift' ? 40 : 10))
   if (error) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(error.message)}`)
   if (!items?.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('No importable preview items found. Generate preview first, or select rows with status new/duplicate/existing.')}`)
 
   let created = 0
   let updated = 0
   let failed = 0
-  let firstImportedListingId: string | null = null
+  const importedListingIds: string[] = []
   for (const item of items as any[]) {
     try {
       const normalized = item.normalized_listing && Object.keys(item.normalized_listing || {}).length
@@ -506,7 +506,7 @@ export async function importPreviewItemsAction(formData: FormData) {
         data_quality_checklist: buildDataQualityChecklist(refreshed || result.listing, score),
         confidence_breakdown: buildConfidenceBreakdown(refreshed || result.listing, score),
       }).eq('id', result.listing.id).eq('organization_id', workspace.organization.id)
-      if (!firstImportedListingId) firstImportedListingId = String(result.listing.id)
+      importedListingIds.push(String(result.listing.id))
       await supabase.from('market_import_preview_items').update({ status: 'imported', imported_listing_id: result.listing.id, imported_at: new Date().toISOString() }).eq('id', item.id)
       await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, listingId: result.listing.id, eventType: 'listing_imported', message: result.created ? 'Listing imported.' : 'Listing updated from import.', metadata: { sourceType, sourceUrl: item.source_url } })
       if (result.created) created += 1
@@ -534,13 +534,12 @@ export async function importPreviewItemsAction(formData: FormData) {
     relatedEntityType: 'market_url_import_batch',
     relatedEntityId: batchId,
     actionHref: `/imports?batch=${batchId}`,
-    metadata: { created, updated, failed, sourceType },
+    metadata: { created, updated, failed, sourceType, importedListingIds },
   })
   revalidatePath('/imports')
   revalidatePath('/market')
   revalidatePath('/notifications')
-  if (firstImportedListingId) redirect(`/market/${firstImportedListingId}?saved=imported&batch=${batchId}&imported_count=${created + updated}`)
-  redirect(`/imports?batch=${batchId}&saved=imported`)
+  redirect(importedListingIds[0] ? `/market/${importedListingIds[0]}?batch=${batchId}&saved=imported` : `/imports?batch=${batchId}&saved=imported`)
 }
 
 export async function skipPreviewItemsAction(formData: FormData) {

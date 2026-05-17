@@ -18,20 +18,6 @@ export type MarketSourceAdapter = {
 const defaultUserAgent = 'DealFlowIQBot/2.0 (+authorized-market-import; contact=admin@dealflowiq.com)'
 
 const adapters: Record<string, MarketSourceAdapter> = {
-  investorlift: {
-    type: 'investorlift',
-    label: 'InvestorLift',
-    category: 'residential',
-    userAgent: defaultUserAgent,
-    referrer: 'https://investorlift.com/',
-    searchUrlHint: 'Paste authorized InvestorLift property, deal, listing or marketplace URLs. This connector is live-only and follows the configured 40 listings/hour policy.',
-    urlExamples: ['https://investorlift.com/...', 'https://app.investorlift.com/...'],
-    importNotes: ['Best for wholesale/off-market opportunities and disposition pipelines.', 'The adapter captures source URL, price, ARV/rehab hints, contact details when present, and DealFlowIQ scoring is layered on top.'],
-    listingIdPatterns: [/propertyId["'\s:]+([A-Za-z0-9_-]{5,})/i, /listingId["'\s:]+([A-Za-z0-9_-]{5,})/i, /dealId["'\s:]+([A-Za-z0-9_-]{5,})/i, /opportunityId["'\s:]+([A-Za-z0-9_-]{5,})/i, /\/(?:property|properties|property-detail|deal|deals|listing|listings|opportunity|opportunities)\/([A-Za-z0-9_-]{4,})/i, /[?&](?:propertyId|listingId|dealId|id)=([A-Za-z0-9_-]{4,})/i],
-    priceKeys: ['askingPrice', 'price', 'purchasePrice', 'assignmentFee', 'listPrice'],
-    rentKeys: ['rent', 'monthlyRent', 'marketRent'],
-    brokerKeys: ['seller', 'dispositionManager', 'contactName', 'agentName', 'brokerName'],
-  },
   zillow: {
     type: 'zillow',
     label: 'Zillow',
@@ -115,6 +101,20 @@ const adapters: Record<string, MarketSourceAdapter> = {
     priceKeys: ['price', 'minRent', 'maxRent'],
     rentKeys: ['rent', 'minRent', 'maxRent', 'monthlyRent'],
     brokerKeys: ['propertyManager', 'contactName'],
+  },
+  investorlift: {
+    type: 'investorlift',
+    label: 'InvestorLift',
+    category: 'residential',
+    userAgent: defaultUserAgent,
+    referrer: 'https://app.investorlift.com/',
+    searchUrlHint: 'Paste authorized InvestorLift deal, property or inventory URLs. Your account is configured for up to 40 listings per hour.',
+    urlExamples: ['https://app.investorlift.com/deals/...', 'https://app.investorlift.com/properties/...'],
+    importNotes: ['Authorized live import only under your InvestorLift access.', 'The adapter stores the source link and imports exposed images, description, taxes, ARV, rehab and rent fields when present.', 'If InvestorLift only returns an app/login shell, DealFlowIQ creates a review-required URL listing instead of silently failing.'],
+    listingIdPatterns: [/\/(?:deal|deals|property|properties|listing|listings)\/([A-Za-z0-9_-]{4,})/i, /(?:dealId|propertyId|listingId)["'\s:=]+([A-Za-z0-9_-]{4,})/i],
+    priceKeys: ['askingPrice', 'listPrice', 'price', 'purchasePrice'],
+    rentKeys: ['marketRent', 'estimatedRent', 'rent', 'monthlyRent'],
+    brokerKeys: ['ownerName', 'sellerName', 'contactName', 'brokerName', 'agentName'],
   },
   csv: {
     type: 'csv',

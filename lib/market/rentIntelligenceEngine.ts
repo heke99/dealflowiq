@@ -213,7 +213,7 @@ export async function applyHudFmrToListing(params: { supabase: SupabaseLike; org
 export async function rescoreListingAfterIntelligence(params: { supabase: SupabaseLike; organizationId: string; userId?: string | null; listing: ListingLike }) {
   const score = scoreMarketListing(params.listing)
   const calculatedAt = new Date().toISOString()
-  const { data: insertedScore } = await params.supabase.from('market_listing_scores').insert({
+  const { data: insertedScore, error: scoreInsertError } = await params.supabase.from('market_listing_scores').insert({
     listing_id: params.listing.id,
     organization_id: params.organizationId,
     formula_version: 'market-score-v5-rent-sync',
@@ -240,6 +240,7 @@ export async function rescoreListingAfterIntelligence(params: { supabase: Supaba
     missing_fields: score.missingFields,
     calculated_at: calculatedAt,
   }).select('id').single()
+  if (scoreInsertError) throw new Error(scoreInsertError.message || 'Could not save recalculated listing score')
   const review = determineDealReviewStatus(score as any, params.listing)
   const rank = classifyOpportunity(score.dealScore, score.rentConfidenceScore, Array.isArray(score.missingFields) && score.missingFields.length > 0)
   await params.supabase.from('market_listings').update({

@@ -2,13 +2,13 @@ import { normalizePropertyType } from '@/lib/market/scoring'
 import { getMarketSourceAdapter } from '@/lib/market/sourceAdapters'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
-export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'investorlift' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'other'
+export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'investorlift' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'generic' | 'other'
 
 
 
-const SEARCH_DISCOVERY_LIMIT = 40
-const SEARCH_DISCOVERY_TIMEOUT_MS = 5000
-const LISTING_FETCH_TIMEOUT_MS = 5000
+const SEARCH_DISCOVERY_LIMIT = 10
+const SEARCH_DISCOVERY_TIMEOUT_MS = 15000
+const LISTING_FETCH_TIMEOUT_MS = 15000
 const MAX_SOURCE_HTML_CHARS = 2500000
 
 function timeoutMessage(sourceType: string, mode: 'search' | 'listing', timeoutMs: number) {
@@ -93,13 +93,10 @@ function cleanText(value: unknown) {
 
 function parseNumber(value: unknown) {
   if (value === null || value === undefined) return null
-  const original = String(value).trim()
-  if (!original) return null
-  const multiplier = /\bm\b|million/i.test(original) ? 1_000_000 : /\bk\b|thousand/i.test(original) ? 1_000 : 1
-  const cleaned = original.replace(/[$,\s]/g, '').replace(/million|thousand/gi, '').replace(/[a-z]+$/i, '')
-  if (!cleaned) return null
-  const parsed = Number(cleaned)
-  return Number.isFinite(parsed) ? parsed * multiplier : null
+  const raw = String(value).replace(/[$,\s]/g, '').trim()
+  if (!raw) return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function parseInteger(value: unknown) {
@@ -197,104 +194,7 @@ function collectImages(html: string, jsonObjects: unknown[]) {
       }
     })
   }
-  return [...images].slice(0, 24)
-}
-
-
-function valueByKeyAliases(jsonObjects: unknown[], aliases: string[]) {
-  const normalizedAliases = aliases.map((item) => item.toLowerCase())
-  for (const obj of jsonObjects) {
-    let found: unknown = null
-    walk(obj, (key, value) => {
-      if (found !== null && found !== undefined) return
-      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, '')
-      if (normalizedAliases.some((alias) => normalizedKey === alias || normalizedKey.includes(alias))) {
-        if (typeof value === 'string' || typeof value === 'number') found = value
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          const candidate = (value as any).value || (value as any).amount || (value as any).price || (value as any).text || (value as any).name
-          if (typeof candidate === 'string' || typeof candidate === 'number') found = candidate
-        }
-      }
-    })
-    if (found !== null && found !== undefined) return found
-  }
-  return null
-}
-
-function textFromJson(jsonObjects: unknown[], aliases: string[]) {
-  return cleanText(valueByKeyAliases(jsonObjects, aliases))
-}
-
-function moneyFromJson(jsonObjects: unknown[], aliases: string[]) {
-  return parseMoney(valueByKeyAliases(jsonObjects, aliases))
-}
-
-function numberFromJson(jsonObjects: unknown[], aliases: string[]) {
-  return parseNumber(valueByKeyAliases(jsonObjects, aliases))
-}
-
-function extractMoneyByLabels(html: string, labels: string[]) {
-  for (const label of labels) {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const patterns = [
-      new RegExp(`${escaped}[^$0-9]{0,80}\\$?\\s*([0-9][0-9,.]{2,12})\\s*(?:m|k|million|thousand)?`, 'i'),
-      new RegExp(`\\$?\\s*([0-9][0-9,.]{2,12})\\s*(?:m|k|million|thousand)?[^A-Za-z0-9]{0,40}${escaped}`, 'i'),
-    ]
-    for (const pattern of patterns) {
-      const match = html.match(pattern)
-      const value = parseMoney(match?.[1])
-      if (value !== null) return value
-    }
-  }
-  return null
-}
-
-export function buildFallbackNormalizedListing(inputUrl: string, sourceType: MarketSourceType, reason: string): NormalizedMarketListing {
-  return {
-    source_type: sourceType,
-    external_listing_id: firstMatch(inputUrl, [/\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/([A-Za-z0-9_-]{4,})/i, /[?&](?:id|dealId|propertyId|listingId)=([A-Za-z0-9_-]{4,})/i]),
-    source_url: inputUrl,
-    title: `${getMarketSourceAdapter(sourceType).label} listing pending review`,
-    address: null,
-    city: null,
-    state: null,
-    zip_code: null,
-    county: null,
-    property_type: null,
-    units: 1,
-    bedrooms: null,
-    bathrooms: null,
-    sqft: null,
-    lot_size: null,
-    year_built: null,
-    list_price: null,
-    asking_price: null,
-    arv: null,
-    rehab_estimate: null,
-    current_rent: null,
-    market_rent: null,
-    hud_rent: null,
-    estimated_rent: null,
-    taxes_annual: null,
-    insurance_annual: null,
-    hoa_monthly: null,
-    utilities_monthly: null,
-    description: `Imported from ${getMarketSourceAdapter(sourceType).label}. Source details were not exposed to the server import and need manual review.`,
-    broker_name: null,
-    broker_phone: null,
-    broker_email: null,
-    primary_image_url: null,
-    image_urls: [],
-    raw_payload: {
-      source: 'authorized_url_import_fallback',
-      sourceType,
-      sourceUrl: inputUrl,
-      fetchedAt: new Date().toISOString(),
-      importConfidence: 'low',
-      reviewRequired: true,
-      reason,
-    },
-  }
+  return [...images].slice(0, 12)
 }
 
 function extractFromStructuredData(jsonObjects: any[]) {
@@ -351,18 +251,78 @@ function buildTitle(params: { title?: string | null; address?: string | null; ci
   return params.title || [params.address, params.city, params.state].filter(Boolean).join(', ') || `${params.sourceType[0]?.toUpperCase()}${params.sourceType.slice(1)} opportunity`
 }
 
+export function buildUrlOnlyMarketListing(inputUrl: string, sourceTypeInput?: string | null, reason?: string): NormalizedMarketListing {
+  const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
+  const adapter = getMarketSourceAdapter(sourceType)
+  let title = `${adapter.label} listing awaiting review`
+  let externalListingId: string | null = null
+  try {
+    const url = new URL(inputUrl)
+    const pathTitle = decodeURIComponent(url.pathname.split('/').filter(Boolean).slice(-2).join(' '))
+      .replace(/[-_]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (pathTitle) title = `${adapter.label}: ${pathTitle}`
+    externalListingId = firstMatch(url.toString(), adapter.listingIdPatterns) || url.searchParams.get('id') || url.searchParams.get('zpid') || null
+  } catch {
+    // Keep URL-only fallback valid even when URL parsing fails after earlier validation.
+  }
+
+  return {
+    source_type: sourceType,
+    external_listing_id: externalListingId,
+    source_url: inputUrl,
+    title,
+    address: null,
+    city: null,
+    state: null,
+    zip_code: null,
+    county: null,
+    property_type: null,
+    units: 1,
+    bedrooms: null,
+    bathrooms: null,
+    sqft: null,
+    lot_size: null,
+    year_built: null,
+    list_price: null,
+    asking_price: null,
+    arv: null,
+    rehab_estimate: null,
+    current_rent: null,
+    market_rent: null,
+    hud_rent: null,
+    estimated_rent: null,
+    taxes_annual: null,
+    insurance_annual: null,
+    hoa_monthly: null,
+    utilities_monthly: null,
+    description: 'Imported from URL. Source details could not be fetched server-side, so review and enrich this listing manually.',
+    broker_name: null,
+    broker_phone: null,
+    broker_email: null,
+    primary_image_url: null,
+    image_urls: [],
+    raw_payload: {
+      source: 'authorized_url_import_fallback',
+      sourceType,
+      adapter: adapter.label,
+      importedAt: new Date().toISOString(),
+      reviewRequired: true,
+      fallbackReason: reason || 'source_not_fetchable_or_no_structured_listing_data',
+    },
+  }
+}
+
 
 export function isSearchResultsUrl(inputUrl: string | null | undefined) {
   const url = String(inputUrl || '').toLowerCase()
   if (!url.startsWith('http')) return false
-  if (url.includes('investorlift.')) {
-    if (/\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/[a-z0-9_-]{4,}/i.test(url)) return false
-    if (url.includes('/search') || url.includes('/inventory') || url.includes('/marketplace') || url.includes('/dashboard') || url.includes('/deals?') || url.includes('/properties?') || url.includes('/listings?')) return true
-  }
   if (url.includes('searchquerystate=')) return true
   if (url.includes('/homes/') || url.includes('/for-sale/') || url.includes('/realestateandhomes-search/')) return true
   if (/\/[a-z-]+-[a-z]{2}\/?(?:\?|$)/i.test(url)) return true
   if (url.includes('/properties?') || url.includes('/search?') || url.includes('/commercial-real-estate/')) return true
+  if (url.includes('investorlift.') && (url.includes('/deals') || url.includes('/properties') || url.includes('/search') || url.includes('/map'))) return true
   return false
 }
 
@@ -375,13 +335,13 @@ function absoluteUrl(baseUrl: string, href: string) {
 }
 
 function listingUrlPatternsFor(sourceType: MarketSourceType) {
-  if (sourceType === 'zillow') return [/href=["']([^"']*\/homedetails\/[^"']+?_zpid\/?[^"']*)["']/gi, /https?:\\?\/\\?\/www\.zillow\.com\\?\/homedetails\\?\/[^"'\\]+?_zpid\/?/gi]
-  if (sourceType === 'redfin') return [/href=["']([^"']*\/[^"']+\/home\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.redfin\.com\\?\/[^"'\\]+?\\?\/home\\?\/[0-9]+/gi]
-  if (sourceType === 'realtor') return [/href=["']([^"']*\/realestateandhomes-detail\/[^"']+)["']/gi, /https?:\\?\/\\?\/www\.realtor\.com\\?\/realestateandhomes-detail\\?\/[^"'\\]+/gi]
-  if (sourceType === 'crexi') return [/href=["']([^"']*\/properties\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.crexi\.com\\?\/properties\\?\/[0-9]+[^"'\\]*/gi]
-  if (sourceType === 'loopnet') return [/href=["']([^"']*\/Listing\/[^"']+\/[0-9]+\/?[^"']*)["']/gi, /https?:\\?\/\\?\/www\.loopnet\.com\\?\/Listing\\?\/[^"'\\]+?\\?\/[0-9]+/gi]
-  if (sourceType === 'investorlift') return [/href=["']([^"']*\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/[A-Za-z0-9_-]{4,}[^"']*)["']/gi, /https?:\\?\/\\?\/[^"'\\]*investorlift\.[^"'\\]+?\\?\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\\?\/[A-Za-z0-9_-]{4,}[^"'\\]*/gi, /["'](https?:\\?\/\\?\/[^"'\\]*investorlift\.[^"'\\]+?(?:deal|property|listing)[^"'\\]{6,})["']/gi]
-  return [/href=["']([^"']*(?:homedetails|realestateandhomes-detail|\/home\/|\/properties\/|\/Listing\/)[^"']*)["']/gi]
+  if (sourceType === 'zillow') return [/href=["']([^"']*\/homedetails\/[^"']+?_zpid\/?[^"']*)["']/gi, /https?:\\?\/\\?\/www\.zillow\.com\?\/homedetails\?\/[^"'\\]+?_zpid\/?/gi]
+  if (sourceType === 'redfin') return [/href=["']([^"']*\/[^"']+\/home\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.redfin\.com\?\/[^"'\\]+?\?\/home\?\/[0-9]+/gi]
+  if (sourceType === 'realtor') return [/href=["']([^"']*\/realestateandhomes-detail\/[^"']+)["']/gi, /https?:\\?\/\\?\/www\.realtor\.com\?\/realestateandhomes-detail\?\/[^"'\\]+/gi]
+  if (sourceType === 'crexi') return [/href=["']([^"']*\/properties\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.crexi\.com\?\/properties\?\/[0-9]+[^"'\\]*/gi]
+  if (sourceType === 'loopnet') return [/href=["']([^"']*\/Listing\/[^"']+\/[0-9]+\/?[^"']*)["']/gi, /https?:\\?\/\\?\/www\.loopnet\.com\?\/Listing\?\/[^"'\\]+?\?\/[0-9]+/gi]
+  if (sourceType === 'investorlift') return [/href=["']([^"']*(?:\/deals?\/|\/properties?\/|\/listing\/)[^"']+)["']/gi, /https?:\\?\/\\?\/(?:app\.)?investorlift\.com\?\/(?:deals?|properties?|listing)\?\/[^"'\\s<>]+/gi]
+  return [/href=["']([^"']*(?:homedetails|realestateandhomes-detail|\/home\/|\/properties\/|\/Listing\/|\/deals?\/|\/listing\/)[^"']*)["']/gi]
 }
 
 function cleanDiscoveredUrl(raw: string, baseUrl: string) {
@@ -400,7 +360,7 @@ function isLikelyListingUrl(url: string, sourceType: MarketSourceType) {
   if (sourceType === 'realtor') return value.includes('/realestateandhomes-detail/')
   if (sourceType === 'crexi') return value.includes('/properties/')
   if (sourceType === 'loopnet') return value.includes('/listing/')
-  if (sourceType === 'investorlift') return /\/(deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/[a-z0-9_-]{4,}/i.test(value) || /(?:dealid|propertyid|listingid|id)=([a-z0-9_-]{4,})/i.test(value)
+  if (sourceType === 'investorlift') return value.includes('/deal/') || value.includes('/deals/') || value.includes('/property/') || value.includes('/properties/') || value.includes('/listing/')
   return value.includes('/homedetails/') || value.includes('/home/') || value.includes('/realestateandhomes-detail/') || value.includes('/properties/') || value.includes('/listing/')
 }
 
@@ -408,27 +368,16 @@ export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceT
   const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
   const adapter = getMarketSourceAdapter(sourceType)
   const hardLimit = Math.max(1, Math.min(Number(limit || SEARCH_DISCOVERY_LIMIT), SEARCH_DISCOVERY_LIMIT))
-  let html = ''
-  try {
-    html = await fetchTextWithTimeout(inputUrl, {
-      sourceType,
-      mode: 'search',
-      timeoutMs: SEARCH_DISCOVERY_TIMEOUT_MS,
-      headers: {
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'user-agent': adapter.userAgent,
-        ...(adapter.referrer ? { referer: adapter.referrer } : {}),
-      },
-    })
-  } catch (error) {
-    return [{
-      url: inputUrl,
-      sourceType,
-      sourceUrl: inputUrl,
-      order: 1,
-      fallbackReason: error instanceof Error ? error.message : 'Source search page was not fetchable from the server',
-    }]
-  }
+  const html = await fetchTextWithTimeout(inputUrl, {
+    sourceType,
+    mode: 'search',
+    timeoutMs: SEARCH_DISCOVERY_TIMEOUT_MS,
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'user-agent': adapter.userAgent,
+      ...(adapter.referrer ? { referer: adapter.referrer } : {}),
+    },
+  })
 
   const urls = new Set<string>()
   for (const pattern of listingUrlPatternsFor(sourceType)) {
@@ -442,105 +391,82 @@ export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceT
     if (urls.size >= hardLimit) break
   }
 
-  const discovered = [...urls].slice(0, hardLimit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
-  if (!discovered.length) {
-    return [{
-      url: inputUrl,
-      sourceType,
-      sourceUrl: inputUrl,
-      order: 1,
-      fallbackReason: 'No listing links were exposed in the source page HTML; importing the submitted URL for review instead.',
-    }]
-  }
-  return discovered
+  return [...urls].slice(0, hardLimit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
 }
 
 export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInput?: string | null): Promise<NormalizedMarketListing> {
-  const sourceType = (sourceTypeInput && !['manual', 'manual_url', 'other'].includes(String(sourceTypeInput)) ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
+  const sourceType = (sourceTypeInput && sourceTypeInput !== 'manual_url' ? sourceTypeInput : detectSourceType(inputUrl)) as MarketSourceType
   const adapter = getMarketSourceAdapter(sourceType)
-  let html = ''
-  try {
-    html = await fetchTextWithTimeout(inputUrl, {
-      sourceType,
-      mode: 'listing',
-      timeoutMs: LISTING_FETCH_TIMEOUT_MS,
-      headers: {
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'user-agent': adapter.userAgent,
-        ...(adapter.referrer ? { referer: adapter.referrer } : {}),
-      },
-    })
-  } catch (error) {
-    return buildFallbackNormalizedListing(inputUrl, sourceType, error instanceof Error ? error.message : 'Source did not return fetchable listing HTML')
-  }
-
+  const html = await fetchTextWithTimeout(inputUrl, {
+    sourceType,
+    mode: 'listing',
+    timeoutMs: LISTING_FETCH_TIMEOUT_MS,
+    headers: {
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'user-agent': adapter.userAgent,
+      ...(adapter.referrer ? { referer: adapter.referrer } : {}),
+    },
+  })
   const jsonLd = findJsonLd(html)
   const nextData = findNextData(html)
-  const jsonObjects = [...jsonLd, nextData].filter(Boolean)
-  const structuredFacts = extractFromStructuredData(jsonObjects)
-  const images = collectImages(html, jsonObjects)
+  const structuredFacts = extractFromStructuredData([...jsonLd, nextData].filter(Boolean))
+  const images = collectImages(html, [...jsonLd, nextData].filter(Boolean))
 
   const title = firstMatch(html, [
     /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
     /<title[^>]*>([\s\S]*?)<\/title>/i,
-  ]) || cleanText(structuredFacts.name) || cleanText(structuredFacts.headline) || textFromJson(jsonObjects, ['title', 'headline', 'propertytitle', 'dealname', 'name'])
+  ]) || cleanText(structuredFacts.name) || cleanText(structuredFacts.headline)
 
   const description = firstMatch(html, [
     /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
-  ]) || cleanText(structuredFacts.description) || textFromJson(jsonObjects, ['description', 'remarks', 'propertydescription', 'summary', 'investmenthighlights'])
+  ]) || cleanText(structuredFacts.description)
 
-  const address = cleanText(structuredFacts.streetAddress) || textFromJson(jsonObjects, ['streetaddress', 'addressline1', 'fulladdress', 'propertyaddress', 'address']) || firstMatch(html, [/"streetAddress"\s*:\s*"([^"]+)"/i])
-  const city = cleanText(structuredFacts.addressLocality) || textFromJson(jsonObjects, ['addresslocality', 'city']) || firstMatch(html, [/"addressLocality"\s*:\s*"([^"]+)"/i])
-  const state = cleanText(structuredFacts.addressRegion) || textFromJson(jsonObjects, ['addressregion', 'state', 'province']) || firstMatch(html, [/"addressRegion"\s*:\s*"([^"]+)"/i])
-  const zip = cleanText(structuredFacts.postalCode) || textFromJson(jsonObjects, ['postalcode', 'zipcode', 'zip']) || firstMatch(html, [/"postalCode"\s*:\s*"([0-9]{5})"/i, /\b([0-9]{5})(?:-[0-9]{4})?\b/])
-  const beds = numberFromJson(jsonObjects, ['bedrooms', 'beds', 'bedcount']) ?? parseNumber(firstMatch(html, [/([0-9]+(?:\.[0-9]+)?)\s*(?:bd|beds?|bedrooms?)\b/i]))
-  const baths = numberFromJson(jsonObjects, ['bathrooms', 'baths', 'bathcount']) ?? parseNumber(firstMatch(html, [/([0-9]+(?:\.[0-9]+)?)\s*(?:ba|baths?|bathrooms?)\b/i]))
-  const sqft = parseInteger(numberFromJson(jsonObjects, ['sqft', 'squarefeet', 'buildingarea', 'livingarea', 'floorsize']) ?? firstMatch(html, [/([0-9][0-9,]{2,6})\s*(?:sq\.?\s*ft|sqft|square feet)\b/i]))
-  const units = parseInteger(numberFromJson(jsonObjects, ['units', 'doors', 'unitcount', 'numberofunits']) ?? firstMatch(html, [/([0-9]+)\s*(?:units?|doors?)\b/i])) || (inferPropertyType(`${title || ''} ${description || ''}`)?.includes('Duplex') ? 2 : null)
-  const marketRent = parseRent(moneyFromJson(jsonObjects, ['marketrent', 'estimatedrent', 'rent', 'monthlyrent']) ?? extractMonthlyRentFromHtml(html))
-  const structuredPrice = parseMoney(structuredFacts.price ?? structuredFacts.priceValue ?? structuredFacts.amount) ?? moneyFromJson(jsonObjects, ['askingprice', 'listprice', 'price', 'purchaseprice'])
+  const address = cleanText(structuredFacts.streetAddress) || firstMatch(html, [/"streetAddress"\s*:\s*"([^"]+)"/i])
+  const city = cleanText(structuredFacts.addressLocality) || firstMatch(html, [/"addressLocality"\s*:\s*"([^"]+)"/i])
+  const state = cleanText(structuredFacts.addressRegion) || firstMatch(html, [/"addressRegion"\s*:\s*"([^"]+)"/i])
+  const zip = cleanText(structuredFacts.postalCode) || firstMatch(html, [/"postalCode"\s*:\s*"([0-9]{5})"/i, /\b([0-9]{5})(?:-[0-9]{4})?\b/])
+  const beds = parseNumber(firstMatch(html, [/([0-9]+(?:\.[0-9]+)?)\s*(?:bd|beds?|bedrooms?)\b/i]))
+  const baths = parseNumber(firstMatch(html, [/([0-9]+(?:\.[0-9]+)?)\s*(?:ba|baths?|bathrooms?)\b/i]))
+  const sqft = parseInteger(firstMatch(html, [/([0-9][0-9,]{2,6})\s*(?:sq\.?\s*ft|sqft|square feet)\b/i]))
+  const units = parseInteger(firstMatch(html, [/([0-9]+)\s*(?:units?|doors?)\b/i])) || (inferPropertyType(`${title || ''} ${description || ''}`)?.includes('Duplex') ? 2 : null)
+  const marketRent = extractMonthlyRentFromHtml(html)
+  const structuredPrice = parseMoney(structuredFacts.price ?? structuredFacts.priceValue ?? structuredFacts.amount)
   const listPrice = extractSalePriceFromHtml(html, structuredPrice)
-  const taxesAnnual = moneyFromJson(jsonObjects, ['taxesannual', 'annualtaxes', 'propertytaxes', 'taxamount']) ?? extractMoneyByLabels(html, ['Taxes', 'Annual taxes', 'Property taxes'])
-  const insuranceAnnual = moneyFromJson(jsonObjects, ['insuranceannual', 'annualinsurance', 'insurance']) ?? extractMoneyByLabels(html, ['Insurance', 'Annual insurance'])
-  const hoaMonthly = moneyFromJson(jsonObjects, ['hoa', 'hoamonthly', 'associationfee']) ?? extractMoneyByLabels(html, ['HOA', 'Association fee'])
-  const utilitiesMonthly = moneyFromJson(jsonObjects, ['utilities', 'utilitiesmonthly']) ?? extractMoneyByLabels(html, ['Utilities'])
-  const arv = moneyFromJson(jsonObjects, ['arv', 'afterrepairvalue', 'afterrepairvalueestimate']) ?? extractMoneyByLabels(html, ['ARV', 'After Repair Value'])
-  const rehabEstimate = moneyFromJson(jsonObjects, ['rehab', 'rehabestimate', 'repaircost', 'repairs']) ?? extractMoneyByLabels(html, ['Rehab', 'Repair estimate', 'Repairs'])
 
   return {
     source_type: sourceType,
-    external_listing_id: firstMatch(inputUrl, adapter.listingIdPatterns) || firstMatch(html, adapter.listingIdPatterns) || firstMatch(html, [/"(?:zpid|listingId|propertyId|dealId|id)"\s*:\s*"?([A-Za-z0-9_-]{5,})"?/i]),
+    external_listing_id: firstMatch(inputUrl, adapter.listingIdPatterns) || firstMatch(html, adapter.listingIdPatterns) || firstMatch(html, [/"(?:zpid|listingId|propertyId|id)"\s*:\s*"?([A-Za-z0-9_-]{5,})"?/i]),
     source_url: inputUrl,
     title: buildTitle({ title, address, city, state, sourceType }),
     address,
     city,
     state,
     zip_code: zip,
-    county: textFromJson(jsonObjects, ['county']),
-    property_type: inferPropertyType(`${title || ''} ${description || ''}`) || textFromJson(jsonObjects, ['propertytype', 'assettype']),
+    county: null,
+    property_type: inferPropertyType(`${title || ''} ${description || ''}`),
     units,
     bedrooms: beds,
     bathrooms: baths,
     sqft,
-    lot_size: textFromJson(jsonObjects, ['lotsize', 'lot']) || firstMatch(html, [/([0-9,.]+\s*(?:acre|acres|sqft lot|sf lot))/i]),
-    year_built: parseInteger(numberFromJson(jsonObjects, ['yearbuilt', 'built']) ?? firstMatch(html, [/(?:built in|year built)[^0-9]{0,12}([12][0-9]{3})/i])),
+    lot_size: firstMatch(html, [/([0-9,.]+\s*(?:acre|acres|sqft lot|sf lot))/i]),
+    year_built: parseInteger(firstMatch(html, [/(?:built in|year built)[^0-9]{0,12}([12][0-9]{3})/i])),
     list_price: listPrice,
     asking_price: listPrice,
-    arv,
-    rehab_estimate: rehabEstimate,
+    arv: null,
+    rehab_estimate: null,
     current_rent: marketRent,
     market_rent: marketRent,
     hud_rent: null,
     estimated_rent: marketRent,
-    taxes_annual: taxesAnnual,
-    insurance_annual: insuranceAnnual,
-    hoa_monthly: hoaMonthly,
-    utilities_monthly: utilitiesMonthly,
+    taxes_annual: null,
+    insurance_annual: null,
+    hoa_monthly: null,
+    utilities_monthly: null,
     description,
-    broker_name: textFromJson(jsonObjects, ['brokername', 'agentname', 'contactname', 'ownername']) || firstMatch(html, [/(?:broker|agent|listed by)[^A-Za-z0-9]{0,20}([A-Z][A-Za-z .'-]{3,80})/i]),
-    broker_phone: textFromJson(jsonObjects, ['brokerphone', 'agentphone', 'phone', 'contactphone']) || firstMatch(html, [/\b(\(?[0-9]{3}\)?[-.\s][0-9]{3}[-.\s][0-9]{4})\b/]),
-    broker_email: textFromJson(jsonObjects, ['brokeremail', 'agentemail', 'email', 'contactemail']) || firstMatch(html, [/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i]),
+    broker_name: firstMatch(html, [/(?:broker|agent|listed by)[^A-Za-z0-9]{0,20}([A-Z][A-Za-z .'-]{3,80})/i]),
+    broker_phone: firstMatch(html, [/\b(\(?[0-9]{3}\)?[-.\s][0-9]{3}[-.\s][0-9]{4})\b/]),
+    broker_email: firstMatch(html, [/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i]),
     primary_image_url: images[0] || null,
     image_urls: images,
     raw_payload: {
@@ -557,9 +483,6 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
         hasListPrice: Boolean(listPrice),
         hasMarketRent: Boolean(marketRent),
         imageCount: images.length,
-        hasTaxes: Boolean(taxesAnnual),
-        hasArv: Boolean(arv),
-        hasRehab: Boolean(rehabEstimate),
       },
     },
   }
@@ -598,7 +521,7 @@ export function parseMarketCsvText(rawText: string, sourceType: MarketSourceType
     const values = csvSplit(line)
     const row: Record<string, string> = {}
     headers.forEach((header, headerIndex) => { row[header] = values[headerIndex] || '' })
-    const imageUrls = String(row.image_urls || row.images || '').split(/[|;]+/).map((item) => item.trim()).filter((item) => item.startsWith('http')).slice(0, 24)
+    const imageUrls = String(row.image_urls || row.images || '').split(/[|;]+/).map((item) => item.trim()).filter((item) => item.startsWith('http')).slice(0, 12)
     const sourceUrl = cleanText(row.source_url || row.url || row.link)
     const detectedSource = sourceUrl ? detectSourceType(sourceUrl) : sourceType
     return {

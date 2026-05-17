@@ -265,6 +265,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href="/opportunities" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">View Opportunities</Link>
                 <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">URL Import Queue</Link>
+                <Link href="/imports" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Import Listings</Link>
                 <Link href="/deals/new" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Add My Deal</Link>
               </div>
             </div>
@@ -460,7 +461,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
               <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center">
                 <h2 className="text-xl font-bold">No listings here yet</h2>
                 <p className="mt-2 text-slate-400">Import a URL, create an auto source, or publish a deal to Market.</p>
-                <Link href="/imports" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Add source</Link>
+                <Link href="/imports" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import listing</Link>
               </div>
             )}
           </section>

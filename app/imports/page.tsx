@@ -45,7 +45,7 @@ function BatchActions({ batch }: { batch: Row }) {
       <form action={importPreviewItemsAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
         <input type="hidden" name="import_first_10" value="true" />
-        <SubmitButton pendingText="Importing available rows..." className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import available preview rows</SubmitButton>
+        <SubmitButton pendingText="Importing first 10..." className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import first 10 preview rows</SubmitButton>
       </form>
       <form action={updateImportBatchStatusAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
@@ -134,9 +134,9 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
         <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 sm:p-8">
           <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
             <div>
-              <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">Batch 12I.2 · Real provider import workflow</div>
-              <h1 className="mt-2 text-4xl font-black tracking-tight">URL Import Center</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. InvestorLift is supported as a live provider with a 40 listings/hour policy. DealFlowIQ analyzes the URL, creates a real provider preview, then imports selected listings under provider policy and rate limits. No demo mode. No email/SMS.</p>
+              <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">Canonical URL import</div>
+              <h1 className="mt-2 text-4xl font-black tracking-tight">Import and open listing</h1>
+              <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. DealFlowIQ imports one listing immediately, scores it, and opens the listing page. If the provider blocks server-side details, a review-required URL listing is still created so the import never fails silently.</p>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">Active</div><div className="mt-1 text-2xl font-black">{queued}</div></div>
@@ -151,12 +151,12 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
         <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <section className="space-y-6">
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Import URL now</h2>
-              <p className="mt-2 text-sm text-slate-400">Paste a provider URL. DealFlowIQ analyzes it, imports available listing rows, scores them, and redirects to the first imported listing. Preview rows remain available for review if something needs manual attention.</p>
+              <h2 className="text-xl font-bold">Import listing URL</h2>
+              <p className="mt-2 text-sm text-slate-400">This is the only supported import entry point. It creates or updates the listing, runs scoring, and redirects you directly to the listing.</p>
               <form action={analyzeImportUrlAction} className="mt-5 space-y-4">
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Provider URL</span>
-                  <textarea name="input_url" rows={5} placeholder="https://www.investorlift.com/... or https://www.zillow.com/homedetails/..." className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  <textarea name="input_url" rows={5} placeholder="https://www.zillow.com/homedetails/... or https://app.investorlift.com/..." className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
                 </label>
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Source name</span>
@@ -171,7 +171,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                     <option value="public">Public</option>
                   </select>
                 </label>
-                <SubmitButton pendingText="Importing and building listing..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and open listing</SubmitButton>
+                <SubmitButton pendingText="Importing and opening listing..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and open listing</SubmitButton>
               </form>
             </div>
 
@@ -216,7 +216,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                   <form action={importPreviewItemsAction}>
                     <input type="hidden" name="batch_id" value={selectedBatchId} />
                     <input type="hidden" name="import_first_10" value="true" />
-                    <SubmitButton pendingText="Importing available rows..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Import available rows</SubmitButton>
+                    <SubmitButton pendingText="Importing first 10..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Import first 10</SubmitButton>
                   </form>
                 </div>
                 <form action={importPreviewItemsAction} className="mt-5 space-y-3">

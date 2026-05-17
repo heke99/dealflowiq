@@ -69,7 +69,7 @@ export async function getCurrentWorkspace(): Promise<CurrentWorkspace> {
   const membership = memberships[0] || null
   const organization = membership?.organization || null
   const accountType = organization?.account_type || organization?.organization_type || (profile as WorkspaceProfile | null)?.account_type || 'solo_investor'
-  const access = await getWorkspaceAccess({ organizationId: organization?.id, accountType })
+  const access = await getWorkspaceAccess({ organizationId: organization?.id, userId: user.id, accountType })
 
   return {
     user,

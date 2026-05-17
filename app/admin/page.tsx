@@ -21,7 +21,9 @@ function price(cents?: number | null) {
 }
 
 function statusLabel(value?: string | null) {
-  if (!value || value === 'trialing') return 'active'
+  if (!value) return 'payment required'
+  if (value === 'trialing') return 'trialing'
+  if (value === 'manually_granted') return 'manual access'
   return String(value).replaceAll('_', ' ')
 }
 
@@ -110,14 +112,14 @@ export default async function AdminDashboardPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href="/admin/plans" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">Plans & subscriptions</Link>
-              <Link href="/admin/access" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create invite</Link>
+              <Link href="/admin/access" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Access controls</Link>
             </div>
           </div>
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Stat label="Organizations" value={numberText(orgsResult.count || 0)} hint="Total workspaces in the platform." tone="blue" />
-          <Stat label="Active access" value={numberText(activeSubsResult.count || 0)} hint="Organizations with usable subscription access." href="/admin/plans" tone="green" />
+          <Stat label="Active access" value={numberText(activeSubsResult.count || 0)} hint="Organizations with active, trialing, comped or manual access." href="/admin/plans" tone="green" />
           <Stat label="Active plans" value={numberText(activePlansResult.count || 0)} hint={`${numberText(plansResult.count || 0)} total plan records.`} href="/admin/plans" />
           <Stat label="Open invites" value={numberText(activeInvitesResult.count || 0)} hint="Pending access grants." href="/admin/access" tone="amber" />
           <Stat label="Failed imports" value={numberText(failedImports)} hint="Import jobs needing operator review." href="/market?tab=sources" tone={failedImports > 0 ? 'red' : 'green'} />
@@ -126,7 +128,7 @@ export default async function AdminDashboardPage() {
         <section className="grid gap-5 lg:grid-cols-3">
           <AdminAction icon={BadgeDollarSign} title="Create or edit plans" text="Change plan names, prices, limits and included features. Delete plans safely with replacement sync." href="/admin/plans" cta="Manage plans" />
           <AdminAction icon={Building2} title="Sync organization subscriptions" text="Assign a plan to a workspace, activate access, cancel access or update current-period dates." href="/admin/plans#subscriptions" cta="Open subscriptions" />
-          <AdminAction icon={Users} title="Grant access by invite" text="Invite users, set workspace type and attach a plan before they sign up." href="/admin/access" cta="Create invite" />
+          <AdminAction icon={Users} title="Grant access by invite or override" text="Invite users before signup or give an existing member full access override." href="/admin/access" cta="Access controls" />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">

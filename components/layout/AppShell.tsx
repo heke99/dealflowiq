@@ -56,10 +56,28 @@ type AppShellProps = {
 }
 
 function statusLabel(status?: string | null) {
-  const normalized = String(status || 'active').replaceAll('_', ' ')
-  if (!status || status === 'trialing') return 'Active access'
+  if (!status) return 'Access pending'
+  if (status === 'platform_admin') return 'Platform admin'
+  if (status === 'member_full_access') return 'Admin override'
+  if (status === 'trialing') return '7-day trial'
+  if (status === 'trial_expired') return 'Payment required'
   if (status === 'manually_granted') return 'Manual access'
+  if (status === 'past_due') return 'Payment past due'
+  if (status === 'missing_subscription') return 'No subscription'
+  if (status === 'restricted_by_admin') return 'Restricted'
+  const normalized = String(status).replaceAll('_', ' ')
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
+function isPaymentBlocked(status?: string | null) {
+  return ['trial_expired', 'past_due', 'canceled', 'expired', 'missing_subscription', 'restricted_by_admin', 'missing_organization'].includes(String(status || ''))
+}
+
+function daysRemaining(value?: string | null) {
+  if (!value) return null
+  const diff = new Date(value).getTime() - Date.now()
+  if (!Number.isFinite(diff) || diff <= 0) return 0
+  return Math.ceil(diff / (24 * 60 * 60 * 1000))
 }
 
 function initials(value?: string | null) {
@@ -107,6 +125,7 @@ export function AppShell({
   features,
   subscriptionStatus,
   planName,
+  trialEndsAt,
   isPlatformAdmin,
 }: AppShellProps) {
   const config = getAccountTypeConfig(accountType)
@@ -164,6 +183,9 @@ export function AppShell({
   const visibleGroups = navGroups
     .map((group) => ({ ...group, items: group.items.filter((item) => item.visible !== false) }))
     .filter((group) => group.items.length > 0)
+  const paymentBlocked = !isPlatformAdmin && isPaymentBlocked(subscriptionStatus)
+  const trialDaysLeft = daysRemaining(trialEndsAt)
+  const safeWhenBlocked = new Set(['/dashboard', '/settings/billing', '/settings'])
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -189,11 +211,11 @@ export function AppShell({
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-3">
               <div className="text-slate-500">Plan</div>
-              <div className="mt-1 truncate font-bold text-white">{planName || 'Active plan'}</div>
+              <div className="mt-1 truncate font-bold text-white">{isPlatformAdmin ? 'Admin access' : planName || 'Plan pending'}</div>
             </div>
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3">
               <div className="text-emerald-200/70">Status</div>
-              <div className="mt-1 truncate font-bold text-emerald-100">{isPlatformAdmin ? 'Platform admin' : statusLabel(subscriptionStatus)}</div>
+              <div className="mt-1 truncate font-bold text-emerald-100">{statusLabel(subscriptionStatus)}</div>
             </div>
           </div>
           <div className="mt-2 rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-xs text-slate-400">
@@ -207,7 +229,7 @@ export function AppShell({
               <div className="mb-2 px-3 text-[11px] font-black uppercase tracking-[0.18em] text-slate-600">{group.label}</div>
               <div className="space-y-1">
                 {group.items.map((item) => {
-                  const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
+                  const locked = Boolean((paymentBlocked && !safeWhenBlocked.has(item.href)) || (item.feature && !item.core && !canUseFeature(features, item.feature)))
                   return <NavLink key={item.href} item={item} locked={locked} />
                 })}
               </div>
@@ -233,7 +255,7 @@ export function AppShell({
           </div>
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
             {visibleGroups.flatMap((group) => group.items).map((item) => {
-              const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
+              const locked = Boolean((paymentBlocked && !safeWhenBlocked.has(item.href)) || (item.feature && !item.core && !canUseFeature(features, item.feature)))
               const Icon = item.icon
               return (
                 <Link key={item.href} href={item.href} className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-bold text-slate-300">
@@ -246,7 +268,22 @@ export function AppShell({
           </nav>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+        <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          {!isPlatformAdmin && subscriptionStatus === 'trialing' ? (
+            <div className="mb-6 rounded-3xl border border-emerald-400/25 bg-emerald-400/10 p-4 text-sm text-emerald-50">
+              <div className="font-black">7-day full-access trial is active{trialDaysLeft !== null ? ` · ${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : ''}</div>
+              <p className="mt-1 text-emerald-100/80">After the trial, the workspace is restricted until an active subscription or admin override is assigned.</p>
+            </div>
+          ) : null}
+          {paymentBlocked ? (
+            <div className="mb-6 rounded-3xl border border-amber-400/30 bg-amber-400/10 p-5 text-amber-50">
+              <div className="text-lg font-black">Subscription required</div>
+              <p className="mt-1 text-sm text-amber-100/80">Your trial or subscription is not active. Core navigation stays visible, but deal tools are locked until payment is fixed or admin grants access.</p>
+              <Link href="/settings/billing" className="mt-4 inline-flex rounded-2xl bg-white px-4 py-2 text-sm font-black text-slate-950 hover:bg-slate-200">Open billing</Link>
+            </div>
+          ) : null}
+          {children}
+        </main>
       </div>
     </div>
   )

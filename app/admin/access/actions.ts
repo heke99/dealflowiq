@@ -94,3 +94,62 @@ export async function revokeAdminAccessInviteAction(formData: FormData) {
   revalidatePath('/admin/access')
   redirect('/admin/access?saved=1')
 }
+
+export async function grantMemberFullAccessOverrideAction(formData: FormData) {
+  await requirePlatformAdmin()
+
+  const organizationId = String(formData.get('organization_id') || '').trim()
+  const userId = String(formData.get('user_id') || '').trim()
+  const expiresInDays = toInt(formData.get('expires_in_days'), 0)
+  const notes = String(formData.get('notes') || '').trim()
+
+  if (!organizationId || !userId) {
+    redirect('/admin/access?error=Choose an organization member to override')
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const { data: userData } = await supabase.auth.getUser()
+  const grantedBy = userData.user?.id || null
+  const now = new Date().toISOString()
+  const expiresAt = expiresInDays > 0 ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString() : null
+
+  const { error } = await supabase.from('member_access_overrides').upsert({
+    organization_id: organizationId,
+    user_id: userId,
+    status: 'full_access',
+    starts_at: now,
+    expires_at: expiresAt,
+    features_override: {},
+    limits_override: { unlimited: null },
+    notes: notes || 'Full access granted by platform admin.',
+    granted_by: grantedBy,
+    updated_at: now,
+  }, { onConflict: 'organization_id,user_id' })
+
+  if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+
+  revalidatePath('/admin/access')
+  revalidatePath('/admin')
+  revalidatePath('/dashboard')
+  redirect('/admin/access?saved=1#member-overrides')
+}
+
+export async function revokeMemberAccessOverrideAction(formData: FormData) {
+  await requirePlatformAdmin()
+
+  const id = String(formData.get('id') || '').trim()
+  if (!id) redirect('/admin/access?error=Override ID is required')
+
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase
+    .from('member_access_overrides')
+    .update({ status: 'revoked', updated_at: new Date().toISOString() })
+    .eq('id', id)
+
+  if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+
+  revalidatePath('/admin/access')
+  revalidatePath('/admin')
+  revalidatePath('/dashboard')
+  redirect('/admin/access?saved=1#member-overrides')
+}

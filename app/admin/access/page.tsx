@@ -1,5 +1,5 @@
 import { AppShell } from '@/components/layout/AppShell'
-import { createAdminAccessInviteAction, revokeAdminAccessInviteAction } from '@/app/admin/access/actions'
+import { createAdminAccessInviteAction, grantMemberFullAccessOverrideAction, revokeAdminAccessInviteAction, revokeMemberAccessOverrideAction } from '@/app/admin/access/actions'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { ACCOUNT_TYPE_CONFIGS } from '@/lib/product/accountTypes'
@@ -50,6 +50,24 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
     .select('id, email, organization_name, account_type, role, trial_days, status, invite_token, expires_at, used_at, created_at, billing_plans(name, code)')
     .order('created_at', { ascending: false })
     .limit(30)
+  const { data: organizations } = await supabase.from('organizations').select('id, name').order('name').limit(200)
+  const { data: memberRows } = await supabase
+    .from('organization_members')
+    .select('id, organization_id, user_id, role, status, organizations(id, name)')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(250)
+  const memberUserIds = Array.from(new Set((memberRows || []).map((row: any) => row.user_id).filter(Boolean)))
+  const { data: profiles } = memberUserIds.length
+    ? await supabase.from('profiles').select('id, email, full_name').in('id', memberUserIds)
+    : { data: [] as any[] }
+  const profileById = new Map((profiles || []).map((profile: any) => [profile.id, profile]))
+  const { data: overrides } = await supabase
+    .from('member_access_overrides')
+    .select('id, organization_id, user_id, status, starts_at, expires_at, notes, created_at, organizations(id, name)')
+    .neq('status', 'revoked')
+    .order('updated_at', { ascending: false })
+    .limit(80)
 
   return (
     <AppShell
@@ -65,9 +83,9 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
       <div className="space-y-8">
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-8">
           <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Platform Admin</div>
-          <h1 className="mt-2 text-3xl font-bold">Access Invites & Manual Grants</h1>
+          <h1 className="mt-2 text-3xl font-bold">Access Invites, Member Overrides & Manual Grants</h1>
           <p className="mt-3 max-w-3xl text-slate-300">
-            Invite a user by email and predefine account type, role, plan, role, feature overrides and limits. When that email signs up or logs in, the access grant is applied to their workspace automatically.
+            Invite a user by email before signup, or override a specific existing member so they get full access even when the organization trial/subscription is restricted.
           </p>
           {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{params.error}</div> : null}
           {params.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Saved.</div> : null}
@@ -143,6 +161,49 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
             </div>
           </div>
         </section>
+
+        <section id="member-overrides" className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Grant full access to an existing member</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-400">Use this when a user is already a member of a workspace and you want them to bypass trial/payment restrictions. Platform admins never need this; they already bypass billing.</p>
+            <form action={grantMemberFullAccessOverrideAction} className="mt-6 space-y-5">
+              <label className="block text-sm"><span className="text-slate-300">Organization</span><select name="organization_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select organization</option>{(organizations || []).map((org: any) => <option key={org.id} value={org.id}>{org.name}</option>)}</select></label>
+              <label className="block text-sm"><span className="text-slate-300">Member</span><select name="user_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select member</option>{(memberRows || []).map((member: any) => { const org = Array.isArray(member.organizations) ? member.organizations[0] : member.organizations; const profile = profileById.get(member.user_id) as any; return <option key={member.id} value={member.user_id}>{profile?.email || member.user_id} · {org?.name || member.organization_id} · {member.role}</option> })}</select></label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm"><span className="text-slate-300">Expires in days</span><input name="expires_in_days" type="number" min="0" defaultValue="0" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">0 means no expiry.</span></label>
+                <label className="block text-sm"><span className="text-slate-300">Admin note</span><input name="notes" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" placeholder="Reason for full access" /></label>
+              </div>
+              <button className="w-full rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Grant full access override</button>
+            </form>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Active member overrides</h2>
+            <div className="mt-5 space-y-3">
+              {(overrides || []).map((override: any) => {
+                const org = Array.isArray(override.organizations) ? override.organizations[0] : override.organizations
+                const profile = profileById.get(override.user_id) as any
+                return (
+                  <div key={override.id} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">{profile?.email || override.user_id}</div>
+                        <div className="mt-1 text-xs text-slate-500">{org?.name || override.organization_id} · {String(override.status).replaceAll('_', ' ')} · expires {override.expires_at ? new Date(override.expires_at).toLocaleDateString('en-US') : 'never'}</div>
+                        {override.notes ? <div className="mt-2 text-xs text-slate-500">{override.notes}</div> : null}
+                      </div>
+                      <form action={revokeMemberAccessOverrideAction}>
+                        <input type="hidden" name="id" value={override.id} />
+                        <button className="rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/10">Revoke</button>
+                      </form>
+                    </div>
+                  </div>
+                )
+              })}
+              {!(overrides || []).length ? <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No active member overrides.</div> : null}
+            </div>
+          </div>
+        </section>
+
       </div>
     </AppShell>
   )

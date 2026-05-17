@@ -52,7 +52,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
             <p className="mt-5 max-w-xl text-base leading-8 text-slate-300">
               {isInviteSignup
                 ? 'Use your invite code to create an account and get connected to the right DealFlowIQ community and team automatically.'
-                : 'Launch a professional workspace for sourcing, underwriting, ranking and reviewing real estate opportunities.'}
+                : 'Launch a professional workspace with 7 days of full access for normal new signups. After the trial, an active subscription or admin override is required.'}
             </p>
           </div>
 
@@ -68,12 +68,12 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
         <section className="flex items-center">
           <div className="w-full rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30 sm:p-8">
             <div>
-              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Create account</div>
+              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Start 7-day trial</div>
               <h2 className="mt-2 text-3xl font-bold tracking-tight">{isInviteSignup ? 'Accept your invite' : 'Choose your setup'}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
                 {isInviteSignup
                   ? 'The code below will connect your new account to the correct community. You can also paste a code manually.'
-                  : 'Pick the workspace type that matches how you source and review deals.'}
+                  : 'Pick the workspace type that matches how you source and review deals. New non-admin workspaces start with a 7-day full-access trial.'}
               </p>
             </div>
 
@@ -137,7 +137,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
               )}
 
               <button className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200">
-                {isInviteSignup ? 'Create account and join community' : 'Create DealFlowIQ account'}
+                {isInviteSignup ? 'Start 7-day trial and join community' : 'Create DealFlowIQ account'}
               </button>
             </form>
 

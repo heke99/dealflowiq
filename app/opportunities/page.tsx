@@ -13,6 +13,44 @@ function money(value: number | string | null | undefined, compact = false) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
+function numeric(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) && parsed !== 0 ? parsed : null
+}
+
+function percentText(value: number | string | null | undefined) {
+  const parsed = numeric(value)
+  if (parsed === null) return '—'
+  const display = Math.abs(parsed) <= 1 ? parsed * 100 : parsed
+  return `${display.toFixed(display >= 10 ? 1 : 2)}%`
+}
+
+function ratioText(value: number | string | null | undefined) {
+  const parsed = numeric(value)
+  return parsed === null ? '—' : parsed.toFixed(2)
+}
+
+function clampPercent(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, Math.min(100, parsed))
+}
+
+function positiveTone(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (parsed > 0) return 'text-emerald-300'
+  if (parsed < 0) return 'text-red-300'
+  return 'text-slate-100'
+}
+
+function dscrTone(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (parsed >= 1.25) return 'text-emerald-300'
+  if (parsed >= 1.05) return 'text-amber-200'
+  if (parsed > 0) return 'text-red-300'
+  return 'text-slate-100'
+}
+
 function imageStyle(url?: string | null) {
   return url ? { backgroundImage: `url(${url})` } : undefined
 }
@@ -24,13 +62,42 @@ function confidence(score: Row) {
   return 'Needs review'
 }
 
+function MiniMetric({ label, value, tone, caption, highlight }: { label: string; value: string; tone?: string; caption?: string; highlight?: boolean }) {
+  return (
+    <div className={`rounded-2xl border p-3 ${highlight ? 'border-emerald-400/30 bg-emerald-400/[0.08]' : 'border-white/10 bg-slate-950/50'}`}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`mt-1 text-lg font-black ${tone || 'text-white'}`}>{value}</div>
+      {caption ? <div className="mt-1 text-[11px] leading-4 text-slate-500">{caption}</div> : null}
+    </div>
+  )
+}
+
+function ConfidenceBar({ label, value, tone = 'bg-emerald-300' }: { label: string; value: number; tone?: string }) {
+  const safeValue = clampPercent(value)
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-500"><span>{label}</span><span>{safeValue}/100</span></div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className={`h-full rounded-full ${tone}`} style={{ width: `${safeValue}%` }} /></div>
+    </div>
+  )
+}
+
 function OpportunityCard({ score }: { score: Row }) {
   const listing = score.market_listings as Row
   const reasons = Array.isArray(score.reasons) ? score.reasons : []
   const risks = Array.isArray(score.risks) ? score.risks : []
+  const missing = Array.isArray(score.missing_fields) ? score.missing_fields : []
   const dealScore = Math.round(Number(listing.latest_deal_score ?? score.deal_score ?? 0))
   const rentConfidence = Math.round(Number(listing.latest_rent_confidence_score ?? score.rent_confidence_score ?? 0))
-  const rank = classifyOpportunity(dealScore, rentConfidence, Array.isArray(score.missing_fields) && score.missing_fields.length > 0)
+  const dataConfidence = Math.round(Number(listing.latest_data_confidence_score ?? score.data_confidence_score ?? 0))
+  const sourceConfidence = Math.round(Number(listing.latest_source_confidence_score ?? score.source_confidence_score ?? 0))
+  const rank = classifyOpportunity(dealScore, rentConfidence, missing.length > 0)
+  const price = listing.list_price || listing.asking_price
+  const rent = listing.market_rent || listing.estimated_rent || score.market_rent || listing.current_rent || score.hud_rent
+  const cashflow = listing.latest_estimated_monthly_cashflow ?? score.estimated_monthly_cashflow
+  const dscr = listing.latest_estimated_dscr ?? score.estimated_dscr
+  const capRate = listing.latest_estimated_cap_rate ?? score.estimated_cap_rate
+  const breakEven = listing.latest_break_even_rent ?? score.break_even_rent
   return (
     <article className="overflow-hidden rounded-3xl border border-emerald-400/20 bg-gradient-to-b from-emerald-400/[0.08] to-white/[0.03] p-4 shadow-2xl shadow-black/20">
       <Link href={`/market/${listing.id}`} className="block">
@@ -41,27 +108,50 @@ function OpportunityCard({ score }: { score: Row }) {
         )}
       </Link>
       <div className="mt-4 flex items-start justify-between gap-4">
-        <div>
-          <Link href={`/market/${listing.id}`} className="text-xl font-bold text-white hover:underline">{listing.title || listing.address || 'Market listing'}</Link>
+        <div className="min-w-0">
+          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-xl font-bold text-white hover:underline">{listing.title || listing.address || 'Market listing'}</Link>
           <p className="mt-1 text-sm text-slate-400">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
+            {missing.length ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-amber-100">{missing.length} missing</span> : null}
+          </div>
         </div>
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-emerald-100">
           <div className="text-[10px] font-bold uppercase tracking-wide">{rank.label}</div>
-          <div className="text-3xl font-black">{dealScore}</div>
+          <div className="text-4xl font-black">{dealScore}</div>
+          <div className="mt-1 text-[10px] font-bold uppercase tracking-wide opacity-80">Deal score</div>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Price</div><div className="font-bold">{money(listing.list_price || listing.asking_price, true)}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Cashflow</div><div className="font-bold text-emerald-300">{money(listing.latest_estimated_monthly_cashflow ?? score.estimated_monthly_cashflow)}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">DSCR</div><div className="font-bold">{(listing.latest_estimated_dscr ?? score.estimated_dscr) ? Number(listing.latest_estimated_dscr ?? score.estimated_dscr).toFixed(2) : '—'}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold text-emerald-300">{rentConfidence}</div></div>
+
+      <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wide text-emerald-300">Opportunity math</div>
+            <p className="mt-1 text-xs text-slate-500">The most important underwriting numbers are visible without opening the deal.</p>
+          </div>
+          <Link href={`/market/${listing.id}`} className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-100 hover:bg-white/10">Open full analysis</Link>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <MiniMetric label="Price" value={money(price, true)} caption="Asking / list" />
+          <MiniMetric label="Rent / mo" value={money(rent, true)} caption={breakEven ? `Break-even ${money(breakEven, true)}` : 'Market or HUD'} />
+          <MiniMetric label="Cashflow / mo" value={money(cashflow, true)} tone={positiveTone(cashflow)} caption="After debt + expenses" highlight={Number(cashflow || 0) > 0} />
+          <MiniMetric label="DSCR" value={ratioText(dscr)} tone={dscrTone(dscr)} caption="Bank view" />
+          <MiniMetric label="Cap rate" value={percentText(capRate)} caption="NOI / price" />
+          <MiniMetric label="Tax / ins." value={listing.taxes_annual ? money(listing.taxes_annual, true) : 'Verify'} caption={listing.insurance_annual ? `Insurance ${money(listing.insurance_annual, true)}/yr` : 'Insurance missing'} />
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <ConfidenceBar label="Rent confidence" value={rentConfidence} />
+          <ConfidenceBar label="Data quality" value={dataConfidence} tone="bg-sky-300" />
+          <ConfidenceBar label="Source confidence" value={sourceConfidence} tone="bg-violet-300" />
+        </div>
       </div>
+
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/50 p-4">
         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
           <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-emerald-100">{confidence(score)}</span>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{score.strategy_fit || 'Strategy pending'}</span>
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Risk: {score.risk_level || 'medium'}</span>
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence}/100</span>
         </div>
         <div className="mt-3 grid gap-4 md:grid-cols-2">
           <div>
@@ -76,7 +166,7 @@ function OpportunityCard({ score }: { score: Row }) {
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-4">
         <form action={saveOpportunityAction}><input type="hidden" name="listing_id" value={listing.id} /><input type="hidden" name="status" value="saved" /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Save</button></form>
-        <form action={convertListingToDealAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Analyze</button></form>
+        <form action={convertListingToDealAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-100">Analyze</button></form>
         <form action={rescoreMarketListingAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Rescore</button></form>
         <Link href={`/market/${listing.id}`} className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-slate-100">View</Link>
       </div>

@@ -136,7 +136,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             <div>
               <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">Canonical URL import</div>
               <h1 className="mt-2 text-4xl font-black tracking-tight">Import and open listing</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. DealFlowIQ imports one listing immediately, scores it, and opens the listing page. If the provider blocks server-side details, a review-required URL listing is still created so the import never fails silently.</p>
+              <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. DealFlowIQ imports one listing immediately, scores it, and opens the listing page. Direct imports usually take about 40 seconds because the system fetches, normalizes, saves, scores and redirects in one flow.</p>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">Active</div><div className="mt-1 text-2xl font-black">{queued}</div></div>
@@ -153,6 +153,15 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Import listing URL</h2>
               <p className="mt-2 text-sm text-slate-400">This is the only supported import entry point. It creates or updates the listing, runs scoring, and redirects you directly to the listing.</p>
+              <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.08] p-4 text-sm text-emerald-50">
+                <div className="font-semibold">Importing usually takes about 40 seconds.</div>
+                <div className="mt-1 text-emerald-100/80">Keep the tab open after clicking. We will fetch the source, save images/details, run scoring and open the listing automatically.</div>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-5">
+                {['Fetch URL', 'Extract fields', 'Save listing', 'Run score', 'Open listing'].map((step, index) => (
+                  <div key={step} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2"><span className="mr-1 text-slate-500">{index + 1}.</span>{step}</div>
+                ))}
+              </div>
               <form action={analyzeImportUrlAction} className="mt-5 space-y-4">
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Provider URL</span>
@@ -171,7 +180,10 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                     <option value="public">Public</option>
                   </select>
                 </label>
-                <SubmitButton pendingText="Importing and opening listing..." className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Import and open listing</SubmitButton>
+                <SubmitButton pendingText="Importing — usually about 40 seconds" pendingHint="Fetching, saving, scoring and opening listing automatically." className="w-full rounded-xl bg-white px-5 py-4 text-sm font-semibold text-slate-950 hover:bg-slate-200">
+                  Import and open listing
+                  <span className="ml-2 rounded-full bg-slate-950/10 px-2 py-0.5 text-xs">~40 sec</span>
+                </SubmitButton>
               </form>
             </div>
 

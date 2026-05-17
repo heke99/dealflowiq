@@ -41,6 +41,50 @@ function money(value: number | string | null | undefined, compact = false) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
+function numeric(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) && parsed !== 0 ? parsed : null
+}
+
+function compactNumber(value: number | string | null | undefined) {
+  const parsed = numeric(value)
+  if (parsed === null) return '—'
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(parsed)
+}
+
+function percentText(value: number | string | null | undefined) {
+  const parsed = numeric(value)
+  if (parsed === null) return '—'
+  const display = Math.abs(parsed) <= 1 ? parsed * 100 : parsed
+  return `${display.toFixed(display >= 10 ? 1 : 2)}%`
+}
+
+function ratioText(value: number | string | null | undefined) {
+  const parsed = numeric(value)
+  return parsed === null ? '—' : parsed.toFixed(2)
+}
+
+function clampPercent(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, Math.min(100, parsed))
+}
+
+function positiveTone(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (parsed > 0) return 'text-emerald-300'
+  if (parsed < 0) return 'text-red-300'
+  return 'text-slate-100'
+}
+
+function dscrTone(value: number | string | null | undefined) {
+  const parsed = Number(value || 0)
+  if (parsed >= 1.25) return 'text-emerald-300'
+  if (parsed >= 1.05) return 'text-amber-200'
+  if (parsed > 0) return 'text-red-300'
+  return 'text-slate-100'
+}
+
 function dateText(value: string | null | undefined) {
   if (!value) return 'Not scheduled'
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
@@ -111,11 +155,27 @@ function ImageBlock({ listing }: { listing: Row }) {
   )
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
+function Metric({ label, value, tone, caption, highlight }: { label: string; value: string; tone?: string; caption?: string; highlight?: boolean }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-1 text-sm font-semibold ${tone || 'text-slate-100'}`}>{value}</div>
+    <div className={`rounded-2xl border p-3 ${highlight ? 'border-emerald-400/30 bg-emerald-400/[0.08]' : 'border-white/10 bg-slate-950/40'}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`mt-1 text-base font-black ${tone || 'text-slate-100'}`}>{value}</div>
+      {caption ? <div className="mt-1 text-[11px] leading-4 text-slate-500">{caption}</div> : null}
+    </div>
+  )
+}
+
+function ScoreBar({ label, value, tone = 'bg-emerald-300' }: { label: string; value: number; tone?: string }) {
+  const safeValue = clampPercent(value)
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        <span>{label}</span>
+        <span>{safeValue}/100</span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${safeValue}%` }} />
+      </div>
     </div>
   )
 }
@@ -123,20 +183,38 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
 function ListingCard({ listing, score, watch }: { listing: Row; score: Row | null; watch: Row | null }) {
   const dealScore = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_deal_score', 'deal_score') || 0))
   const rentConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0))
+  const dataConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_data_confidence_score', 'data_confidence_score') || 0))
+  const sourceConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_source_confidence_score', 'source_confidence_score') || 0))
   const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || listing.address || 'Location pending'
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
+  const missing = Array.isArray(score?.missing_fields) ? score.missing_fields : []
+  const price = listing.list_price || listing.asking_price
+  const rent = listing.market_rent || listing.estimated_rent || score?.market_rent || listing.current_rent || score?.hud_rent
+  const cashflow = metricFromListingOrScore(listing, score, 'latest_estimated_monthly_cashflow', 'estimated_monthly_cashflow')
+  const dscr = metricFromListingOrScore(listing, score, 'latest_estimated_dscr', 'estimated_dscr')
+  const capRate = metricFromListingOrScore(listing, score, 'latest_estimated_cap_rate', 'estimated_cap_rate')
+  const breakEven = metricFromListingOrScore(listing, score, 'latest_break_even_rent', 'break_even_rent')
+  const rehabOrArv = listing.rehab_estimate ? `Rehab ${money(listing.rehab_estimate, true)}` : listing.arv ? `ARV ${money(listing.arv, true)}` : 'Needs ARV/rehab'
+  const rankLabel = listing.latest_opportunity_rank_label || (dealScore >= STRONG_OPPORTUNITY_SCORE_THRESHOLD ? 'Strong opportunity' : dealScore >= OPPORTUNITY_SCORE_THRESHOLD ? 'Opportunity' : 'Needs review')
+
   return (
     <article className="group overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035] p-4 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.055]">
       <Link href={`/market/${listing.id}`} className="block"><ImageBlock listing={listing} /></Link>
       <div className="mt-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-lg font-bold text-white hover:underline">{listing.title}</Link>
+          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-lg font-bold text-white hover:underline">{listing.title || listing.address || 'Market listing'}</Link>
           <p className="mt-1 text-sm text-slate-400">{location}</p>
+          <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <span>{listing.source_type || 'manual'}</span>
+            <span>•</span>
+            <span>{dateText(listing.latest_score_calculated_at || listing.updated_at || listing.created_at)}</span>
+          </div>
         </div>
-        <div className={`shrink-0 rounded-2xl border px-3 py-2 text-center ${scoreTone(dealScore)}`}>
-          <div className="text-[10px] font-semibold uppercase tracking-wide">Score</div>
-          <div className="text-xl font-bold">{dealScore || '—'}</div>
+        <div className={`shrink-0 rounded-2xl border px-4 py-3 text-center ${scoreTone(dealScore)}`}>
+          <div className="text-[10px] font-semibold uppercase tracking-wide">Deal score</div>
+          <div className="text-3xl font-black">{dealScore || '—'}</div>
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">{rankLabel}</div>
         </div>
       </div>
 
@@ -144,22 +222,38 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
         <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
         <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {score?.risk_level || 'medium'}</span>
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Rent confidence: {rentConfidence || '—'}</span>
         <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{dealStatusLabel(listing.deal_status)}</span>
         {watch?.status ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{String(watch.status).replaceAll('_', ' ')}</span> : null}
+        {missing.length ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-amber-100">{missing.length} missing input(s)</span> : null}
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <Metric label="Price" value={money(listing.list_price || listing.asking_price, true)} />
-        <Metric label="Cashflow" value={money(metricFromListingOrScore(listing, score, 'latest_estimated_monthly_cashflow', 'estimated_monthly_cashflow'))} tone={Number(metricFromListingOrScore(listing, score, 'latest_estimated_monthly_cashflow', 'estimated_monthly_cashflow') || 0) > 0 ? 'text-emerald-300' : undefined} />
-        <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
-        <Metric label="DSCR" value={metricFromListingOrScore(listing, score, 'latest_estimated_dscr', 'estimated_dscr') ? Number(metricFromListingOrScore(listing, score, 'latest_estimated_dscr', 'estimated_dscr')).toFixed(2) : '—'} />
+      <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/50 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wide text-emerald-300">Underwriting snapshot</div>
+            <div className="mt-1 text-xs text-slate-500">Key math is visible before you open the full listing.</div>
+          </div>
+          <Link href={`/market/${listing.id}`} className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:bg-white/10">Full details</Link>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <Metric label="Price" value={money(price, true)} caption="Asking / list" />
+          <Metric label="Rent / mo" value={money(rent, true)} caption={breakEven ? `Break-even ${money(breakEven, true)}` : 'Market or estimated'} />
+          <Metric label="Cashflow / mo" value={money(cashflow, true)} tone={positiveTone(cashflow)} caption="After debt + expenses" highlight={Number(cashflow || 0) > 0} />
+          <Metric label="DSCR" value={ratioText(dscr)} tone={dscrTone(dscr)} caption="Bank view" />
+          <Metric label="Cap rate" value={percentText(capRate)} caption="NOI / price" />
+          <Metric label="Value add" value={rehabOrArv} caption={listing.taxes_annual ? `Taxes ${money(listing.taxes_annual, true)}/yr` : 'Verify taxes'} />
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <ScoreBar label="Rent confidence" value={rentConfidence} />
+          <ScoreBar label="Data quality" value={dataConfidence} tone="bg-sky-300" />
+          <ScoreBar label="Source confidence" value={sourceConfidence} tone="bg-violet-300" />
+        </div>
       </div>
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Why this ranks</div>
         {reasons.length ? (
-          <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{reasons.slice(0, 2).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
+          <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{reasons.slice(0, 3).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
         ) : <p className="mt-2 text-xs leading-5 text-slate-500">Add rent, price and ZIP data to improve ranking.</p>}
         {risks.length ? <p className="mt-2 text-xs text-amber-200">Risk: {String(risks[0])}</p> : null}
         {listing.why_this_deal ? <p className="mt-2 text-xs leading-5 text-slate-400">{listing.why_this_deal}</p> : null}
@@ -173,7 +267,7 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
         </form>
         <form action={convertListingToDealAction}>
           <input type="hidden" name="listing_id" value={listing.id} />
-          <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Analyze</button>
+          <button className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/15">Analyze deal</button>
         </form>
         <form action={rescoreMarketListingAction}>
           <input type="hidden" name="listing_id" value={listing.id} />

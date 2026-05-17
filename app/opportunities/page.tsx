@@ -3,7 +3,8 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
-import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import { hasFullOpportunityAccess, opportunityListLimit, lockedPremiumText } from '@/lib/billing/freemium'
 
 type Row = Record<string, any>
 
@@ -24,7 +25,11 @@ function confidence(score: Row) {
   return 'Needs review'
 }
 
-function OpportunityCard({ score }: { score: Row }) {
+function LockedMetric({ label }: { label: string }) {
+  return <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3"><div className="text-xs text-amber-100/70">{label}</div><div className="font-bold text-amber-100">Locked</div></div>
+}
+
+function OpportunityCard({ score, premiumAccess }: { score: Row; premiumAccess: boolean }) {
   const listing = score.market_listings as Row
   const reasons = Array.isArray(score.reasons) ? score.reasons : []
   const risks = Array.isArray(score.risks) ? score.risks : []
@@ -46,14 +51,14 @@ function OpportunityCard({ score }: { score: Row }) {
           <p className="mt-1 text-sm text-slate-400">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</p>
         </div>
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-emerald-100">
-          <div className="text-[10px] font-bold uppercase tracking-wide">{rank.label}</div>
-          <div className="text-3xl font-black">{dealScore}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide">{premiumAccess ? rank.label : 'Score locked'}</div>
+          <div className="text-3xl font-black">{premiumAccess ? dealScore : '🔒'}</div>
         </div>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Price</div><div className="font-bold">{money(listing.list_price || listing.asking_price, true)}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Cashflow</div><div className="font-bold text-emerald-300">{money(listing.latest_estimated_monthly_cashflow ?? score.estimated_monthly_cashflow)}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">DSCR</div><div className="font-bold">{(listing.latest_estimated_dscr ?? score.estimated_dscr) ? Number(listing.latest_estimated_dscr ?? score.estimated_dscr).toFixed(2) : '—'}</div></div>
+        {premiumAccess ? <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Cashflow</div><div className="font-bold text-emerald-300">{money(listing.latest_estimated_monthly_cashflow ?? score.estimated_monthly_cashflow)}</div></div> : <LockedMetric label="Cashflow" />}
+        {premiumAccess ? <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">DSCR</div><div className="font-bold">{(listing.latest_estimated_dscr ?? score.estimated_dscr) ? Number(listing.latest_estimated_dscr ?? score.estimated_dscr).toFixed(2) : '—'}</div></div> : <LockedMetric label="DSCR" />}
         <div className="rounded-2xl border border-white/10 bg-slate-950/50 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold text-emerald-300">{rentConfidence}</div></div>
       </div>
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/50 p-4">
@@ -66,18 +71,18 @@ function OpportunityCard({ score }: { score: Row }) {
         <div className="mt-3 grid gap-4 md:grid-cols-2">
           <div>
             <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Why this ranks</div>
-            <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-300">{(reasons.length ? reasons : ['Strong score based on available underwriting inputs.']).slice(0, 3).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
+            {premiumAccess ? <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-300">{(reasons.length ? reasons : ['Strong score based on available underwriting inputs.']).slice(0, 3).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul> : <p className="mt-2 text-sm leading-6 text-amber-100">Deal reasoning is locked on Free.</p>}
           </div>
           <div>
             <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Risks / missing</div>
-            <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-400">{(risks.length ? risks : ['Verify taxes, insurance, rent and rehab before making an offer.']).slice(0, 3).map((risk: string, index: number) => <li key={index}>• {risk}</li>)}</ul>
+            {premiumAccess ? <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-400">{(risks.length ? risks : ['Verify taxes, insurance, rent and rehab before making an offer.']).slice(0, 3).map((risk: string, index: number) => <li key={index}>• {risk}</li>)}</ul> : <p className="mt-2 text-sm leading-6 text-amber-100">Risk breakdown unlocks with Trial/Paid/Override.</p>}
           </div>
         </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-4">
-        <form action={saveOpportunityAction}><input type="hidden" name="listing_id" value={listing.id} /><input type="hidden" name="status" value="saved" /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Save</button></form>
-        <form action={convertListingToDealAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Analyze</button></form>
-        <form action={rescoreMarketListingAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Rescore</button></form>
+        {premiumAccess ? <form action={saveOpportunityAction}><input type="hidden" name="listing_id" value={listing.id} /><input type="hidden" name="status" value="saved" /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Save</button></form> : <Link href="/settings/billing" className="rounded-xl bg-amber-200 px-4 py-3 text-center text-sm font-semibold text-slate-950">Unlock</Link>}
+        {premiumAccess ? <form action={convertListingToDealAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Analyze</button></form> : <button disabled className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-500">Analyze locked</button>}
+        {premiumAccess ? <form action={rescoreMarketListingAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Rescore</button></form> : <button disabled className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-500">Rescore locked</button>}
         <Link href={`/market/${listing.id}`} className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-slate-100">View</Link>
       </div>
     </article>
@@ -122,7 +127,7 @@ export default async function OpportunitiesPage() {
     if (!existing || Number(score.deal_score || 0) > Number(existing.deal_score || 0)) scoreByListing.set(listingId, score)
   }
 
-  const scores = ((listingsData || []) as Row[]).map((listing) => {
+  const allScores = ((listingsData || []) as Row[]).map((listing) => {
     const score = scoreByListing.get(String(listing.id)) || {}
     return {
       ...score,
@@ -139,6 +144,10 @@ export default async function OpportunitiesPage() {
     }
   })
 
+  const premiumAccess = hasFullOpportunityAccess(workspace.access)
+  const freeLimit = opportunityListLimit(workspace.access)
+  const scores = freeLimit === null ? allScores : allScores.slice(0, freeLimit)
+
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={workspace.access.accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
       <div className="space-y-6">
@@ -147,15 +156,16 @@ export default async function OpportunitiesPage() {
             <div>
               <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">70+ score · 50+ rent confidence</div>
               <h1 className="mt-2 text-4xl font-black tracking-tight">Opportunities</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Listings with DealFlowIQ score 70+ and rent confidence 50+ appear here. 85+ score with 65+ rent confidence is marked as Strong Opportunity.</p>
+              <p className="mt-3 max-w-3xl text-slate-300">Listings with DealFlowIQ score 70+ and rent confidence 50+ appear here. Free users can see 2 opportunities and open 1 full detail every 2 days.</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link href="/buy-boxes" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link>
+              {premiumAccess ? <Link href="/buy-boxes" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link> : <Link href="/settings/billing" className="rounded-xl bg-amber-200 px-5 py-3 text-sm font-semibold text-slate-950">Unlock Pro</Link>}
               <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100">Run Imports</Link>
             </div>
           </div>
         </section>
-        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
+        {!premiumAccess ? <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-5 text-sm text-amber-50">{lockedPremiumText()}</div> : null}
+        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} premiumAccess={premiumAccess} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
       </div>
     </AppShell>
   )

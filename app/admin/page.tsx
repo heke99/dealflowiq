@@ -1,11 +1,9 @@
 import Link from 'next/link'
-import { ArrowRight, BadgeDollarSign, Building2, DatabaseZap, ShieldCheck, Users } from 'lucide-react'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 type Row = Record<string, any>
-type Tone = 'default' | 'green' | 'amber' | 'red' | 'blue'
 
 function numberText(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US').format(Number(value || 0))
@@ -16,51 +14,21 @@ function dateText(value?: string | null) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 
-function price(cents?: number | null) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(cents || 0) / 100)
-}
-
-function statusLabel(value?: string | null) {
-  if (!value) return 'payment required'
-  if (value === 'trialing') return 'trialing'
-  if (value === 'manually_granted') return 'manual access'
-  return String(value).replaceAll('_', ' ')
-}
-
-function Stat({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: Tone }) {
-  const tones: Record<Tone, string> = {
-    default: 'border-white/10 bg-white/[0.035]',
+function Stat({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: 'default' | 'green' | 'amber' | 'red' }) {
+  const tones = {
+    default: 'border-white/10 bg-white/[0.03]',
     green: 'border-emerald-400/25 bg-emerald-400/10',
     amber: 'border-amber-400/25 bg-amber-400/10',
     red: 'border-red-400/25 bg-red-400/10',
-    blue: 'border-blue-400/25 bg-blue-400/10',
   }
   const card = (
-    <div className={`h-full rounded-3xl border p-5 transition hover:border-white/25 hover:bg-white/[0.06] ${tones[tone]}`}>
-      <div className="text-sm font-bold text-slate-400">{label}</div>
+    <div className={`rounded-3xl border p-5 ${tones[tone]}`}>
+      <div className="text-sm text-slate-400">{label}</div>
       <div className="mt-3 text-3xl font-black">{value}</div>
       <div className="mt-3 text-xs leading-5 text-slate-500">{hint}</div>
     </div>
   )
   return href ? <Link href={href}>{card}</Link> : card
-}
-
-function AdminAction({ icon: Icon, title, text, href, cta }: { icon: any; title: string; text: string; href: string; cta: string }) {
-  return (
-    <Link href={href} className="group rounded-3xl border border-white/10 bg-white/[0.035] p-5 transition hover:border-white/25 hover:bg-white/[0.07]">
-      <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/60 text-blue-100"><Icon className="h-5 w-5" /></div>
-        <div>
-          <h2 className="text-lg font-black">{title}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400">{text}</p>
-        </div>
-      </div>
-      <div className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2 text-sm font-black text-slate-950 group-hover:bg-slate-200">
-        {cta}
-        <ArrowRight className="h-4 w-4" />
-      </div>
-    </Link>
-  )
 }
 
 export default async function AdminDashboardPage() {
@@ -79,149 +47,125 @@ export default async function AdminDashboardPage() {
   }
 
   const orgId = workspace.organization?.id
-  const [plansResult, activePlansResult, orgsResult, subsResult, activeSubsResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult] = await Promise.all([
+  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult, notificationsResult, usersResult, orgsResult, communitiesResult, paidSubscriptionsResult] = await Promise.all([
     supabase.from('billing_plans').select('id', { count: 'exact', head: true }),
-    supabase.from('billing_plans').select('id', { count: 'exact', head: true }).eq('is_active', true),
-    supabase.from('organizations').select('id', { count: 'exact', head: true }),
-    supabase.from('organization_subscriptions').select('id, organization_id, status, current_period_end, updated_at, organizations(name), billing_plans(name, code, monthly_price_cents)').order('updated_at', { ascending: false }).limit(8),
-    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).in('status', ['active', 'trialing', 'manually_granted', 'comped']),
-    supabase.from('admin_access_invites').select('id,email,organization_name,account_type,role,status,expires_at,created_at,billing_plans(name)').order('created_at', { ascending: false }).limit(6),
+    supabase.from('admin_access_invites').select('id,email,organization_name,account_type,role,status,expires_at,created_at,billing_plans(name)').order('created_at', { ascending: false }).limit(8),
     supabase.from('admin_access_invites').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-    orgId ? supabase.from('market_import_jobs').select('status,items_created,items_updated,items_failed,error_message,created_at,source_url').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(6) : Promise.resolve({ data: [] as Row[] }),
+    orgId ? supabase.from('market_import_jobs').select('status,items_created,items_updated,items_failed,error_message,created_at,source_url').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
     orgId ? supabase.from('market_import_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('status', 'failed') : Promise.resolve({ count: 0 }),
     orgId ? supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId) : Promise.resolve({ count: 0 }),
+    orgId ? supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).is('read_at', null).is('archived_at', null) : Promise.resolve({ count: 0 }),
+    supabase.from('profiles').select('id', { count: 'exact', head: true }),
+    supabase.from('organizations').select('id', { count: 'exact', head: true }),
+    supabase.from('community_teams').select('id', { count: 'exact', head: true }),
+    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).in('status', ['active', 'paid', 'trialing', 'comped']),
   ])
 
   const jobs = (jobsResult.data || []) as Row[]
   const invites = (invitesResult.data || []) as Row[]
-  const subscriptions = (subsResult.data || []) as Row[]
-  const failedImports = Number(failedJobsResult.count || 0)
 
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={workspace.access.accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
       <div className="space-y-8">
-        <section className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-blue-500/15 via-slate-950 to-emerald-500/10 p-6 shadow-2xl shadow-black/20 sm:p-8">
+        <section className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-blue-500/15 via-slate-950 to-emerald-500/10 p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-sm font-black uppercase tracking-wide text-blue-100">
-                <ShieldCheck className="h-4 w-4" />
-                Platform control center
-              </div>
-              <h1 className="mt-4 text-4xl font-black tracking-tight sm:text-5xl">Admin Dashboard</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Manage plans, organization subscriptions, access invites and import health from one production-ready operator view.</p>
+              <div className="text-sm font-black uppercase tracking-wide text-blue-300">Platform operations</div>
+              <h1 className="mt-3 text-4xl font-black tracking-tight">Admin Dashboard</h1>
+              <p className="mt-3 max-w-3xl text-slate-300">Manage plans, invites, access grants and import health from one operator view. This area should feel like a real SaaS control center, not a developer-only backend.</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link href="/admin/plans" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">Plans & subscriptions</Link>
-              <Link href="/admin/access" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Access controls</Link>
+              <Link href="/admin/users" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">View users</Link>
+              <Link href="/admin/access" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Create invite</Link>
+              <Link href="/admin/plans" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Manage plans</Link>
             </div>
           </div>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <Stat label="Organizations" value={numberText(orgsResult.count || 0)} hint="Total workspaces in the platform." tone="blue" />
-          <Stat label="Active access" value={numberText(activeSubsResult.count || 0)} hint="Organizations with active, trialing, comped or manual access." href="/admin/plans" tone="green" />
-          <Stat label="Active plans" value={numberText(activePlansResult.count || 0)} hint={`${numberText(plansResult.count || 0)} total plan records.`} href="/admin/plans" />
-          <Stat label="Open invites" value={numberText(activeInvitesResult.count || 0)} hint="Pending access grants." href="/admin/access" tone="amber" />
-          <Stat label="Failed imports" value={numberText(failedImports)} hint="Import jobs needing operator review." href="/market?tab=sources" tone={failedImports > 0 ? 'red' : 'green'} />
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat label="Users" value={numberText(usersResult.count || 0)} hint="All registered platform users." href="/admin/users" tone="green" />
+          <Stat label="Organizations" value={numberText(orgsResult.count || 0)} hint="Companies/workspaces on the platform." href="/admin/users" />
+          <Stat label="Communities" value={numberText(communitiesResult.count || 0)} hint="Community/team spaces created." href="/community" />
+          <Stat label="Active access" value={numberText(paidSubscriptionsResult.count || 0)} hint="Paid, comped or trialing subscriptions." href="/admin/plans" tone="green" />
+          <Stat label="Plans" value={numberText(plansResult.count || 0)} hint="Billing plans configured in platform." href="/admin/plans" />
+          <Stat label="Active invites" value={numberText(activeInvitesResult.count || 0)} hint="Outstanding access grants." href="/admin/access" tone="green" />
+          <Stat label="Workspace listings" value={numberText(listingsResult.count || 0)} hint="Listings in this admin workspace." href="/market" />
+          <Stat label="Failed imports" value={numberText(failedJobsResult.count || 0)} hint="Import issues needing operator review." href="/market?tab=sources" tone={(failedJobsResult.count || 0) > 0 ? 'red' : 'green'} />
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-3">
-          <AdminAction icon={BadgeDollarSign} title="Create or edit plans" text="Change plan names, prices, limits and included features. Delete plans safely with replacement sync." href="/admin/plans" cta="Manage plans" />
-          <AdminAction icon={Building2} title="Sync organization subscriptions" text="Assign a plan to a workspace, activate access, cancel access or update current-period dates." href="/admin/plans#subscriptions" cta="Open subscriptions" />
-          <AdminAction icon={Users} title="Grant access by invite or override" text="Invite users before signup or give an existing member full access override." href="/admin/access" cta="Access controls" />
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-6">
+        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-black">Latest subscriptions</h2>
-                <p className="mt-1 text-sm text-slate-500">Recent organization plan assignments and access status.</p>
+                <h2 className="text-2xl font-black">Recent access invites</h2>
+                <p className="mt-1 text-sm text-slate-500">Track user onboarding and manual grants.</p>
               </div>
-              <Link href="/admin/plans#subscriptions" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Manage</Link>
+              <Link href="/admin/access" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Open</Link>
             </div>
             <div className="mt-5 space-y-3">
-              {subscriptions.length ? subscriptions.map((sub) => {
-                const org = Array.isArray(sub.organizations) ? sub.organizations[0] : sub.organizations
-                const plan = Array.isArray(sub.billing_plans) ? sub.billing_plans[0] : sub.billing_plans
+              {invites.length ? invites.map((invite) => {
+                const plan = Array.isArray(invite.billing_plans) ? invite.billing_plans[0] : invite.billing_plans
                 return (
-                  <div key={sub.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                  <div key={invite.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <div className="truncate font-black">{org?.name || sub.organization_id}</div>
-                        <div className="mt-1 text-xs text-slate-500">{plan?.name || 'No plan'} · {plan?.monthly_price_cents ? `${price(plan.monthly_price_cents)}/mo` : 'custom pricing'}</div>
+                        <div className="truncate font-bold">{invite.email}</div>
+                        <div className="mt-1 text-xs text-slate-500">{invite.organization_name || 'Workspace pending'} · {invite.account_type} · {plan?.name || 'default plan'}</div>
                       </div>
-                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-black uppercase text-emerald-100">{statusLabel(sub.status)}</span>
+                      <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold uppercase text-slate-300">{invite.status}</span>
                     </div>
-                    <div className="mt-3 text-xs text-slate-500">Updated {dateText(sub.updated_at)} · Period ends {dateText(sub.current_period_end)}</div>
+                    <div className="mt-3 text-xs text-slate-500">Created {dateText(invite.created_at)} · Expires {dateText(invite.expires_at)}</div>
                   </div>
                 )
-              }) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No subscriptions found.</div>}
+              }) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No invites yet.</div>}
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-6">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-black">Recent access invites</h2>
-                  <p className="mt-1 text-sm text-slate-500">Track user onboarding and manual grants.</p>
-                </div>
-                <Link href="/admin/access" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Open</Link>
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-black">Import health</h2>
+                <p className="mt-1 text-sm text-slate-500">Recent provider jobs and issues.</p>
               </div>
-              <div className="mt-5 space-y-3">
-                {invites.length ? invites.map((invite) => {
-                  const plan = Array.isArray(invite.billing_plans) ? invite.billing_plans[0] : invite.billing_plans
-                  return (
-                    <div key={invite.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="truncate font-bold">{invite.email}</div>
-                          <div className="mt-1 text-xs text-slate-500">{invite.organization_name || 'Workspace pending'} · {invite.account_type} · {plan?.name || 'default plan'}</div>
-                        </div>
-                        <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold uppercase text-slate-300">{invite.status}</span>
-                      </div>
-                      <div className="mt-3 text-xs text-slate-500">Created {dateText(invite.created_at)} · Expires {dateText(invite.expires_at)}</div>
-                    </div>
-                  )
-                }) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No invites yet.</div>}
-              </div>
+              <Link href="/market?tab=sources" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Sources</Link>
             </div>
-
-            <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-6">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-black">Import health</h2>
-                  <p className="mt-1 text-sm text-slate-500">Recent provider jobs and issues.</p>
-                </div>
-                <DatabaseZap className="h-5 w-5 text-slate-500" />
-              </div>
-              <div className="mt-5 space-y-3">
-                {jobs.length ? jobs.map((job, index) => (
-                  <div key={`${job.created_at}-${index}`} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="font-bold capitalize">{String(job.status || 'queued').replaceAll('_', ' ')}</div>
-                        <div className="mt-1 truncate text-xs text-slate-500">{job.source_url || 'Import job'}</div>
-                      </div>
-                      <span className="text-xs text-slate-500">{dateText(job.created_at)}</span>
+            <div className="mt-5 space-y-3">
+              {jobs.length ? jobs.map((job, index) => (
+                <div key={`${job.created_at}-${index}`} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="font-bold capitalize">{String(job.status || 'queued').replaceAll('_', ' ')}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">{job.source_url || 'Import job'}</div>
                     </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">
-                      <div>Created <span className="block font-bold text-slate-100">{numberText(job.items_created || 0)}</span></div>
-                      <div>Updated <span className="block font-bold text-slate-100">{numberText(job.items_updated || 0)}</span></div>
-                      <div>Failed <span className="block font-bold text-slate-100">{numberText(job.items_failed || 0)}</span></div>
-                    </div>
-                    {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
+                    <span className="text-xs text-slate-500">{dateText(job.created_at)}</span>
                   </div>
-                )) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No import jobs yet.</div>}
-              </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">
+                    <div>Created <span className="block font-bold text-slate-100">{numberText(job.items_created || 0)}</span></div>
+                    <div>Updated <span className="block font-bold text-slate-100">{numberText(job.items_updated || 0)}</span></div>
+                    <div>Failed <span className="block font-bold text-slate-100">{numberText(job.items_failed || 0)}</span></div>
+                  </div>
+                  {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
+                </div>
+              )) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No jobs yet.</div>}
             </div>
           </div>
         </section>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 text-sm text-slate-400">
-          Current admin workspace listings: <span className="font-black text-white">{numberText(listingsResult.count || 0)}</span>. Platform-wide billing and subscription data is handled in Plans & Subscriptions.
-        </div>
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <h2 className="text-2xl font-black">Operator checklist</h2>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {[
+              ['Plans configured', 'Keep plan names, limits and feature gates ready for sales demos.'],
+              ['Access grants controlled', 'Use admin invites instead of manually editing users.'],
+              ['Import failures visible', 'Investigate failed jobs before they become user support issues.'],
+            ].map(([title, text]) => (
+              <div key={title} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                <div className="font-bold text-white">{title}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-400">{text}</div>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </AppShell>
   )

@@ -5,6 +5,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { addListingManualOverrideAction, addMarketListingNoteAction, convertListingToDealAction, ignoreMarketListingAction, rescoreMarketListingAction, runListingFullIntelligenceAction, runListingHudLookupAction, runListingMarketRentAction, saveOpportunityAction, updateMarketListingAnalysisInputsAction, updateMarketListingReviewStatusAction, updateMarketListingStageAction } from '@/app/market/actions'
 import { canUseFeature } from '@/lib/billing/features'
+import { getNextFreeOpportunityDetailUnlock, hasFullOpportunityAccess, lockedPremiumText, recordOpportunityDetailView } from '@/lib/billing/freemium'
 import { dealStatusLabel } from '@/lib/market/review'
 
 type Row = Record<string, any>
@@ -78,6 +79,32 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   ])
 
   if (!listing) notFound()
+
+  const detailAccess = await getNextFreeOpportunityDetailUnlock({ supabase, userId: workspace.user.id, access: workspace.access })
+  if (!detailAccess.allowed) {
+    return (
+      <AppShell
+        organizationName={workspace.organization?.name}
+        userEmail={workspace.user.email}
+        accountType={workspace.access.accountType}
+        features={workspace.access.features}
+        subscriptionStatus={workspace.access.status}
+        planName={workspace.access.plan?.name}
+        trialEndsAt={workspace.access.trialEndsAt}
+        isPlatformAdmin={workspace.access.isPlatformAdmin}
+      >
+        <div className="mx-auto max-w-3xl rounded-[2rem] border border-amber-400/25 bg-amber-400/10 p-8 text-amber-50">
+          <div className="text-sm font-black uppercase tracking-wide">Free plan limit</div>
+          <h1 className="mt-3 text-3xl font-black">Opportunity detail locked</h1>
+          <p className="mt-3 text-sm leading-6">Free users can open 1 full opportunity detail every 2 days. Your next free detail unlocks {detailAccess.nextUnlockAt ? dateText(detailAccess.nextUnlockAt) : 'soon'}.</p>
+          <p className="mt-4 text-sm leading-6">{lockedPremiumText()}</p>
+          <div className="mt-6 flex flex-wrap gap-3"><Link href="/opportunities" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Back to opportunities</Link><Link href="/settings/billing" className="rounded-xl bg-amber-200 px-5 py-3 text-sm font-bold text-slate-950">Upgrade to Pro</Link></div>
+        </div>
+      </AppShell>
+    )
+  }
+  await recordOpportunityDetailView({ supabase, userId: workspace.user.id, organizationId: workspace.organization?.id, listingId: id, access: workspace.access })
+  const premiumAccess = hasFullOpportunityAccess(workspace.access)
   const row = listing as Row
   const score = (scores || [])[0] as Row | undefined
   const dealScore = Math.round(Number(row.latest_deal_score ?? score?.deal_score ?? 0))
@@ -129,8 +156,8 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               <p className="mt-3 text-slate-300">{location || 'Location pending'}</p>
             </div>
             <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
-              <div className="text-xs font-semibold uppercase tracking-wide">Deal Score</div>
-              <div className="mt-1 text-5xl font-black">{dealScore || '—'}</div>
+              <div className="text-xs font-semibold uppercase tracking-wide">{premiumAccess ? 'Deal Score' : 'Deal Score locked'}</div>
+              <div className="mt-1 text-5xl font-black">{premiumAccess ? dealScore || '—' : '🔒'}</div>
               <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : dealStatusLabel(row.deal_status)}</div>
             </div>
           </div>

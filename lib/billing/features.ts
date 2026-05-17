@@ -33,6 +33,13 @@ export type FeatureKey = (typeof FEATURE_KEYS)[number]
 export type FeatureMap = Partial<Record<FeatureKey, boolean>>
 export type LimitMap = Record<string, number | null>
 
+export const FREE_FEATURES: FeatureMap = {
+  market_search: true,
+  market_rent: true,
+  market_opportunities: true,
+  public_community_deals: true,
+}
+
 export const CORE_FEATURES: FeatureMap = {
   deals: true,
   deal_analyzer: true,
@@ -43,6 +50,19 @@ export const CORE_FEATURES: FeatureMap = {
   market_opportunities: true,
 }
 
+export const FREE_LIMITS: LimitMap = {
+  max_visible_opportunities: 2,
+  opportunity_detail_cooldown_hours: 48,
+  max_saved_deals: 3,
+  max_imports_per_7_days: 1,
+}
+
+export const TRIAL_LIMITS: LimitMap = {
+  max_visible_opportunities: null,
+  opportunity_detail_cooldown_hours: 0,
+  max_saved_deals: null,
+  max_imports_per_7_days: null,
+}
 
 export const ALL_FEATURES: FeatureMap = FEATURE_KEYS.reduce<FeatureMap>((acc, feature) => {
   acc[feature] = true
@@ -50,6 +70,9 @@ export const ALL_FEATURES: FeatureMap = FEATURE_KEYS.reduce<FeatureMap>((acc, fe
 }, {})
 
 export const PREMIUM_FEATURES: FeatureKey[] = [
+  'deals',
+  'deal_analyzer',
+  'rent_analysis',
   'section8_hud',
   'brrrr',
   'flip',
@@ -66,9 +89,7 @@ export const PREMIUM_FEATURES: FeatureKey[] = [
   'ai_review',
   'lender_view',
   'market_source_imports',
-  'market_opportunities',
   'scheduled_market_imports',
-  'public_community_deals',
 ]
 
 export const featureLabels: Record<FeatureKey, string> = {
@@ -101,91 +122,14 @@ export const featureLabels: Record<FeatureKey, string> = {
 }
 
 export const accountTypeDefaultFeatures: Record<AccountType, FeatureMap> = {
-  solo_investor: {
-    ...CORE_FEATURES,
-    section8_hud: true,
-    brrrr: true,
-    flip: true,
-    wholesale: true,
-    five_year_projection: true,
-    csv_export: true,
-    lender_view: true,
-  },
-  wholesaler: {
-    ...CORE_FEATURES,
-    wholesale: true,
-    flip: true,
-    buyers: true,
-    buyer_matching: true,
-    deal_distribution: true,
-    csv_export: true,
-  },
-  landlord: {
-    ...CORE_FEATURES,
-    section8_hud: true,
-    five_year_projection: true,
-    csv_export: true,
-    lender_view: true,
-  },
-  section_8_landlord: {
-    ...CORE_FEATURES,
-    section8_hud: true,
-    five_year_projection: true,
-    csv_export: true,
-    lender_view: true,
-  },
-  brrrr_investor: {
-    ...CORE_FEATURES,
-    section8_hud: true,
-    brrrr: true,
-    five_year_projection: true,
-    csv_export: true,
-    lender_view: true,
-  },
-  fix_and_flip_investor: {
-    ...CORE_FEATURES,
-    flip: true,
-    wholesale: true,
-    csv_export: true,
-  },
-  community_guru_owner: {
-    ...CORE_FEATURES,
-    section8_hud: true,
-    brrrr: true,
-    flip: true,
-    wholesale: true,
-    five_year_projection: true,
-    csv_export: true,
-    pdf_export: true,
-    buyers: true,
-    buyer_matching: true,
-    deal_distribution: true,
-    community_members: true,
-    white_label: true,
-    lender_view: true,
-    market_source_imports: true,
-    market_opportunities: true,
-    scheduled_market_imports: true,
-    public_community_deals: true,
-  },
-  team_company: {
-    ...CORE_FEATURES,
-    section8_hud: true,
-    brrrr: true,
-    flip: true,
-    wholesale: true,
-    five_year_projection: true,
-    csv_export: true,
-    pdf_export: true,
-    buyers: true,
-    buyer_matching: true,
-    deal_distribution: true,
-    lender_view: true,
-    market_source_imports: true,
-    market_opportunities: true,
-    scheduled_market_imports: true,
-    public_community_deals: true,
-  },
+  solo_investor: { ...CORE_FEATURES, section8_hud: true, brrrr: true, flip: true, wholesale: true, five_year_projection: true, csv_export: true, lender_view: true },
+  wholesaler: { ...CORE_FEATURES, wholesale: true, flip: true, buyers: true, buyer_matching: true, deal_distribution: true, csv_export: true },
+  landlord: { ...CORE_FEATURES, section8_hud: true, five_year_projection: true, csv_export: true, lender_view: true },
+  section_8_landlord: { ...CORE_FEATURES, section8_hud: true, five_year_projection: true, csv_export: true, lender_view: true },
+  brrrr_investor: { ...CORE_FEATURES, section8_hud: true, brrrr: true, five_year_projection: true, csv_export: true, lender_view: true },
+  fix_and_flip_investor: { ...CORE_FEATURES, flip: true, wholesale: true, csv_export: true },
+  community_guru_owner: { ...ALL_FEATURES, admin_plan_management: false },
+  team_company: { ...ALL_FEATURES, admin_plan_management: false },
 }
 
 export function mergeFeatures(...featureMaps: Array<FeatureMap | null | undefined>): FeatureMap {

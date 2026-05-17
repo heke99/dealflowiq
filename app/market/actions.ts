@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
+import { hasFullOpportunityAccess } from '@/lib/billing/freemium'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
 import { runMarketSourceNow } from '@/lib/market/importRunner'
 import { determineDealReviewStatus } from '@/lib/market/review'
@@ -306,6 +307,12 @@ async function upsertNormalizedListing(params: {
   await insertScoreForListing(params.supabase, data as any, params.organizationId)
   await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing imported', description: 'New market listing was created from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
   return { listing: data as any, created: true }
+}
+
+function requireFullOpportunityAccess(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>, message = 'This action is locked on Free. Upgrade to Pro, use your trial, or ask an admin for override.') {
+  if (!hasFullOpportunityAccess(workspace.access)) {
+    redirect(`/settings/billing?error=${encodeURIComponent(message)}`)
+  }
 }
 
 function requireSourceImports(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
@@ -649,6 +656,7 @@ export async function rescoreMarketListingAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireFullOpportunityAccess(workspace, 'Rescore is locked on Free. Upgrade to Pro to run scoring and calculations.')
   const supabase = await createSupabaseServerClient()
   try {
     await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
@@ -668,6 +676,7 @@ export async function saveOpportunityAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireFullOpportunityAccess(workspace, 'Saving opportunities is limited on Free. Upgrade to Pro for the full deal workflow.')
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase.from('market_watchlist').upsert({
     organization_id: workspace.organization.id,
@@ -697,6 +706,7 @@ export async function convertListingToDealAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireFullOpportunityAccess(workspace, 'Deal conversion and analysis are locked on Free. Upgrade to Pro to create full deal files.')
   const supabase = await createSupabaseServerClient()
   const { data: listing, error: listingError } = await supabase
     .from('market_listings')
@@ -1167,6 +1177,7 @@ export async function runListingMarketRentAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireFullOpportunityAccess(workspace, 'Market rent intelligence is locked on Free. Upgrade to Pro to run calculations.')
   const supabase = await createSupabaseServerClient()
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)
@@ -1185,6 +1196,7 @@ export async function runListingHudLookupAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireFullOpportunityAccess(workspace, 'HUD/FMR lookup is locked on Free. Upgrade to Pro to run premium rent checks.')
   const supabase = await createSupabaseServerClient()
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)
@@ -1204,6 +1216,7 @@ export async function runListingFullIntelligenceAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireFullOpportunityAccess(workspace, 'Full intelligence is locked on Free. Upgrade to Pro to run the full analysis engine.')
   const supabase = await createSupabaseServerClient()
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)

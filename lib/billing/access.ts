@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isCurrentUserPlatformAdmin } from '@/lib/auth/admin'
 import { normalizeAccountType, type AccountType } from '@/lib/product/accountTypes'
-import { ALL_FEATURES, accountTypeDefaultFeatures, mergeFeatures, type FeatureMap, type LimitMap } from '@/lib/billing/features'
+import { ALL_FEATURES, CORE_FEATURES, FREE_FEATURES, FREE_LIMITS, TRIAL_LIMITS, accountTypeDefaultFeatures, mergeFeatures, type FeatureMap, type LimitMap } from '@/lib/billing/features'
 
 export type BillingPlan = {
   id: string
@@ -34,29 +34,31 @@ export type OrganizationSubscription = {
   plan: BillingPlan | null
 }
 
-export type MemberAccessOverride = {
+export type UserAccessOverride = {
   id: string
-  organization_id: string
   user_id: string
-  status: 'full_access' | 'restricted' | 'revoked'
-  starts_at: string | null
+  organization_id: string | null
+  status: string
+  reason: string | null
   expires_at: string | null
   features_override: FeatureMap | null
   limits_override: Partial<LimitMap> | null
-  notes: string | null
 }
+
+export type AccessSource = 'platform_admin' | 'user_override' | 'subscription' | 'trial' | 'free' | 'payment_required' | 'missing_organization'
 
 export type WorkspaceAccess = {
   accountType: AccountType
   isPlatformAdmin: boolean
   subscription: OrganizationSubscription | null
   plan: BillingPlan | null
-  memberOverride: MemberAccessOverride | null
+  userOverride: UserAccessOverride | null
+  accessSource: AccessSource
   status: string
-  accessLevel: 'platform_admin' | 'member_override' | 'trial' | 'subscription' | 'restricted'
   trialEndsAt: string | null
   isTrialActive: boolean
-  isAccessActive: boolean
+  isFreeAccess: boolean
+  isPaymentRequired: boolean
   requiresPayment: boolean
   restrictionReason: string | null
   features: FeatureMap
@@ -66,23 +68,6 @@ export type WorkspaceAccess = {
 function parseObject<T extends Record<string, unknown>>(value: unknown, fallback: T): T {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback
   return value as T
-}
-
-function isFuture(value?: string | null) {
-  if (!value) return false
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) && timestamp > Date.now()
-}
-
-function hasStarted(value?: string | null) {
-  if (!value) return true
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) && timestamp <= Date.now()
-}
-
-function hasNotEnded(value?: string | null) {
-  if (!value) return true
-  return isFuture(value)
 }
 
 function normalizePlan(rawPlan: any): BillingPlan | null {
@@ -101,6 +86,17 @@ function normalizePlan(rawPlan: any): BillingPlan | null {
     features: parseObject<FeatureMap>(rawPlan.features, {}),
     limits: parseObject<LimitMap>(rawPlan.limits, {}),
   }
+}
+
+function getRestrictionReason(accessSource: AccessSource, status: string, hasOrganization: boolean): string | null {
+  if (!hasOrganization) return 'No workspace is connected to this user yet.'
+  if (accessSource === 'payment_required') {
+    if (status === 'past_due') return 'Payment is past due. Update billing or ask admin to restore access.'
+    if (status === 'unpaid') return 'Payment is unpaid. Update billing or ask admin to restore access.'
+    if (status === 'incomplete') return 'Payment setup is incomplete. Complete billing or ask admin to activate access.'
+    return 'A valid subscription or admin override is required to continue using premium workspace features.'
+  }
+  return null
 }
 
 function normalizeSubscription(row: any, plan: BillingPlan | null): OrganizationSubscription | null {
@@ -122,64 +118,33 @@ function normalizeSubscription(row: any, plan: BillingPlan | null): Organization
   }
 }
 
-function normalizeMemberOverride(row: any): MemberAccessOverride | null {
-  if (!row) return null
-  return {
-    id: row.id,
-    organization_id: row.organization_id,
-    user_id: row.user_id,
-    status: row.status,
-    starts_at: row.starts_at,
-    expires_at: row.expires_at,
-    features_override: parseObject<FeatureMap>(row.features_override, {}),
-    limits_override: parseObject<Partial<LimitMap>>(row.limits_override, {}),
-    notes: row.notes,
-  }
-}
-
 export async function getWorkspaceAccess(params: {
   organizationId?: string | null
-  userId?: string | null
   accountType?: string | null
+  userId?: string | null
 }): Promise<WorkspaceAccess> {
   const accountType = normalizeAccountType(params.accountType)
   const isPlatformAdmin = await isCurrentUserPlatformAdmin()
-
-  if (isPlatformAdmin) {
-    return {
-      accountType,
-      isPlatformAdmin: true,
-      subscription: null,
-      plan: null,
-      memberOverride: null,
-      status: 'platform_admin',
-      accessLevel: 'platform_admin',
-      trialEndsAt: null,
-      isTrialActive: false,
-      isAccessActive: true,
-      requiresPayment: false,
-      restrictionReason: null,
-      features: ALL_FEATURES,
-      limits: { unlimited: null },
-    }
-  }
+  const defaultFeatures = mergeFeatures(CORE_FEATURES, accountTypeDefaultFeatures[accountType])
+  const fullLimits = { unlimited: null, ...TRIAL_LIMITS }
 
   if (!params.organizationId) {
     return {
       accountType,
-      isPlatformAdmin: false,
+      isPlatformAdmin,
       subscription: null,
       plan: null,
-      memberOverride: null,
-      status: 'missing_organization',
-      accessLevel: 'restricted',
+      userOverride: null,
+      accessSource: isPlatformAdmin ? 'platform_admin' : 'missing_organization',
+      status: isPlatformAdmin ? 'platform_admin' : 'missing_organization',
       trialEndsAt: null,
       isTrialActive: false,
-      isAccessActive: false,
-      requiresPayment: true,
-      restrictionReason: 'No workspace is connected to this user yet.',
-      features: {},
-      limits: {},
+      isFreeAccess: !isPlatformAdmin,
+      isPaymentRequired: !isPlatformAdmin,
+      requiresPayment: !isPlatformAdmin,
+      restrictionReason: getRestrictionReason(isPlatformAdmin ? 'platform_admin' : 'missing_organization', isPlatformAdmin ? 'platform_admin' : 'missing_organization', false),
+      features: isPlatformAdmin ? ALL_FEATURES : FREE_FEATURES,
+      limits: isPlatformAdmin ? fullLimits : FREE_LIMITS,
     }
   }
 
@@ -194,109 +159,81 @@ export async function getWorkspaceAccess(params: {
       .maybeSingle(),
     params.userId
       ? supabase
-          .from('member_access_overrides')
-          .select('id, organization_id, user_id, status, starts_at, expires_at, features_override, limits_override, notes')
-          .eq('organization_id', params.organizationId)
+          .from('user_access_overrides')
+          .select('id, user_id, organization_id, status, reason, expires_at, features_override, limits_override')
           .eq('user_id', params.userId)
-          .in('status', ['full_access', 'restricted'])
-          .order('updated_at', { ascending: false })
+          .eq('status', 'active')
+          .or(`organization_id.eq.${params.organizationId},organization_id.is.null`)
+          .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+      : Promise.resolve({ data: null }),
   ])
 
   const row = data as any
   const rawPlan = Array.isArray(row?.billing_plans) ? row.billing_plans[0] : row?.billing_plans
   const plan = normalizePlan(rawPlan)
   const subscription = normalizeSubscription(row, plan)
-  const memberOverride = normalizeMemberOverride((overrideResult as any)?.data)
-  const overrideActive = Boolean(
-    memberOverride?.status === 'full_access' &&
-    hasStarted(memberOverride.starts_at) &&
-    hasNotEnded(memberOverride.expires_at),
-  )
-  const overrideRestricted = Boolean(
-    memberOverride?.status === 'restricted' &&
-    hasStarted(memberOverride.starts_at) &&
-    hasNotEnded(memberOverride.expires_at),
-  )
+  const overrideRow = overrideResult.data as any
+  const userOverride: UserAccessOverride | null = overrideRow
+    ? {
+        id: overrideRow.id,
+        user_id: overrideRow.user_id,
+        organization_id: overrideRow.organization_id,
+        status: overrideRow.status,
+        reason: overrideRow.reason,
+        expires_at: overrideRow.expires_at,
+        features_override: parseObject<FeatureMap>(overrideRow.features_override, {}),
+        limits_override: parseObject<Partial<LimitMap>>(overrideRow.limits_override, {}),
+      }
+    : null
 
-  if (overrideActive) {
-    return {
-      accountType,
-      isPlatformAdmin: false,
-      subscription,
-      plan,
-      memberOverride,
-      status: 'member_full_access',
-      accessLevel: 'member_override',
-      trialEndsAt: subscription?.trial_end_at || null,
-      isTrialActive: false,
-      isAccessActive: true,
-      requiresPayment: false,
-      restrictionReason: null,
-      features: mergeFeatures(ALL_FEATURES, memberOverride?.features_override),
-      limits: { unlimited: null, ...(memberOverride?.limits_override || {}) },
-    }
-  }
-
-  const rawStatus = subscription?.status || 'missing_subscription'
+  const status = subscription?.status || 'trialing'
   const trialEndsAt = subscription?.trial_end_at || null
-  const isTrialActive = Boolean(rawStatus === 'trialing' && isFuture(trialEndsAt))
-  const activeSubscription = ['active', 'comped', 'manually_granted'].includes(rawStatus) && hasNotEnded(subscription?.current_period_end)
-  const isAccessActive = !overrideRestricted && (isTrialActive || activeSubscription)
+  const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
+  const isOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
+  const isSubscriptionActive = ['active', 'paid', 'comped'].includes(status)
 
-  let status = rawStatus
-  let accessLevel: WorkspaceAccess['accessLevel'] = 'restricted'
-  let restrictionReason: string | null = null
+  let accessSource: AccessSource = 'free'
+  let features: FeatureMap = FREE_FEATURES
+  let limits: LimitMap = FREE_LIMITS
 
-  if (overrideRestricted) {
-    status = 'restricted_by_admin'
-    restrictionReason = memberOverride?.notes || 'Access has been restricted by platform admin.'
+  if (isPlatformAdmin) {
+    accessSource = 'platform_admin'
+    features = ALL_FEATURES
+    limits = fullLimits
+  } else if (isOverrideActive) {
+    accessSource = 'user_override'
+    features = mergeFeatures(defaultFeatures, plan?.features, userOverride?.features_override)
+    limits = { ...(plan?.limits || {}), ...fullLimits, ...(userOverride?.limits_override || {}) }
+  } else if (isSubscriptionActive) {
+    accessSource = 'subscription'
+    features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
+    limits = { ...(plan?.limits || {}), ...fullLimits, ...(subscription?.limits_override || {}) }
   } else if (isTrialActive) {
-    status = 'trialing'
-    accessLevel = 'trial'
-  } else if (activeSubscription) {
-    accessLevel = 'subscription'
-  } else if (rawStatus === 'trialing') {
-    status = 'trial_expired'
-    restrictionReason = 'Your 7-day trial has ended. Choose a subscription to continue.'
-  } else if (rawStatus === 'past_due') {
-    restrictionReason = 'Payment is past due. Update billing or ask admin to restore access.'
-  } else if (rawStatus === 'canceled') {
-    restrictionReason = 'This subscription is canceled.'
-  } else if (rawStatus === 'expired') {
-    restrictionReason = 'This subscription has expired.'
-  } else if (rawStatus === 'missing_subscription') {
-    restrictionReason = 'No subscription record exists for this workspace.'
-  } else {
-    restrictionReason = 'A valid subscription is required to use this workspace.'
+    accessSource = 'trial'
+    features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
+    limits = { ...(plan?.limits || {}), ...fullLimits, ...(subscription?.limits_override || {}) }
+  } else if (['past_due', 'unpaid', 'incomplete'].includes(status)) {
+    accessSource = 'payment_required'
   }
 
-  const features = isTrialActive
-    ? ALL_FEATURES
-    : isAccessActive
-      ? mergeFeatures(accountTypeDefaultFeatures[accountType], plan?.features, subscription?.features_override)
-      : {}
-
-  const limits = isTrialActive
-    ? ({ unlimited: null } as LimitMap)
-    : isAccessActive
-      ? ({ ...(plan?.limits || {}), ...(subscription?.limits_override || {}) } as LimitMap)
-      : {}
+  const isPaymentRequired = accessSource === 'payment_required'
+  const restrictionReason = getRestrictionReason(accessSource, status, true)
 
   return {
     accountType,
-    isPlatformAdmin: false,
+    isPlatformAdmin,
     subscription,
     plan,
-    memberOverride,
+    userOverride,
+    accessSource,
     status,
-    accessLevel,
     trialEndsAt,
     isTrialActive,
-    isAccessActive,
-    requiresPayment: !isAccessActive,
+    isFreeAccess: accessSource === 'free',
+    isPaymentRequired,
+    requiresPayment: isPaymentRequired,
     restrictionReason,
     features,
     limits,

@@ -7,8 +7,8 @@ export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'real
 
 
 const SEARCH_DISCOVERY_LIMIT = 40
-const SEARCH_DISCOVERY_TIMEOUT_MS = 9000
-const LISTING_FETCH_TIMEOUT_MS = 9000
+const SEARCH_DISCOVERY_TIMEOUT_MS = 5000
+const LISTING_FETCH_TIMEOUT_MS = 5000
 const MAX_SOURCE_HTML_CHARS = 2500000
 
 function timeoutMessage(sourceType: string, mode: 'search' | 'listing', timeoutMs: number) {
@@ -249,7 +249,7 @@ function extractMoneyByLabels(html: string, labels: string[]) {
   return null
 }
 
-function fallbackNormalizedListing(inputUrl: string, sourceType: MarketSourceType, reason: string): NormalizedMarketListing {
+export function buildFallbackNormalizedListing(inputUrl: string, sourceType: MarketSourceType, reason: string): NormalizedMarketListing {
   return {
     source_type: sourceType,
     external_listing_id: firstMatch(inputUrl, [/\/(?:deal|deals|deal-detail|deal-details|property|properties|property-detail|property-details|listing|listings)\/([A-Za-z0-9_-]{4,})/i, /[?&](?:id|dealId|propertyId|listingId)=([A-Za-z0-9_-]{4,})/i]),
@@ -471,7 +471,7 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
       },
     })
   } catch (error) {
-    return fallbackNormalizedListing(inputUrl, sourceType, error instanceof Error ? error.message : 'Source did not return fetchable listing HTML')
+    return buildFallbackNormalizedListing(inputUrl, sourceType, error instanceof Error ? error.message : 'Source did not return fetchable listing HTML')
   }
 
   const jsonLd = findJsonLd(html)

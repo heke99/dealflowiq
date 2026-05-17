@@ -320,7 +320,10 @@ export async function createMarketSourceAction(formData: FormData) {
   if (sourceUrls.length) {
     let runResult: any = null
     try {
-      runResult = await runMarketSourceNow(source as any, { maxUrls: maxUrlsPerRun })
+      // Source creation should prove the import path and redirect to the first listing.
+      // Larger source batches can run from the source runner/scheduler; doing 40 external
+      // fetches during the create form submit is too fragile for an interactive action.
+      runResult = await runMarketSourceNow(source as any, { maxUrls: 1 })
     } catch (runError) {
       redirect(`/market?tab=sources&source_id=${source.id}&error=${encodeURIComponent(runError instanceof Error ? runError.message : 'Source was saved but import failed.')}`)
     }
@@ -788,7 +791,8 @@ export async function runMarketSourceAction(formData: FormData) {
 
   let runResult: any = null
   try {
-    runResult = await runMarketSourceNow(source as any, { maxUrls: source.source_type === 'investorlift' ? 40 : Number((source.settings as any)?.max_urls_per_run || 5) || 5 })
+    const configuredMax = source.source_type === 'investorlift' ? 40 : Number((source.settings as any)?.max_urls_per_run || 5) || 5
+    runResult = await runMarketSourceNow(source as any, { maxUrls: Math.min(configuredMax, 5) })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run market source'
     redirect(`/market?tab=sources&error=${encodeURIComponent(message)}`)

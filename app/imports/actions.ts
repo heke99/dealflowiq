@@ -7,9 +7,9 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { analyzeMarketUrl } from '@/lib/market/urlAnalyzer'
 import { createInAppNotification } from '@/lib/notifications'
-import { discoverListingUrlsFromSearchUrl, fetchAndNormalizeMarketUrl } from '@/lib/market/sourceConnectors'
+import { buildFallbackNormalizedListing, discoverListingUrlsFromSearchUrl, fetchAndNormalizeMarketUrl } from '@/lib/market/sourceConnectors'
 import { upsertMarketListingFromNormalized } from '@/lib/market/importRunner'
-import { runListingRentIntelligence, buildDataQualityChecklist, buildConfidenceBreakdown } from '@/lib/market/rentIntelligenceEngine'
+import { buildDataQualityChecklist, buildConfidenceBreakdown } from '@/lib/market/rentIntelligenceEngine'
 import { providerPolicyFromRow, providerPolicySnapshot } from '@/lib/market/providerPolicies'
 
 type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>
@@ -211,20 +211,25 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
 
     try {
       if (isSearchPreview) {
+        const fallbackReason = typeof entry === 'string' ? null : String((entry as any).fallbackReason || '').trim() || null
+        const normalizedListing = fallbackReason
+          ? buildFallbackNormalizedListing(listingUrl || entrySourceUrl, entrySourceType as any, fallbackReason)
+          : {}
         await supabase.from('market_import_preview_items').insert({
           organization_id: workspace.organization.id,
           import_batch_id: batchId,
           source_type: entrySourceType,
           source_url: listingUrl || entrySourceUrl,
-          title: `Listing ${order} from ${policy.label} search`,
-          normalized_listing: {},
+          title: fallbackReason ? `${policy.label} listing pending review` : `Listing ${order} from ${policy.label} search`,
+          normalized_listing: normalizedListing,
           status: 'new',
           data_quality: {
             checklist: [
               { label: 'Listing URL found', status: 'ok' },
-              { label: 'Details fetched during import', status: 'pending' },
+              { label: fallbackReason ? 'Provider details need review' : 'Details fetched during import', status: fallbackReason ? 'warning' : 'pending' },
             ],
             lightweightPreview: true,
+            fallbackReason,
             policy: providerPolicySnapshot(policy),
           },
         })
@@ -362,15 +367,10 @@ async function importPreviewRowsForBatch(params: {
         deal_stage: 'imported',
       }).eq('id', result.listing.id).eq('organization_id', workspace.organization.id)
       const { data: refreshed } = await supabase.from('market_listings').select('*').eq('id', result.listing.id).maybeSingle()
-      try {
-        await runListingRentIntelligence({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listing: refreshed || result.listing })
-      } catch (intelligenceError) {
-        await auditImportEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, batchId, listingId: result.listing.id, eventType: 'rent_analysis_failed', message: intelligenceError instanceof Error ? intelligenceError.message : 'Rent intelligence failed', metadata: { sourceType } })
-      }
       const { data: score } = await supabase.from('market_listing_scores').select('*').eq('listing_id', result.listing.id).order('calculated_at', { ascending: false }).limit(1).maybeSingle()
       await supabase.from('market_listings').update({
-        data_quality_checklist: buildDataQualityChecklist(refreshed || result.listing, score),
-        confidence_breakdown: buildConfidenceBreakdown(refreshed || result.listing, score),
+        data_quality_checklist: buildDataQualityChecklist(refreshed || result.listing, score || (result as any).score),
+        confidence_breakdown: buildConfidenceBreakdown(refreshed || result.listing, score || (result as any).score),
       }).eq('id', result.listing.id).eq('organization_id', workspace.organization.id)
       importedListingIds.push(String(result.listing.id))
       await supabase.from('market_import_preview_items').update({ status: 'imported', imported_listing_id: result.listing.id, imported_at: new Date().toISOString() }).eq('id', item.id)
@@ -504,13 +504,17 @@ export async function analyzeImportUrlAction(formData: FormData) {
       metadata: { sourceType: analysis.sourceType, found: preview.found, inserted: preview.inserted, failed: preview.failed },
     })
 
+    // Keep the interactive URL import fast and predictable. Import one listing immediately,
+    // redirect to that listing, and leave the remaining preview rows in the batch for the
+    // explicit/scheduled importer. Importing 40 external pages inside one server action can
+    // hit Next.js/runtime timeouts and surface as the generic "This page couldn’t load" UI.
     const imported = await importPreviewRowsForBatch({
       supabase,
       workspace,
       batch: batch as any,
       batchId: String(batch.id),
       importFirst: true,
-      hardLimit: analysis.sourceType === 'investorlift' ? 40 : 10,
+      hardLimit: 1,
     })
     destination = imported.importedListingIds[0]
       ? `/market/${imported.importedListingIds[0]}?batch=${batch.id}&saved=imported`

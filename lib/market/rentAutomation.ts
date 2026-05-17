@@ -13,6 +13,7 @@ type ApplyParams = {
   organizationId: string
   userId?: string | null
   trigger?: 'auto_import' | 'manual_market_rent' | 'manual_hud' | 'manual_override'
+  runHud?: boolean
 }
 
 export async function applyAutomatedRentIntelligence(params: ApplyParams) {
@@ -23,7 +24,8 @@ export async function applyAutomatedRentIntelligence(params: ApplyParams) {
   const zip = String(listing.zip_code || '').trim()
   const bedrooms = Number(listing.bedrooms || 0) || null
 
-  if (zip && ['residential', 'multifamily', '', null, undefined].includes(String(listing.asset_class || '').toLowerCase() || '')) {
+  const shouldRunHud = params.runHud !== false
+  if (shouldRunHud && zip && ['residential', 'multifamily', '', null, undefined].includes(String(listing.asset_class || '').toLowerCase() || '')) {
     try {
       const hud = await lookupHudFmrByZip({ zipCode: zip, bedrooms })
       hudSelectedRent = hud.selectedBedroomRent

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth/session'
+import { PublicFooter } from '@/components/layout/PublicFooter'
 
 const metrics = [
   ['10x', 'faster first-pass deal review'],
@@ -77,6 +78,8 @@ export default async function HomePage() {
           {features.map((feature) => <div key={feature.title} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6"><h2 className="text-xl font-bold">{feature.title}</h2><p className="mt-3 text-sm leading-6 text-slate-400">{feature.text}</p></div>)}
         </div>
       </section>
+
+      <PublicFooter />
     </main>
   )
 }

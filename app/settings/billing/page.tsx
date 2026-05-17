@@ -94,8 +94,8 @@ export default async function BillingSettingsPage() {
             </dl>
 
             {workspace.access.requiresPayment ? (
-              <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
-                Payment checkout is not connected yet. Until Stripe/payment provider is connected, platform admin must activate a subscription or grant a member override in Admin.
+              <div className="mt-6 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-6 text-amber-100">
+                Your workspace needs an active subscription to unlock premium tools. Self-serve checkout can be connected to Stripe before launch; until then, platform admin can activate a subscription or grant a member override. For help, contact <a href="mailto:support@dealfloowiq.com" className="font-black text-white hover:underline">support@dealfloowiq.com</a>.
               </div>
             ) : null}
           </section>

@@ -108,7 +108,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 </label>
 
                 <label className="block">
-                  <span className="text-sm font-bold text-slate-300">Password</span>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-300">Password</span>
+                    <Link href="/forgot-password" className="text-xs font-black text-emerald-100 hover:underline">Forgot password?</Link>
+                  </div>
                   <input
                     name="password"
                     type="password"

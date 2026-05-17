@@ -15,6 +15,18 @@ function toMessage(value: string) {
   return encodeURIComponent(value)
 }
 
+function getAppUrl() {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL
+  if (configured) return configured.replace(/\/$/, '')
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return 'http://localhost:3000'
+}
+
+function getAuthRedirectUrl(next = '/dashboard') {
+  const safeNext = getSafeRedirect(next)
+  return `${getAppUrl()}/auth/callback?next=${encodeURIComponent(safeNext)}`
+}
+
 function normalizeInviteCode(value: FormDataEntryValue | null) {
   return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
@@ -105,10 +117,12 @@ export async function signUpAction(formData: FormData) {
   }
 
   const supabase = await createSupabaseServerClient()
+  const nextAfterConfirm = inviteCode ? `/dashboard?invite=${encodeURIComponent(inviteCode)}` : '/dashboard'
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
+      emailRedirectTo: getAuthRedirectUrl(nextAfterConfirm),
       data: {
         full_name: fullName || null,
         account_type: accountType,
@@ -123,8 +137,7 @@ export async function signUpAction(formData: FormData) {
   }
 
   if (!data.session) {
-    const next = inviteCode ? `/dashboard?invite=${encodeURIComponent(inviteCode)}` : '/dashboard'
-    redirect(`/login?next=${encodeURIComponent(next)}&message=${toMessage(inviteCode ? 'Account created. Confirm your email, then log in to join the community.' : 'Account created. Check your email to confirm your account, then log in.')}`)
+    redirect(`/login?next=${encodeURIComponent(nextAfterConfirm)}&message=${toMessage(inviteCode ? 'Account created. Confirm your email, then log in to join the community.' : 'Account created. Check your email to confirm your account, then log in.')}`)
   }
 
   if (inviteCode) {
@@ -141,6 +154,47 @@ export async function signUpAction(formData: FormData) {
   }
 
   redirect('/dashboard')
+}
+
+export async function requestPasswordResetAction(formData: FormData) {
+  const email = String(formData.get('email') || '').trim().toLowerCase()
+  if (!email) {
+    redirect(`/forgot-password?error=${toMessage('Email is required.')}`)
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: getAuthRedirectUrl('/reset-password'),
+  })
+
+  if (error) {
+    redirect(`/forgot-password?error=${toMessage(error.message)}`)
+  }
+
+  redirect(`/forgot-password?sent=1&email=${encodeURIComponent(email)}`)
+}
+
+export async function updatePasswordAction(formData: FormData) {
+  const password = String(formData.get('password') || '')
+  const confirmPassword = String(formData.get('confirm_password') || '')
+
+  if (!password || password.length < 6) {
+    redirect(`/reset-password?error=${toMessage('Password must be at least 6 characters.')}`)
+  }
+
+  if (password !== confirmPassword) {
+    redirect(`/reset-password?error=${toMessage('Passwords do not match.')}`)
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase.auth.updateUser({ password })
+
+  if (error) {
+    redirect(`/reset-password?error=${toMessage(error.message)}`)
+  }
+
+  await supabase.auth.signOut()
+  redirect(`/login?message=${toMessage('Password updated. Log in with your new password.')}`)
 }
 
 export async function signOutAction() {

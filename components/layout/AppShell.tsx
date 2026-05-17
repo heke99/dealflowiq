@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { signOutAction } from '@/lib/auth/actions'
+import { MessageBell } from '@/components/layout/MessageBell'
+import { NotificationBell } from '@/components/layout/NotificationBell'
 import type { FeatureMap, FeatureKey } from '@/lib/billing/features'
 import { canUseFeature, featureLabels } from '@/lib/billing/features'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
@@ -117,14 +119,24 @@ export function AppShell({
       </aside>
 
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between gap-4">
-            <Link href="/dashboard" className="font-bold">DealFlowIQ</Link>
-            <form action={signOutAction}>
-              <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
-            </form>
+        <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
+            <div className="min-w-0">
+              <Link href="/dashboard" className="font-black tracking-tight text-white lg:hidden">DealFlowIQ</Link>
+              <div className="hidden text-xs font-black uppercase tracking-[0.18em] text-slate-500 lg:block">Workspace</div>
+              <div className="hidden truncate text-sm font-semibold text-slate-200 lg:block">{organizationName || 'Organization'}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <MessageBell />
+              <NotificationBell />
+              <form action={signOutAction}>
+                <button className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10">
+                  Log out
+                </button>
+              </form>
+            </div>
           </div>
-          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
             {nav.map((item) => {
               const locked = Boolean(item.feature && !item.core && !canUseFeature(features, item.feature))
               return (

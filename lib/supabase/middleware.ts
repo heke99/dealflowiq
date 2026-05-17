@@ -31,7 +31,23 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const pathname = request.nextUrl.pathname
-  const protectedPrefixes = ['/dashboard', '/deals', '/buyers', '/settings', '/admin']
+  const protectedPrefixes = [
+    '/dashboard',
+    '/deals',
+    '/buyers',
+    '/settings',
+    '/admin',
+    '/market',
+    '/imports',
+    '/opportunities',
+    '/buy-boxes',
+    '/saved-deals',
+    '/rent-analysis',
+    '/calculators',
+    '/community',
+    '/messages',
+    '/notifications',
+  ]
   const authPages = ['/login', '/signup']
   const isProtectedRoute = protectedPrefixes.some((prefix) => pathname.startsWith(prefix))
 

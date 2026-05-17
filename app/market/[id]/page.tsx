@@ -166,6 +166,10 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
               </div>
               <h1 className="mt-3 max-w-4xl text-3xl font-bold tracking-tight sm:text-5xl">{row.title}</h1>
               <p className="mt-3 text-slate-300">{location || 'Location pending'}</p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link href="#contact-owner" className="rounded-xl bg-sky-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-sky-200">Message listing owner</Link>
+                {row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Open source listing</a> : null}
+              </div>
             </div>
             <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
               <div className="text-xs font-semibold uppercase tracking-wide">{premiumAccess ? 'Deal Score' : 'Deal Score locked'}</div>
@@ -312,6 +316,26 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
           </div>
 
           <aside className="space-y-5">
+            <div id="contact-owner" className="scroll-mt-24 rounded-3xl border border-sky-300/30 bg-sky-300/[0.08] p-6 shadow-2xl shadow-sky-950/20">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">Contact owner</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">Send an in-app message tied to this listing. Free users can send 1 message every 48 hours. Trial and paid users get full messaging access.</p>
+                </div>
+                <span className="rounded-full border border-sky-300/30 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100">Deal conversation</span>
+              </div>
+              <form action={startListingConversationAction} className="mt-4 space-y-3">
+                <input type="hidden" name="listing_id" value={row.id} />
+                <textarea name="body" rows={4} required placeholder="Hi, I’m interested in this listing. Is it still available?" className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                <button className="w-full rounded-xl bg-sky-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-sky-200">Send message</button>
+              </form>
+              <dl className="mt-5 space-y-3 text-sm">
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Contact name</dt><dd className="text-right text-slate-200">{row.broker_name || 'Listing owner'}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Phone</dt><dd className="text-right text-slate-200">{visiblePhone || (phoneVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Email</dt><dd className="text-right text-slate-200">{visibleEmail || (emailVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
+              </dl>
+            </div>
+
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Actions</h2>
               <div className="mt-5 grid gap-3">
@@ -421,26 +445,6 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 </div>
               </div>
             ) : null}
-
-            <div id="contact-owner" className="rounded-3xl border border-sky-300/20 bg-sky-300/[0.06] p-6">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold">Contact owner</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">Send an in-app message tied to this listing. Free users can send 1 message every 48 hours.</p>
-                </div>
-                <span className="rounded-full border border-sky-300/30 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100">Deal conversation</span>
-              </div>
-              <form action={startListingConversationAction} className="mt-4 space-y-3">
-                <input type="hidden" name="listing_id" value={row.id} />
-                <textarea name="body" rows={4} required placeholder="Hi, I’m interested in this listing. Is it still available?" className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
-                <button className="w-full rounded-xl bg-sky-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-sky-200">Send message</button>
-              </form>
-              <dl className="mt-5 space-y-3 text-sm">
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Contact name</dt><dd className="text-right text-slate-200">{row.broker_name || 'Listing owner'}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Phone</dt><dd className="text-right text-slate-200">{visiblePhone || (phoneVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Email</dt><dd className="text-right text-slate-200">{visibleEmail || (emailVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
-              </dl>
-            </div>
 
             {canManageContact ? (
               <form action={updateListingContactSettingsAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">

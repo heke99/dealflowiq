@@ -77,7 +77,7 @@ function Section({ title, description, children }: { title: string; description:
 export function DealForm({ action, submitLabel, deal, property, error, assumptionDefaults }: DealFormProps) {
   const defaults = assumptionDefaults
   return (
-    <form action={action} className="space-y-6">
+    <form action={action} encType="multipart/form-data" className="space-y-6">
       {deal?.id ? <input type="hidden" name="deal_id" value={deal.id} /> : null}
       {error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
 
@@ -93,6 +93,17 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
         <Field label="Source platform" name="source_platform" placeholder="Zillow, InvestorLift, manual, PDF..." defaultValue={value(deal, 'source_platform')} />
         <Field label="Primary image URL" name="primary_image_url" placeholder="https://.../property-photo.jpg" defaultValue={value(deal, 'primary_image_url')} help="Used on Market, Opportunities and deal cards. Use images you have the right to display." />
         <Field label="Additional image URLs" name="image_urls" placeholder="One or more image URLs, separated by commas or new lines" defaultValue={Array.isArray(deal?.image_urls) ? deal?.image_urls.join('\n') : value(deal, 'image_urls')} help="Optional gallery images for Market cards and future deal pages." />
+        <label className="block md:col-span-2">
+          <span className="text-sm font-medium text-slate-300">Upload photos and documents</span>
+          <input
+            name="deal_files"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            multiple
+            className="mt-2 w-full rounded-xl border border-dashed border-white/15 bg-slate-900/80 px-4 py-4 text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-950 hover:border-white/30"
+          />
+          <span className="mt-1 block text-xs leading-5 text-slate-500">Upload JPG, PNG, WebP photos or PDF deal documents. Max 15 MB per file, up to 12 files per save.</span>
+        </label>
         <label className="block">
           <span className="text-sm font-medium text-slate-300">Market visibility</span>
           <select name="visibility" defaultValue={value(deal, 'visibility') || 'private'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">

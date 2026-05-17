@@ -20,8 +20,8 @@ function percent(value: number | string | null | undefined) {
 }
 
 
-function DealHeroImage({ deal }: { deal: Record<string, any> }) {
-  const imageUrl = String(deal.primary_image_url || '')
+function DealHeroImage({ deal, heroImageUrl }: { deal: Record<string, any>; heroImageUrl?: string | null }) {
+  const imageUrl = String(heroImageUrl || deal.primary_image_url || '')
   if (imageUrl) {
     return <div className="h-64 rounded-3xl border border-white/10 bg-cover bg-center" style={{ backgroundImage: `url(${imageUrl})` }} />
   }
@@ -53,22 +53,80 @@ function QuickField({ label, name, defaultValue, placeholder }: { label: string;
   )
 }
 
+async function signDealFiles(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, files: Record<string, any>[]): Promise<Array<Record<string, any> & { signedUrl: string | null }>> {
+  const signed: Array<Record<string, any> & { signedUrl: string | null }> = []
+  for (const file of files) {
+    const { data } = await supabase.storage.from(file.storage_bucket || 'deal-files').createSignedUrl(file.storage_path, 60 * 60)
+    signed.push({ ...file, signedUrl: data?.signedUrl || null })
+  }
+  return signed
+}
+
+function DealFilesSection({ files }: { files: Record<string, any>[] }) {
+  if (!files.length) return null
+  const images = files.filter((file) => file.file_kind === 'image' && file.signedUrl)
+  const documents = files.filter((file) => file.file_kind === 'pdf' && file.signedUrl)
+  return (
+    <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Files & photos</div>
+          <h2 className="mt-2 text-xl font-bold">Uploaded deal media</h2>
+        </div>
+        <Link href="#" className="hidden" aria-hidden="true">.</Link>
+      </div>
+      {images.length ? (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {images.map((file) => (
+            <a key={file.id} href={file.signedUrl} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50">
+              <div className="h-44 bg-cover bg-center transition group-hover:scale-[1.02]" style={{ backgroundImage: `url(${file.signedUrl})` }} />
+              <div className="truncate px-3 py-2 text-xs text-slate-400">{file.file_name}</div>
+            </a>
+          ))}
+        </div>
+      ) : null}
+      {documents.length ? (
+        <div className="mt-5 grid gap-2">
+          {documents.map((file) => (
+            <a key={file.id} href={file.signedUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm hover:bg-white/5">
+              <span className="truncate font-semibold text-slate-100">{file.file_name}</span>
+              <span className="shrink-0 text-xs text-slate-500">Open PDF</span>
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export default async function DealDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params
   const query = await searchParams
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
+  const organizationId = workspace.organization?.id
 
-  const { data: deal } = workspace.organization?.id
+  const { data: deal } = organizationId
     ? await supabase
         .from('deals')
         .select('*, properties(*)')
         .eq('id', id)
-        .eq('organization_id', workspace.organization.id)
+        .eq('organization_id', organizationId)
         .maybeSingle()
     : { data: null }
 
   if (!deal) notFound()
+
+  const { data: dealFiles } = await supabase
+    .from('deal_files')
+    .select('*')
+    .eq('deal_id', id)
+    .eq('organization_id', organizationId)
+    .order('file_kind', { ascending: true })
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  const signedDealFiles = await signDealFiles(supabase, (dealFiles || []) as Record<string, any>[])
+  const firstUploadedImage = signedDealFiles.find((file) => file.file_kind === 'image' && file.signedUrl)?.signedUrl || null
 
   const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
   const currentRent = Number((deal as any).current_rent || 0)
@@ -132,11 +190,13 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <button className="mt-3 w-full rounded-xl border border-red-300/30 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20">Delete Deal</button>
           </form>
         </div>
-        <DealHeroImage deal={deal as any} />
+        <DealHeroImage deal={deal as any} heroImageUrl={firstUploadedImage} />
         </section>
 
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
         {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+
+        <DealFilesSection files={signedDealFiles} />
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">

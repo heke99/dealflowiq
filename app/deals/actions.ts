@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { buildCalculationSnapshotPayload, calculateDealUnderwriting } from '@/lib/calculations/underwriting'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
@@ -85,6 +86,85 @@ function maybeRent(formData: FormData, key: string) {
   if (!hasFormValue(formData, key)) return undefined
   return rentValue(formData, key)
 }
+
+function uploadedDealFiles(formData: FormData) {
+  return formData
+    .getAll('deal_files')
+    .filter((value): value is File => typeof File !== 'undefined' && value instanceof File && value.size > 0)
+}
+
+const DEAL_FILE_BUCKET = 'deal-files'
+const MAX_DEAL_FILE_SIZE = 15 * 1024 * 1024
+const MAX_DEAL_FILES_PER_SUBMIT = 12
+const ALLOWED_DEAL_FILE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+
+function safeStorageFileName(name: string) {
+  const cleaned = String(name || 'file')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120)
+  return cleaned || 'file'
+}
+
+function fileKindFor(mimeType: string) {
+  return mimeType === 'application/pdf' ? 'pdf' : 'image'
+}
+
+async function uploadDealFiles(params: {
+  formData: FormData
+  organizationId: string
+  dealId: string
+  userId: string
+}) {
+  const files = uploadedDealFiles(params.formData).slice(0, MAX_DEAL_FILES_PER_SUBMIT)
+  if (!files.length) return []
+
+  const admin = createSupabaseAdminClient()
+  const uploaded: Array<{ path: string; fileKind: string; mimeType: string; fileName: string; size: number }> = []
+
+  for (const [index, file] of files.entries()) {
+    const mimeType = String(file.type || '').toLowerCase()
+    if (!ALLOWED_DEAL_FILE_TYPES.has(mimeType)) {
+      throw new Error(`${file.name || 'File'} is not supported. Upload JPG, PNG, WebP or PDF files.`)
+    }
+    if (file.size > MAX_DEAL_FILE_SIZE) {
+      throw new Error(`${file.name || 'File'} is too large. Max file size is 15 MB.`)
+    }
+
+    const fileName = safeStorageFileName(file.name)
+    const storagePath = `${params.organizationId}/${params.dealId}/${Date.now()}-${index}-${crypto.randomUUID()}-${fileName}`
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const { error: uploadError } = await admin.storage.from(DEAL_FILE_BUCKET).upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: false,
+    })
+    if (uploadError) throw new Error(uploadError.message)
+
+    uploaded.push({ path: storagePath, fileKind: fileKindFor(mimeType), mimeType, fileName, size: file.size })
+  }
+
+  if (uploaded.length) {
+    const { error } = await admin.from('deal_files').insert(uploaded.map((file, index) => ({
+      organization_id: params.organizationId,
+      deal_id: params.dealId,
+      uploaded_by: params.userId,
+      storage_bucket: DEAL_FILE_BUCKET,
+      storage_path: file.path,
+      file_name: file.fileName,
+      mime_type: file.mimeType,
+      file_size_bytes: file.size,
+      file_kind: file.fileKind,
+      sort_order: index,
+    })))
+    if (error) throw new Error(error.message)
+  }
+
+  return uploaded
+}
+
 
 function buildDealPayload(formData: FormData) {
   return {
@@ -183,6 +263,13 @@ export async function createDealAction(formData: FormData) {
     redirect(`/deals/${deal.id}/edit?error=${encodeURIComponent(propertyError.message)}`)
   }
 
+  try {
+    await uploadDealFiles({ formData, organizationId: workspace.organization.id, dealId: deal.id, userId: workspace.user.id })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Deal was created, but file upload failed.'
+    redirect(`/deals/${deal.id}/edit?error=${encodeURIComponent(message)}`)
+  }
+
   await supabase.from('audit_logs').insert({
     organization_id: workspace.organization.id,
     actor_id: workspace.user.id,
@@ -226,6 +313,13 @@ export async function updateDealAction(formData: FormData) {
 
   if (propertyError) {
     redirect(`/deals/${dealId}/edit?error=${encodeURIComponent(propertyError.message)}`)
+  }
+
+  try {
+    await uploadDealFiles({ formData, organizationId: workspace.organization.id, dealId, userId: workspace.user.id })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Deal was saved, but file upload failed.'
+    redirect(`/deals/${dealId}/edit?error=${encodeURIComponent(message)}`)
   }
 
   await supabase.from('audit_logs').insert({

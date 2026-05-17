@@ -254,6 +254,76 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
   return score
 }
 
+async function finalizeImportedListing(params: {
+  supabase: SupabaseAny
+  listing: Record<string, any>
+  organizationId: string
+  userId?: string | null
+  sourceId?: string | null
+  created: boolean
+}) {
+  let listing = params.listing
+  let score: ReturnType<typeof scoreMarketListing> | Awaited<ReturnType<typeof insertMarketListingScore>> = scoreMarketListing(listing)
+  const warnings: string[] = []
+
+  try {
+    await applyAutomatedRentIntelligence({
+      supabase: params.supabase,
+      listing: listing as any,
+      organizationId: params.organizationId,
+      userId: params.userId || null,
+      trigger: 'auto_import',
+    })
+    const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', listing.id).maybeSingle()
+    if (refreshed) listing = refreshed as any
+  } catch (error) {
+    warnings.push(error instanceof Error ? error.message : 'Automated rent intelligence failed')
+  }
+
+  try {
+    score = await insertMarketListingScore(params.supabase, listing as any, params.organizationId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Score insert failed'
+    warnings.push(message)
+    await recordMarketListingActivity(params.supabase, {
+      organizationId: params.organizationId,
+      listingId: listing.id,
+      actorId: params.userId || null,
+      eventType: 'score_failed',
+      title: 'Score needs review',
+      description: message,
+      metadata: { sourceId: params.sourceId, warning: message },
+    })
+  }
+
+  if (warnings.length) {
+    await params.supabase
+      .from('market_listings')
+      .update({
+        raw_payload: {
+          ...((listing.raw_payload && typeof listing.raw_payload === 'object') ? listing.raw_payload : {}),
+          import_warnings: warnings,
+        },
+      })
+      .eq('id', listing.id)
+      .eq('organization_id', params.organizationId)
+    const { data: refreshedAfterWarnings } = await params.supabase.from('market_listings').select('*').eq('id', listing.id).maybeSingle()
+    if (refreshedAfterWarnings) listing = refreshedAfterWarnings as any
+  }
+
+  await recordMarketListingActivity(params.supabase, {
+    organizationId: params.organizationId,
+    listingId: listing.id,
+    actorId: params.userId || null,
+    eventType: 'imported',
+    title: params.created ? 'Listing imported from source run' : 'Listing updated from source run',
+    description: params.created ? 'New listing was created by the import worker.' : 'Existing listing was refreshed by the import worker.',
+    metadata: { sourceId: params.sourceId, sourceType: listing.source_type, warnings },
+  })
+
+  return { listing, score }
+}
+
 export async function upsertMarketListingFromNormalized(params: {
   supabase: SupabaseAny
   listing: NormalizedMarketListing | Record<string, any>
@@ -308,11 +378,15 @@ export async function upsertMarketListingFromNormalized(params: {
       .select('*')
       .single()
     if (error || !data) throw new Error(error?.message || 'Could not update market listing')
-    await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data as any, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
-    const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
-    const score = await insertMarketListingScore(params.supabase, (refreshed || data) as any, params.organizationId)
-    await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing updated from source run', description: 'Existing listing was refreshed by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
-    return { listing: (refreshed || data) as any, created: false, score }
+    const finalized = await finalizeImportedListing({
+      supabase: params.supabase,
+      listing: data as any,
+      organizationId: params.organizationId,
+      userId: params.userId || null,
+      sourceId: params.sourceId || null,
+      created: false,
+    })
+    return { listing: finalized.listing as any, created: false, score: finalized.score as any }
   }
 
   const { data, error } = await params.supabase
@@ -321,11 +395,15 @@ export async function upsertMarketListingFromNormalized(params: {
     .select('*')
     .single()
   if (error || !data) throw new Error(error?.message || 'Could not create market listing')
-  await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data as any, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
-  const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
-  const score = await insertMarketListingScore(params.supabase, (refreshed || data) as any, params.organizationId)
-  await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing imported from source run', description: 'New listing was created by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
-  return { listing: (refreshed || data) as any, created: true, score }
+  const finalized = await finalizeImportedListing({
+    supabase: params.supabase,
+    listing: data as any,
+    organizationId: params.organizationId,
+    userId: params.userId || null,
+    sourceId: params.sourceId || null,
+    created: true,
+  })
+  return { listing: finalized.listing as any, created: true, score: finalized.score as any }
 }
 
 

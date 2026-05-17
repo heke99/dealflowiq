@@ -100,6 +100,7 @@ export default async function MarketSearchPage({ searchParams }: { searchParams?
                   <select name="source_type" defaultValue="manual_url" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
                     <option value="manual_url">Auto-detect from URL</option>
                     <option value="zillow">Zillow</option>
+                    <option value="investorlift">InvestorLift</option>
                     <option value="crexi">Crexi</option>
                     <option value="loopnet">LoopNet</option>
                     <option value="realtor">Realtor.com</option>
@@ -107,7 +108,7 @@ export default async function MarketSearchPage({ searchParams }: { searchParams?
                     <option value="other">Other</option>
                   </select>
                 </label>
-                <Field label="Source URL" name="input_url" placeholder="https://www.zillow.com/homedetails/... or search URL" />
+                <Field label="Source URL" name="input_url" placeholder="https://www.investorlift.com/... or https://www.zillow.com/homedetails/..." />
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Visibility</span>
                   <select name="visibility" defaultValue="private" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">

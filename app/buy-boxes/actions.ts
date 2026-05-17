@@ -46,7 +46,7 @@ function statusValue(formData: FormData) {
 
 function sourceTypeValue(formData: FormData) {
   const value = String(formData.get('source_type') || 'zillow')
-  return ['zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'manual_url', 'other'].includes(value) ? value : 'zillow'
+  return ['zillow', 'investorlift', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'manual_url', 'other'].includes(value) ? value : 'zillow'
 }
 
 function nextRunFor(frequency: string) {

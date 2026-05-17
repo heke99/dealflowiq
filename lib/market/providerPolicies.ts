@@ -17,6 +17,21 @@ export type ProviderPolicy = {
 }
 
 export const DEFAULT_PROVIDER_POLICIES: Record<string, ProviderPolicy> = {
+  investorlift: {
+    sourceType: 'investorlift' as MarketSourceType,
+    label: 'InvestorLift',
+    active: true,
+    maxListingsPerHour: 40,
+    maxListingsPerDay: null,
+    storageDays: 15,
+    imagesAllowed: true,
+    descriptionAllowed: true,
+    sourceLinkRequired: true,
+    attributionRequired: true,
+    searchImportAllowed: true,
+    listingImportAllowed: true,
+    notes: 'Authorized InvestorLift live import only. 40 listing imports per organization per rolling hour. No demo mode, proxy rotation, CAPTCHA bypass, or anti-bot circumvention.',
+  },
   zillow: {
     sourceType: 'zillow',
     label: 'Zillow',

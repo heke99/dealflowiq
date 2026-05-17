@@ -5,7 +5,6 @@ import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
-import { hasFullOpportunityAccess } from '@/lib/billing/freemium'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
 import { runMarketSourceNow } from '@/lib/market/importRunner'
 import { determineDealReviewStatus } from '@/lib/market/review'
@@ -21,6 +20,7 @@ import {
   parseMarketCsvText,
   type NormalizedMarketListing,
 } from '@/lib/market/sourceConnectors'
+import { providerPolicyFromRow, providerPolicySnapshot } from '@/lib/market/providerPolicies'
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -41,7 +41,7 @@ function integerValue(formData: FormData, key: string) {
 
 function sourceTypeValue(formData: FormData) {
   const value = String(formData.get('source_type') || 'manual')
-  return ['manual', 'manual_url', 'zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'mls_feed', 'public_deal', 'community_deal', 'other'].includes(value) ? value : 'manual'
+  return ['manual', 'manual_url', 'zillow', 'investorlift', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'mls_feed', 'public_deal', 'community_deal', 'other'].includes(value) ? value : 'manual'
 }
 
 function accessModeValue(formData: FormData) {
@@ -78,6 +78,42 @@ function sourceUrlsValue(formData: FormData) {
 
 function checkboxValue(formData: FormData, key: string) {
   return String(formData.get(key) || '') === 'on' || String(formData.get(key) || '') === 'true'
+}
+
+
+async function importPolicyForSource(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, sourceType: string) {
+  const { data } = await supabase
+    .from('market_provider_policies')
+    .select('*')
+    .or(`organization_id.eq.${organizationId},organization_id.is.null`)
+    .eq('source_type', sourceType)
+    .order('organization_id', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+  return providerPolicyFromRow(sourceType, data as any)
+}
+
+async function countRecentProviderImports(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, sourceType: string) {
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count } = await supabase
+    .from('market_import_audit_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .eq('event_type', 'listing_imported')
+    .gte('created_at', since)
+    .contains('metadata', { sourceType })
+  return count || 0
+}
+
+async function auditImportEvent(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, params: { organizationId: string; userId?: string | null; listingId?: string | null; eventType: string; message: string; metadata?: Record<string, any> }) {
+  await supabase.from('market_import_audit_events').insert({
+    organization_id: params.organizationId,
+    user_id: params.userId || null,
+    listing_id: params.listingId || null,
+    event_type: params.eventType,
+    message: params.message,
+    metadata: params.metadata || {},
+  })
 }
 
 function scheduleFrequencyValue(formData: FormData) {
@@ -309,12 +345,6 @@ async function upsertNormalizedListing(params: {
   return { listing: data as any, created: true }
 }
 
-function requireFullOpportunityAccess(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>, message = 'This action is locked on Free. Upgrade to Pro, use your trial, or ask an admin for override.') {
-  if (!hasFullOpportunityAccess(workspace.access)) {
-    redirect(`/settings/billing?error=${encodeURIComponent(message)}`)
-  }
-}
-
 function requireSourceImports(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
   if (!canUseFeature(workspace.access.features, 'market_source_imports')) {
     redirect(`/market?tab=sources&error=${encodeURIComponent('Source imports are a premium feature. Upgrade to import URLs, CSV feeds and external market sources.')}`)
@@ -382,6 +412,16 @@ export async function importMarketUrlAction(formData: FormData) {
   const sourceType = requestedSourceType === 'manual' || requestedSourceType === 'manual_url' ? detectSourceType(inputUrl) : requestedSourceType
   const supabase = await createSupabaseServerClient()
   const searchImport = isSearchResultsUrl(inputUrl)
+  const policy = await importPolicyForSource(supabase, workspace.organization.id, String(sourceType))
+
+  const policyErrorHref = (message: string) => `/market?tab=sources&error=${encodeURIComponent(message)}`
+  if (!policy.active) redirect(policyErrorHref(`${policy.label} import is not active. Configure provider policy before live import.`))
+  if (searchImport && !policy.searchImportAllowed) redirect(policyErrorHref(`${policy.label} search import is not allowed by current provider policy.`))
+  if (!searchImport && !policy.listingImportAllowed) redirect(policyErrorHref(`${policy.label} listing import is not allowed by current provider policy.`))
+
+  const recent = await countRecentProviderImports(supabase, workspace.organization.id, String(sourceType))
+  const remaining = Math.max(0, policy.maxListingsPerHour - recent)
+  if (remaining <= 0) redirect(policyErrorHref(`${policy.label} rate limit reached. Try again after the rolling hour window.`))
 
   const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
     organization_id: workspace.organization.id,
@@ -390,7 +430,7 @@ export async function importMarketUrlAction(formData: FormData) {
     job_type: 'authorized_scrape',
     status: 'running',
     input_url: inputUrl,
-    input_payload: { sourceType, visibility, startedFrom: 'market_import_url_action', searchImport, importMode: searchImport ? 'search_url' : 'listing_url' },
+    input_payload: { sourceType, visibility, startedFrom: 'market_import_url_action', searchImport, importMode: searchImport ? 'search_url' : 'listing_url', policy: providerPolicySnapshot(policy) },
     started_at: new Date().toISOString(),
   }).select('*').single()
 
@@ -405,13 +445,14 @@ export async function importMarketUrlAction(formData: FormData) {
   let topScore = 0
 
   try {
+    const importLimit = Math.min(remaining, policy.maxListingsPerHour)
     const discovered = searchImport
-      ? await discoverListingUrlsFromSearchUrl(inputUrl, String(sourceType), 10)
+      ? await discoverListingUrlsFromSearchUrl(inputUrl, String(sourceType), importLimit)
       : [{ url: inputUrl, sourceType, sourceUrl: inputUrl, order: 1 }]
     found = discovered.length
     if (!discovered.length) throw new Error('No eligible listing URLs were found on the source page.')
 
-    for (const entry of discovered.slice(0, 10)) {
+    for (const entry of discovered.slice(0, importLimit)) {
       const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
       const entrySourceType = typeof entry === 'string' ? String(sourceType) : String(entry.sourceType || sourceType)
       if (!listingUrl) continue
@@ -431,6 +472,14 @@ export async function importMarketUrlAction(formData: FormData) {
         else updated += 1
         const score = Number(result.listing.latest_deal_score || 0)
         topScore = Math.max(topScore, score)
+        await auditImportEvent(supabase, {
+          organizationId: workspace.organization.id,
+          userId: workspace.user.id,
+          listingId: result.listing.id,
+          eventType: 'listing_imported',
+          message: result.created ? 'Listing imported from quick URL import.' : 'Listing updated from quick URL import.',
+          metadata: { sourceType, sourceUrl: listingUrl },
+        })
         previewRows.push({
           status: result.created ? 'created' : 'updated',
           listing_id: result.listing.id,
@@ -656,7 +705,6 @@ export async function rescoreMarketListingAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
-  requireFullOpportunityAccess(workspace, 'Rescore is locked on Free. Upgrade to Pro to run scoring and calculations.')
   const supabase = await createSupabaseServerClient()
   try {
     await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
@@ -676,7 +724,6 @@ export async function saveOpportunityAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
-  requireFullOpportunityAccess(workspace, 'Saving opportunities is limited on Free. Upgrade to Pro for the full deal workflow.')
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase.from('market_watchlist').upsert({
     organization_id: workspace.organization.id,
@@ -706,7 +753,6 @@ export async function convertListingToDealAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
-  requireFullOpportunityAccess(workspace, 'Deal conversion and analysis are locked on Free. Upgrade to Pro to create full deal files.')
   const supabase = await createSupabaseServerClient()
   const { data: listing, error: listingError } = await supabase
     .from('market_listings')
@@ -1177,7 +1223,6 @@ export async function runListingMarketRentAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
-  requireFullOpportunityAccess(workspace, 'Market rent intelligence is locked on Free. Upgrade to Pro to run calculations.')
   const supabase = await createSupabaseServerClient()
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)
@@ -1196,7 +1241,6 @@ export async function runListingHudLookupAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
-  requireFullOpportunityAccess(workspace, 'HUD/FMR lookup is locked on Free. Upgrade to Pro to run premium rent checks.')
   const supabase = await createSupabaseServerClient()
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)
@@ -1216,7 +1260,6 @@ export async function runListingFullIntelligenceAction(formData: FormData) {
   if (!listingId) redirect('/market?error=Missing listing id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
-  requireFullOpportunityAccess(workspace, 'Full intelligence is locked on Free. Upgrade to Pro to run the full analysis engine.')
   const supabase = await createSupabaseServerClient()
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)

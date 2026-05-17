@@ -1,4 +1,4 @@
-export type ProviderSourceType = 'zillow' | 'redfin' | 'realtor' | 'crexi' | 'loopnet' | 'apartments' | 'generic' | 'manual_url' | 'other'
+export type ProviderSourceType = 'zillow' | 'investorlift' | 'redfin' | 'realtor' | 'crexi' | 'loopnet' | 'apartments' | 'generic' | 'manual_url' | 'other'
 
 export type ProviderImportPolicy = {
   sourceType: ProviderSourceType | string
@@ -17,6 +17,26 @@ export type ProviderImportPolicy = {
 }
 
 export const DEFAULT_PROVIDER_POLICIES: Record<string, ProviderImportPolicy> = {
+  investorlift: {
+    sourceType: 'investorlift',
+    providerName: 'InvestorLift',
+    active: true,
+    maxListingsPerHour: 40,
+    maxListingsPerDay: null,
+    storageDays: 15,
+    canStoreImages: true,
+    canStoreDescription: true,
+    canStoreListingData: true,
+    requiresSourceLink: true,
+    requiresAttribution: true,
+    attributionLabel: 'Source: InvestorLift',
+    notes: [
+      'Authorized live import only. Do not use proxy rotation, CAPTCHA bypass, or anti-bot circumvention.',
+      'Maximum 40 listing detail imports per organization per rolling hour under the configured InvestorLift access.',
+      'Imported listing data/images expire after 15 days unless refreshed through an authorized import.',
+      'Keep the original InvestorLift source link visible so users can open the provider listing.',
+    ],
+  },
   zillow: {
     sourceType: 'zillow',
     providerName: 'Zillow',
@@ -118,7 +138,7 @@ export const ZILLOW_AUTHORIZED_IMPORT_POLICY = DEFAULT_PROVIDER_POLICIES.zillow
 
 export function normalizeProviderSourceType(sourceType: string | null | undefined): string {
   const value = String(sourceType || '').toLowerCase().trim()
-  if (['zillow', 'redfin', 'realtor', 'crexi', 'loopnet', 'apartments'].includes(value)) return value
+  if (['zillow', 'investorlift', 'redfin', 'realtor', 'crexi', 'loopnet', 'apartments'].includes(value)) return value
   if (value === 'manual_url' || value === 'manual') return 'manual_url'
   if (value === 'generic') return 'generic'
   return 'other'

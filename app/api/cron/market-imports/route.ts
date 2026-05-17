@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await runScheduledMarketImports({ limitSources: 10, maxUrlsPerSource: 5 })
+    const result = await runScheduledMarketImports({ limitSources: 10 })
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Scheduled market import failed'

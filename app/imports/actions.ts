@@ -172,7 +172,7 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
 
   const sourceUrl = String(batch.normalized_url || batch.input_url || '')
   const urls = batch.import_mode === 'search_url'
-    ? await discoverListingUrlsFromSearchUrl(sourceUrl, sourceType, Math.min(remaining, 10))
+    ? await discoverListingUrlsFromSearchUrl(sourceUrl, sourceType, Math.min(remaining, policy.maxListingsPerHour))
     : [sourceUrl]
 
   const previewEntries = urls as Array<string | { url: string; sourceType?: string | null; sourceUrl?: string | null; order?: number | null }>
@@ -189,7 +189,7 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
   let inserted = 0
   let failed = 0
   const isSearchPreview = batch.import_mode === 'search_url'
-  for (const entry of previewEntries.slice(0, Math.min(remaining, 10))) {
+  for (const entry of previewEntries.slice(0, Math.min(remaining, policy.maxListingsPerHour))) {
     const listingUrl = typeof entry === 'string' ? entry : String(entry.url || '').trim()
     const entrySourceType = typeof entry === 'string' ? sourceType : String(entry.sourceType || sourceType)
     const entrySourceUrl = typeof entry === 'string' ? listingUrl : String(entry.sourceUrl || listingUrl)
@@ -464,7 +464,7 @@ export async function importPreviewItemsAction(formData: FormData) {
     if (!ids.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('Select at least one preview item to import.')}`)
     query = query.in('id', ids)
   }
-  const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, 10))
+  const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, policy.maxListingsPerHour))
   if (error) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(error.message)}`)
   if (!items?.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('No importable preview items found. Generate preview first, or select rows with status new/duplicate/existing.')}`)
 

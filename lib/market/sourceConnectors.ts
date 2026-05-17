@@ -2,11 +2,11 @@ import { normalizePropertyType } from '@/lib/market/scoring'
 import { getMarketSourceAdapter } from '@/lib/market/sourceAdapters'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
 
-export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'other'
+export type MarketSourceType = 'zillow' | 'investorlift' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'other'
 
 
 
-const SEARCH_DISCOVERY_LIMIT = 10
+const SEARCH_DISCOVERY_LIMIT = 40
 const SEARCH_DISCOVERY_TIMEOUT_MS = 15000
 const LISTING_FETCH_TIMEOUT_MS = 15000
 const MAX_SOURCE_HTML_CHARS = 2500000
@@ -117,6 +117,7 @@ function parseRent(value: unknown) {
 export function detectSourceType(inputUrl: string | null | undefined): MarketSourceType {
   const url = String(inputUrl || '').toLowerCase()
   if (url.includes('zillow.')) return 'zillow'
+  if (url.includes('investorlift.')) return 'investorlift'
   if (url.includes('crexi.')) return 'crexi'
   if (url.includes('loopnet.')) return 'loopnet'
   if (url.includes('redfin.')) return 'redfin'
@@ -254,10 +255,12 @@ function buildTitle(params: { title?: string | null; address?: string | null; ci
 export function isSearchResultsUrl(inputUrl: string | null | undefined) {
   const url = String(inputUrl || '').toLowerCase()
   if (!url.startsWith('http')) return false
+  if (url.includes('investorlift.') && /\/(?:property|properties|deal|deals|listing|listings)\/[^/?#]+/i.test(url)) return false
   if (url.includes('searchquerystate=')) return true
   if (url.includes('/homes/') || url.includes('/for-sale/') || url.includes('/realestateandhomes-search/')) return true
   if (/\/[a-z-]+-[a-z]{2}\/?(?:\?|$)/i.test(url)) return true
   if (url.includes('/properties?') || url.includes('/search?') || url.includes('/commercial-real-estate/')) return true
+  if (url.includes('investorlift.') && (url.includes('/properties') || url.includes('/deals') || url.includes('/search') || url.includes('/marketplace'))) return true
   return false
 }
 
@@ -271,6 +274,7 @@ function absoluteUrl(baseUrl: string, href: string) {
 
 function listingUrlPatternsFor(sourceType: MarketSourceType) {
   if (sourceType === 'zillow') return [/href=["']([^"']*\/homedetails\/[^"']+?_zpid\/?[^"']*)["']/gi, /https?:\\?\/\\?\/www\.zillow\.com\\?\/homedetails\\?\/[^"'\\]+?_zpid\/?/gi]
+  if (sourceType === 'investorlift') return [/href=["']([^"']*(?:\/property\/|\/properties\/|\/deal\/|\/deals\/|\/listing\/|\/listings\/)[^"']*)["']/gi, /https?:\\?\/\\?\/(?:[A-Za-z0-9.-]+\.)?investorlift\.com\\?\/(?:property|properties|deal|deals|listing|listings)\\?\/[^"'\\]+/gi]
   if (sourceType === 'redfin') return [/href=["']([^"']*\/[^"']+\/home\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.redfin\.com\\?\/[^"'\\]+?\\?\/home\\?\/[0-9]+/gi]
   if (sourceType === 'realtor') return [/href=["']([^"']*\/realestateandhomes-detail\/[^"']+)["']/gi, /https?:\\?\/\\?\/www\.realtor\.com\\?\/realestateandhomes-detail\\?\/[^"'\\]+/gi]
   if (sourceType === 'crexi') return [/href=["']([^"']*\/properties\/[0-9]+[^"']*)["']/gi, /https?:\\?\/\\?\/www\.crexi\.com\\?\/properties\\?\/[0-9]+[^"'\\]*/gi]
@@ -290,11 +294,12 @@ function cleanDiscoveredUrl(raw: string, baseUrl: string) {
 function isLikelyListingUrl(url: string, sourceType: MarketSourceType) {
   const value = url.toLowerCase()
   if (sourceType === 'zillow') return value.includes('/homedetails/') && value.includes('_zpid')
+  if (sourceType === 'investorlift') return (value.includes('/property/') || value.includes('/properties/') || value.includes('/deal/') || value.includes('/deals/') || value.includes('/listing/') || value.includes('/listings/')) && !value.includes('/properties?')
   if (sourceType === 'redfin') return value.includes('/home/')
   if (sourceType === 'realtor') return value.includes('/realestateandhomes-detail/')
   if (sourceType === 'crexi') return value.includes('/properties/')
   if (sourceType === 'loopnet') return value.includes('/listing/')
-  return value.includes('/homedetails/') || value.includes('/home/') || value.includes('/realestateandhomes-detail/') || value.includes('/properties/') || value.includes('/listing/')
+  return value.includes('/homedetails/') || value.includes('/home/') || value.includes('/realestateandhomes-detail/') || value.includes('/properties/') || value.includes('/property/') || value.includes('/deals/') || value.includes('/deal/') || value.includes('/listing/')
 }
 
 export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceTypeInput?: string | null, limit = SEARCH_DISCOVERY_LIMIT) {
@@ -325,6 +330,40 @@ export async function discoverListingUrlsFromSearchUrl(inputUrl: string, sourceT
   }
 
   return [...urls].slice(0, hardLimit).map((url, index) => ({ url, sourceType, sourceUrl: inputUrl, order: index + 1 }))
+}
+
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function sourceSpecificMoney(html: string, labels: string[]) {
+  const escaped = labels.map(escapeRegex).join('|')
+  const patterns = [
+    new RegExp(`(?:${escaped})[^$0-9]{0,80}\\$?\\s*([0-9][0-9,]{3,10})`, 'i'),
+    new RegExp(`"(?:${escaped})"\\s*:\\s*"?\\$?([0-9][0-9,]{3,10})`, 'i'),
+  ]
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    const value = parseMoney(match?.[1])
+    if (value !== null) return value
+  }
+  return null
+}
+
+function sourceSpecificInteger(html: string, labels: string[]) {
+  const escaped = labels.map(escapeRegex).join('|')
+  const pattern = new RegExp(`(?:${escaped})[^0-9]{0,60}([0-9][0-9,]{0,5})`, 'i')
+  return parseInteger(html.match(pattern)?.[1])
+}
+
+function investorLiftFields(html: string) {
+  return {
+    arv: sourceSpecificMoney(html, ['arv', 'after repair value']),
+    rehabEstimate: sourceSpecificMoney(html, ['rehab', 'repairs', 'repair estimate', 'estimated repairs']),
+    askingPrice: sourceSpecificMoney(html, ['asking price', 'assignment fee', 'purchase price', 'price']),
+    units: sourceSpecificInteger(html, ['units', 'doors']),
+  }
 }
 
 export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInput?: string | null): Promise<NormalizedMarketListing> {
@@ -366,6 +405,8 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
   const marketRent = extractMonthlyRentFromHtml(html)
   const structuredPrice = parseMoney(structuredFacts.price ?? structuredFacts.priceValue ?? structuredFacts.amount)
   const listPrice = extractSalePriceFromHtml(html, structuredPrice)
+  const investorLift = sourceType === 'investorlift' ? investorLiftFields(html) : { arv: null, rehabEstimate: null, askingPrice: null, units: null }
+  const effectiveListPrice = investorLift.askingPrice || listPrice
 
   return {
     source_type: sourceType,
@@ -378,16 +419,16 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
     zip_code: zip,
     county: null,
     property_type: inferPropertyType(`${title || ''} ${description || ''}`),
-    units,
+    units: investorLift.units || units,
     bedrooms: beds,
     bathrooms: baths,
     sqft,
     lot_size: firstMatch(html, [/([0-9,.]+\s*(?:acre|acres|sqft lot|sf lot))/i]),
     year_built: parseInteger(firstMatch(html, [/(?:built in|year built)[^0-9]{0,12}([12][0-9]{3})/i])),
-    list_price: listPrice,
-    asking_price: listPrice,
-    arv: null,
-    rehab_estimate: null,
+    list_price: effectiveListPrice,
+    asking_price: effectiveListPrice,
+    arv: investorLift.arv,
+    rehab_estimate: investorLift.rehabEstimate,
     current_rent: marketRent,
     market_rent: marketRent,
     hud_rent: null,
@@ -413,7 +454,7 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
       extractedFields: {
         hasTitle: Boolean(title),
         hasAddress: Boolean(address),
-        hasListPrice: Boolean(listPrice),
+        hasListPrice: Boolean(effectiveListPrice),
         hasMarketRent: Boolean(marketRent),
         imageCount: images.length,
       },

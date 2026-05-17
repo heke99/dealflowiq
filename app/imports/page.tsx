@@ -45,7 +45,7 @@ function BatchActions({ batch }: { batch: Row }) {
       <form action={importPreviewItemsAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
         <input type="hidden" name="import_first_10" value="true" />
-        <SubmitButton pendingText="Importing first 10..." className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import first 10 preview rows</SubmitButton>
+        <SubmitButton pendingText="Importing available rows..." className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import available preview rows</SubmitButton>
       </form>
       <form action={updateImportBatchStatusAction}>
         <input type="hidden" name="batch_id" value={batch.id} />
@@ -136,7 +136,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             <div>
               <div className="text-sm font-bold uppercase tracking-wide text-emerald-300">Batch 12I.2 · Real provider import workflow</div>
               <h1 className="mt-2 text-4xl font-black tracking-tight">URL Import Analyzer</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. DealFlowIQ analyzes the URL, creates a real provider preview, then imports selected listings under provider policy and rate limits. No demo mode. No email/SMS.</p>
+              <p className="mt-3 max-w-3xl text-slate-300">Paste an authorized provider URL. InvestorLift is supported as a live provider with a 40 listings/hour policy. DealFlowIQ analyzes the URL, creates a real provider preview, then imports selected listings under provider policy and rate limits. No demo mode. No email/SMS.</p>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">Active</div><div className="mt-1 text-2xl font-black">{queued}</div></div>
@@ -152,11 +152,11 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
           <section className="space-y-6">
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Start real import</h2>
-              <p className="mt-2 text-sm text-slate-400">This now runs the preview step immediately. For search URLs, the first eligible provider listing URLs are fetched into preview. For direct listing URLs, the listing appears as one preview row.</p>
+              <p className="mt-2 text-sm text-slate-400">This now runs the preview step immediately. For search URLs, eligible provider listing URLs are fetched into preview under that provider’s hourly cap. For direct listing URLs, the listing appears as one preview row.</p>
               <form action={analyzeImportUrlAction} className="mt-5 space-y-4">
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Provider URL</span>
-                  <textarea name="input_url" rows={5} placeholder="https://www.zillow.com/homedetails/... or search URL" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  <textarea name="input_url" rows={5} placeholder="https://www.investorlift.com/... or https://www.zillow.com/homedetails/..." className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
                 </label>
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Source name</span>
@@ -216,7 +216,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                   <form action={importPreviewItemsAction}>
                     <input type="hidden" name="batch_id" value={selectedBatchId} />
                     <input type="hidden" name="import_first_10" value="true" />
-                    <SubmitButton pendingText="Importing first 10..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Import first 10</SubmitButton>
+                    <SubmitButton pendingText="Importing available rows..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Import available rows</SubmitButton>
                   </form>
                 </div>
                 <form action={importPreviewItemsAction} className="mt-5 space-y-3">

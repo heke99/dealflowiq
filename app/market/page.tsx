@@ -166,7 +166,6 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <Link href={`/market/${listing.id}#contact-owner`} className="rounded-xl bg-sky-300 px-4 py-3 text-center text-sm font-semibold text-slate-950 hover:bg-sky-200">Contact owner</Link>
         <form action={saveOpportunityAction}>
           <input type="hidden" name="listing_id" value={listing.id} />
           <input type="hidden" name="status" value="saved" />
@@ -318,12 +317,12 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-bold">Quick listing URL import</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. For search URLs like Zillow map searches, use the controlled URL Import Analyzer.</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">Paste one authorized listing URL. For search URLs like InvestorLift marketplace pages or Zillow map searches, use the controlled URL Import Analyzer.</p>
                   </div>
                   {!canImportSources ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-100">Premium</span> : null}
                 </div>
                 <form action={importMarketUrlAction} className="mt-5 space-y-4">
-                  <Field label="Listing URL" name="input_url" placeholder="https://www.zillow.com/homedetails/..." />
+                  <Field label="Listing URL" name="input_url" placeholder="https://www.investorlift.com/... or https://www.zillow.com/homedetails/..." />
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block">
                       <span className="text-sm font-medium text-slate-300">Source</span>
@@ -350,11 +349,11 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <h2 className="text-xl font-bold">Create auto source</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-400">Add URLs once. The scheduled worker keeps checking them, updating listings and pushing qualified 70+ deals into Opportunities.</p>
                 <form action={createMarketSourceAction} className="mt-5 grid gap-4">
-                  <Field label="Source name" name="source_name" placeholder="Tucson Zillow Watchlist" />
+                  <Field label="Source name" name="source_name" placeholder="InvestorLift Tampa Watchlist" />
                   <label className="block">
                     <span className="text-sm font-medium text-slate-300">Source type</span>
                     <select name="source_type" defaultValue="zillow" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
-                      {getMarketSourceAdapters().filter((adapter) => ['zillow', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'manual_url', 'other'].includes(adapter.type)).map((adapter) => <option key={adapter.type} value={adapter.type}>{adapter.label}</option>)}
+                      {getMarketSourceAdapters().filter((adapter) => ['zillow', 'investorlift', 'crexi', 'loopnet', 'redfin', 'realtor', 'apartments', 'csv', 'partner_api', 'manual_url', 'other'].includes(adapter.type)).map((adapter) => <option key={adapter.type} value={adapter.type}>{adapter.label}</option>)}
                     </select>
                   </label>
                   <label className="block">

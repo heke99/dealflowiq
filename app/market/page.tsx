@@ -166,6 +166,7 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <Link href={`/market/${listing.id}#contact-owner`} className="rounded-xl bg-sky-300 px-4 py-3 text-center text-sm font-semibold text-slate-950 hover:bg-sky-200">Contact owner</Link>
         <form action={saveOpportunityAction}>
           <input type="hidden" name="listing_id" value={listing.id} />
           <input type="hidden" name="status" value="saved" />

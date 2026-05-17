@@ -7,6 +7,7 @@ import { addListingManualOverrideAction, addMarketListingNoteAction, convertList
 import { canUseFeature } from '@/lib/billing/features'
 import { getNextFreeOpportunityDetailUnlock, hasFullOpportunityAccess, lockedPremiumText, recordOpportunityDetailView } from '@/lib/billing/freemium'
 import { dealStatusLabel } from '@/lib/market/review'
+import { startListingConversationAction, updateListingContactSettingsAction } from '@/app/messages/actions'
 
 type Row = Record<string, any>
 
@@ -60,13 +61,15 @@ function scoreTone(score: number) {
   return 'border-white/10 bg-white/5 text-slate-200'
 }
 
-export default async function MarketListingDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function MarketListingDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params
+  const qs = await searchParams
+  const errorMessage = typeof qs?.error === 'string' ? qs.error : ''
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
 
   const buyersEnabled = canUseFeature(workspace.access.features, 'buyer_matching') || Boolean(workspace.access.isPlatformAdmin)
-  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }, { data: rentEstimates }, { data: hudSnapshots }, { data: manualOverrides }] = await Promise.all([
+  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }, { data: rentEstimates }, { data: hudSnapshots }, { data: manualOverrides }, { data: contactSettings }] = await Promise.all([
     supabase.from('market_listings').select('*').eq('id', id).maybeSingle(),
     supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('deal_score', { ascending: false }).order('calculated_at', { ascending: false }).limit(1),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('listing_id', id).eq('user_id', workspace.user.id).maybeSingle() : Promise.resolve({ data: null }),
@@ -76,6 +79,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
     workspace.organization?.id ? supabase.from('listing_rent_estimates').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5) : Promise.resolve({ data: [] as Row[] }),
     workspace.organization?.id ? supabase.from('listing_hud_rent_snapshots').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(5) : Promise.resolve({ data: [] as Row[] }),
     workspace.organization?.id ? supabase.from('listing_manual_overrides').select('*').eq('listing_id', id).eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as Row[] }),
+    supabase.from('listing_contact_settings').select('*').eq('listing_id', id).maybeSingle(),
   ])
 
   if (!listing) notFound()
@@ -126,6 +130,13 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
   const confidenceBreakdown = row.confidence_breakdown && typeof row.confidence_breakdown === 'object' ? row.confidence_breakdown : {}
   const confidencePositives = Array.isArray(confidenceBreakdown.positives) ? confidenceBreakdown.positives : []
   const confidenceNegatives = Array.isArray(confidenceBreakdown.negatives) ? confidenceBreakdown.negatives : []
+  const contact = (contactSettings || {}) as Row
+  const fullContactAccess = hasFullOpportunityAccess(workspace.access)
+  const canManageContact = Boolean(workspace.access.isPlatformAdmin || row.created_by === workspace.user.id || ['owner', 'admin'].includes(String(workspace.membership?.role || '').toLowerCase()))
+  const emailVisibility = String(contact.email_visibility || 'hidden')
+  const phoneVisibility = String(contact.phone_visibility || 'hidden')
+  const visibleEmail = emailVisibility === 'all_logged_in' || (emailVisibility === 'paid_only' && fullContactAccess) ? (contact.contact_email || row.broker_email || '') : ''
+  const visiblePhone = phoneVisibility === 'all_logged_in' || (phoneVisibility === 'paid_only' && fullContactAccess) ? (contact.contact_phone || row.broker_phone || '') : ''
 
   return (
     <AppShell
@@ -139,6 +150,7 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
       isPlatformAdmin={workspace.access.isPlatformAdmin}
     >
       <div className="space-y-6">
+        {errorMessage ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">{errorMessage}</div> : null}
         <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 sm:p-8">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -410,14 +422,40 @@ export default async function MarketListingDetailPage({ params }: { params: Prom
               </div>
             ) : null}
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">Broker / contact</h2>
-              <dl className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Name</dt><dd className="text-right text-slate-200">{row.broker_name || '—'}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Phone</dt><dd className="text-right text-slate-200">{row.broker_phone || '—'}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Email</dt><dd className="text-right text-slate-200">{row.broker_email || '—'}</dd></div>
+            <div id="contact-owner" className="rounded-3xl border border-sky-300/20 bg-sky-300/[0.06] p-6">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">Contact owner</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">Send an in-app message tied to this listing. Free users can send 1 message every 48 hours.</p>
+                </div>
+                <span className="rounded-full border border-sky-300/30 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100">Deal conversation</span>
+              </div>
+              <form action={startListingConversationAction} className="mt-4 space-y-3">
+                <input type="hidden" name="listing_id" value={row.id} />
+                <textarea name="body" rows={4} required placeholder="Hi, I’m interested in this listing. Is it still available?" className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                <button className="w-full rounded-xl bg-sky-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-sky-200">Send message</button>
+              </form>
+              <dl className="mt-5 space-y-3 text-sm">
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Contact name</dt><dd className="text-right text-slate-200">{row.broker_name || 'Listing owner'}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Phone</dt><dd className="text-right text-slate-200">{visiblePhone || (phoneVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Email</dt><dd className="text-right text-slate-200">{visibleEmail || (emailVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
               </dl>
             </div>
+
+            {canManageContact ? (
+              <form action={updateListingContactSettingsAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+                <h2 className="text-xl font-bold">Owner contact settings</h2>
+                <p className="mt-2 text-sm text-slate-400">Email and phone are hidden by default. Choose who can see direct contact info.</p>
+                <input type="hidden" name="listing_id" value={row.id} />
+                <label className="mt-4 flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-300"><input type="checkbox" name="allow_in_app_messages" defaultChecked={contact.allow_in_app_messages !== false} /> Allow in-app messages</label>
+                <input name="contact_email" defaultValue={contact.contact_email || row.broker_email || ''} placeholder="Contact email" className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                <select name="email_visibility" defaultValue={contact.email_visibility || 'hidden'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="hidden">Hide email</option><option value="paid_only">Show email to paid/trial users only</option><option value="all_logged_in">Show email to all logged-in users</option></select>
+                <input name="contact_phone" defaultValue={contact.contact_phone || row.broker_phone || ''} placeholder="Contact phone" className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                <select name="phone_visibility" defaultValue={contact.phone_visibility || 'hidden'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="hidden">Hide phone</option><option value="paid_only">Show phone to paid/trial users only</option><option value="all_logged_in">Show phone to all logged-in users</option></select>
+                <select name="preferred_contact_method" defaultValue={contact.preferred_contact_method || 'in_app'} className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="in_app">Prefer in-app chat</option><option value="email">Prefer email</option><option value="phone">Prefer phone</option></select>
+                <button className="mt-3 w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/10">Save contact settings</button>
+              </form>
+            ) : null}
           </aside>
         </section>
       </div>

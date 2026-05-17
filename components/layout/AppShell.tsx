@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { signOutAction } from '@/lib/auth/actions'
+import { NotificationBell } from '@/components/layout/NotificationBell'
+import { MessageBell } from '@/components/layout/MessageBell'
 import type { FeatureMap, FeatureKey } from '@/lib/billing/features'
 import { canUseFeature, featureLabels } from '@/lib/billing/features'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
@@ -54,6 +56,8 @@ export function AppShell({
     { href: '/community', label: 'Community', visible: true, core: true },
     { href: '/market', label: 'Market', visible: true, feature: 'market_opportunities', core: true },
     { href: '/opportunities', label: 'Opportunities', visible: true, feature: 'market_opportunities', core: true },
+    { href: '/messages', label: 'Messages', visible: true, core: true },
+    { href: '/notifications', label: 'Notifications', visible: true, core: true },
     { href: '/buy-boxes', label: 'Buy Boxes', visible: true, feature: 'scheduled_market_imports' },
     { href: '/saved-deals', label: 'Saved Deals', visible: true, feature: 'market_opportunities', core: true },
     { href: '/deals', label: 'My Deals', visible: true, feature: 'deals', core: true },
@@ -119,12 +123,32 @@ export function AppShell({
       </aside>
 
       <div className="lg:pl-72">
+        <header className="sticky top-0 z-20 hidden border-b border-white/10 bg-slate-950/85 px-6 py-4 backdrop-blur lg:block">
+          <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workspace</div>
+              <div className="text-sm font-bold text-slate-200">{organizationName || 'DealFlowIQ'} · {planName || 'Free'}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <MessageBell />
+              <NotificationBell />
+              <form action={signOutAction}>
+                <button className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">Sign out</button>
+              </form>
+            </div>
+          </div>
+        </header>
+
         <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 px-4 py-4 backdrop-blur lg:hidden">
           <div className="flex items-center justify-between gap-4">
             <Link href="/dashboard" className="font-bold">DealFlowIQ</Link>
-            <form action={signOutAction}>
-              <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
-            </form>
+            <div className="flex items-center gap-2">
+              <MessageBell />
+              <NotificationBell />
+              <form action={signOutAction}>
+                <button className="rounded-lg border border-white/10 px-3 py-2 text-sm">Sign out</button>
+              </form>
+            </div>
           </div>
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
             {nav.map((item) => {

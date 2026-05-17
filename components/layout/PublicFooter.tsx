@@ -6,7 +6,7 @@ export function PublicFooter() {
       <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="font-black text-white">DealFlowIQ</div>
-          <div className="mt-1">Operated by Diversa LLC.</div>
+          <div className="mt-1">Operated by Diversa Solutions LLC.</div>
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <a href="mailto:support@dealfloowiq.com" className="font-semibold text-slate-200 hover:text-white">support@dealfloowiq.com</a>

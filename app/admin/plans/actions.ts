@@ -6,8 +6,10 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { requirePlatformAdmin } from '@/lib/auth/admin'
 import { FEATURE_KEYS, type FeatureMap } from '@/lib/billing/features'
 import { ACCOUNT_TYPES } from '@/lib/product/accountTypes'
+import { syncPlanWithStripe } from '@/lib/billing/stripe'
 
-const SUBSCRIPTION_STATUSES = new Set(['active', 'past_due', 'canceled', 'expired', 'comped', 'manually_granted'])
+const SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'past_due', 'canceled', 'expired', 'comped', 'manually_granted', 'incomplete', 'unpaid'])
+const ACTIVE_OR_BILLING_STATUSES = ['trialing', 'active', 'past_due', 'comped', 'manually_granted', 'incomplete', 'unpaid']
 
 function toCents(value: FormDataEntryValue | null) {
   const numberValue = Number(String(value || '0').replace(',', '.'))
@@ -45,6 +47,10 @@ function parseLimits(formData: FormData) {
     max_ai_reviews: toInt(formData.get('max_ai_reviews'), 0),
     max_deal_landing_pages: toInt(formData.get('max_deal_landing_pages'), 5),
     max_community_members: toInt(formData.get('max_community_members'), 0),
+    max_imports_per_month: toInt(formData.get('max_imports_per_month'), 100),
+    max_imports_per_7_days: toInt(formData.get('max_imports_per_7_days'), 1),
+    max_visible_opportunities: toInt(formData.get('max_visible_opportunities'), 2),
+    opportunity_detail_cooldown_hours: toInt(formData.get('opportunity_detail_cooldown_hours'), 48),
   }
 }
 
@@ -67,8 +73,22 @@ async function getActorId() {
 function refreshAdminPaths() {
   revalidatePath('/admin')
   revalidatePath('/admin/plans')
+  revalidatePath('/plans')
   revalidatePath('/settings/billing')
   revalidatePath('/dashboard')
+}
+
+async function loadPlanById(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, id: string) {
+  const { data, error } = await supabase.from('billing_plans').select('*').eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  return data as Record<string, any> | null
+}
+
+async function persistStripeSync(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, plan: Record<string, any>, force?: { forceMonthlyPrice?: boolean; forceAnnualPrice?: boolean }) {
+  const sync = await syncPlanWithStripe(plan as any, force)
+  const { error } = await supabase.from('billing_plans').update(sync).eq('id', plan.id)
+  if (error) throw new Error(error.message)
+  return sync
 }
 
 export async function savePlanAction(formData: FormData) {
@@ -84,6 +104,7 @@ export async function savePlanAction(formData: FormData) {
   const monthlyPriceCents = toCents(formData.get('monthly_price'))
   const annualPriceCents = toCents(formData.get('annual_price'))
   const displayOrder = toInt(formData.get('display_order'), 100)
+  const trialDays = toInt(formData.get('trial_days'), code === 'premium' ? 7 : 0)
   const isPublic = formData.get('is_public') === 'on'
   const isActive = formData.get('is_active') === 'on'
   const accountTypes = parseAccountTypes(formData)
@@ -94,6 +115,10 @@ export async function savePlanAction(formData: FormData) {
     redirect('/admin/plans?error=Plan name and code are required')
   }
 
+  const previous = id ? await loadPlanById(supabase, id) : null
+  const forceMonthlyPrice = Boolean(previous && Number(previous.monthly_price_cents || 0) !== monthlyPriceCents)
+  const forceAnnualPrice = Boolean(previous && Number(previous.annual_price_cents || 0) !== annualPriceCents)
+
   const payload = {
     name,
     code,
@@ -101,7 +126,7 @@ export async function savePlanAction(formData: FormData) {
     currency,
     monthly_price_cents: monthlyPriceCents,
     annual_price_cents: annualPriceCents,
-    trial_days: 0,
+    trial_days: trialDays,
     display_order: displayOrder,
     is_public: isPublic,
     is_active: isActive,
@@ -109,19 +134,43 @@ export async function savePlanAction(formData: FormData) {
     features,
     limits,
     updated_by: actorId,
+    ...(forceMonthlyPrice ? { stripe_monthly_price_id: null } : {}),
+    ...(forceAnnualPrice ? { stripe_annual_price_id: null } : {}),
     ...(id ? {} : { created_by: actorId }),
   }
 
   const response = id
-    ? await supabase.from('billing_plans').update(payload).eq('id', id)
-    : await supabase.from('billing_plans').insert(payload)
+    ? await supabase.from('billing_plans').update(payload).eq('id', id).select('*').single()
+    : await supabase.from('billing_plans').insert(payload).select('*').single()
 
-  if (response.error) {
-    redirect(`/admin/plans?error=${encodeURIComponent(response.error.message)}`)
+  if (response.error || !response.data) {
+    redirect(`/admin/plans?error=${encodeURIComponent(response.error?.message || 'Could not save plan')}`)
+  }
+
+  try {
+    await persistStripeSync(supabase, response.data as any, { forceMonthlyPrice, forceAnnualPrice })
+  } catch (error) {
+    redirect(`/admin/plans?error=${encodeURIComponent(error instanceof Error ? error.message : 'Plan saved but Stripe sync failed')}`)
   }
 
   refreshAdminPaths()
   redirect('/admin/plans?saved=1')
+}
+
+export async function syncPlanStripeAction(formData: FormData) {
+  await requirePlatformAdmin()
+  const planId = String(formData.get('plan_id') || '').trim()
+  if (!planId) redirect('/admin/plans?error=Plan ID is required')
+  const supabase = await createSupabaseServerClient()
+  const plan = await loadPlanById(supabase, planId)
+  if (!plan) redirect('/admin/plans?error=Plan not found')
+  try {
+    await persistStripeSync(supabase, plan)
+  } catch (error) {
+    redirect(`/admin/plans?error=${encodeURIComponent(error instanceof Error ? error.message : 'Stripe sync failed')}`)
+  }
+  refreshAdminPaths()
+  redirect('/admin/plans?saved=stripe')
 }
 
 export async function deletePlanAction(formData: FormData) {
@@ -133,15 +182,28 @@ export async function deletePlanAction(formData: FormData) {
   if (replacementPlanId === planId) redirect('/admin/plans?error=Replacement plan must be different')
 
   const supabase = await createSupabaseServerClient()
-  const { count, error: countError } = await supabase
-    .from('organization_subscriptions')
-    .select('id', { count: 'exact', head: true })
-    .eq('plan_id', planId)
+  const [{ count, error: countError }, { count: activeCount, error: activeCountError }, { count: stripeActiveCount, error: stripeActiveCountError }] = await Promise.all([
+    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).eq('plan_id', planId),
+    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).eq('plan_id', planId).in('status', ACTIVE_OR_BILLING_STATUSES),
+    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).eq('plan_id', planId).in('status', ACTIVE_OR_BILLING_STATUSES).not('stripe_subscription_id', 'is', null),
+  ])
 
-  if (countError) redirect(`/admin/plans?error=${encodeURIComponent(countError.message)}`)
+  if (countError || activeCountError || stripeActiveCountError) redirect(`/admin/plans?error=${encodeURIComponent(countError?.message || activeCountError?.message || stripeActiveCountError?.message || 'Could not check plan usage')}`)
 
-  if ((count || 0) > 0 && !replacementPlanId) {
-    redirect('/admin/plans?error=This plan is assigned to organizations. Choose a replacement plan before deleting it.')
+  if ((activeCount || 0) > 0 && (!replacementPlanId || (stripeActiveCount || 0) > 0)) {
+    const { error } = await supabase
+      .from('billing_plans')
+      .update({
+        is_active: false,
+        is_public: false,
+        archived_at: new Date().toISOString(),
+        stripe_sync_status: 'archived',
+        stripe_last_error: (stripeActiveCount || 0) > 0 ? 'Archived instead of deleted because active Stripe subscriptions are assigned to this plan. Migrate Stripe subscription items before deleting.' : 'Archived instead of deleted because active subscriptions are assigned to this plan.',
+      })
+      .eq('id', planId)
+    if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+    refreshAdminPaths()
+    redirect('/admin/plans?saved=archived')
   }
 
   if ((count || 0) > 0 && replacementPlanId) {
@@ -154,6 +216,7 @@ export async function deletePlanAction(formData: FormData) {
         trial_end_at: null,
         trial_source: 'admin_override',
         updated_at: new Date().toISOString(),
+        notes: 'Moved to replacement plan by platform admin before old plan deletion.',
       })
       .eq('plan_id', planId)
 
@@ -164,7 +227,7 @@ export async function deletePlanAction(formData: FormData) {
   if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
 
   refreshAdminPaths()
-  redirect('/admin/plans?saved=1')
+  redirect('/admin/plans?saved=deleted')
 }
 
 export async function syncOrganizationSubscriptionAction(formData: FormData) {
@@ -182,14 +245,17 @@ export async function syncOrganizationSubscriptionAction(formData: FormData) {
   if (!planId && status !== 'canceled' && status !== 'expired') redirect('/admin/plans?error=Choose a plan for active access')
 
   const now = new Date().toISOString()
+  const isClosed = status === 'canceled' || status === 'expired'
+  const isTrial = status === 'trialing'
+  const endAt = isClosed ? null : getPeriodEnd(periodDays || (isTrial ? 7 : 30))
   const { error } = await supabase.from('organization_subscriptions').upsert({
     organization_id: organizationId,
     plan_id: planId,
     status,
-    trial_start_at: null,
-    trial_end_at: null,
-    current_period_start: status === 'canceled' || status === 'expired' ? null : now,
-    current_period_end: status === 'canceled' || status === 'expired' ? null : getPeriodEnd(periodDays),
+    trial_start_at: isTrial ? now : null,
+    trial_end_at: isTrial ? endAt : null,
+    current_period_start: isClosed ? null : now,
+    current_period_end: endAt,
     trial_source: 'admin_override',
     notes: notes || `Subscription synced by platform admin as ${status}.`,
     manually_granted_by: actorId,
@@ -216,7 +282,7 @@ export async function cancelOrganizationSubscriptionAction(formData: FormData) {
       trial_start_at: null,
       trial_end_at: null,
       current_period_end: new Date().toISOString(),
-      notes: 'Canceled by platform admin.',
+      notes: 'Canceled by platform admin. If this record has a live Stripe subscription, cancel it in Stripe or the Customer Portal too.',
     })
     .eq('id', id)
 

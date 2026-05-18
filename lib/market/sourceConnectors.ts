@@ -93,10 +93,13 @@ function cleanText(value: unknown) {
 
 function parseNumber(value: unknown) {
   if (value === null || value === undefined) return null
-  const raw = String(value).replace(/[$,\s]/g, '').trim()
+  const original = String(value).trim()
+  if (!original) return null
+  const multiplier = /\bm(?:illion)?\b/i.test(original) ? 1000000 : /\bk\b/i.test(original) ? 1000 : 1
+  const raw = original.replace(/[$,\s]/g, '').replace(/million|m\b/gi, '').replace(/k\b/gi, '').trim()
   if (!raw) return null
   const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : null
+  return Number.isFinite(parsed) ? parsed * multiplier : null
 }
 
 function parseInteger(value: unknown) {
@@ -243,8 +246,37 @@ function extractSalePriceFromHtml(html: string, structuredPrice: number | null) 
 
 function inferPropertyType(text: string) {
   return normalizePropertyType(firstMatch(text, [
-    /\b(single family|duplex|triplex|fourplex|quadplex|multifamily|mixed use|retail|office|industrial|land|condo|townhouse)\b/i,
+    /\b(single\s*family|sfr|duplex|2\s*unit|triplex|3\s*unit|fourplex|4\s*plex|quadplex|4\s*unit|multifamily|multi\s*family|apartment\s*building|mixed\s*use|retail|office|industrial|warehouse|land|lot|condo|townhome|townhouse|mobile\s*home|manufactured)\b/i,
   ]))
+}
+
+function inferUnits(text: string, inferredType: string | null) {
+  const explicit = parseInteger(firstMatch(text, [
+    /\b([0-9]{1,3})\s*(?:units?|doors?|apartments?)\b/i,
+    /\b(?:units?|doors?)\s*[:#-]?\s*([0-9]{1,3})\b/i,
+  ]))
+  if (explicit) return explicit
+  const type = String(inferredType || '').toLowerCase()
+  if (type.includes('duplex')) return 2
+  if (type.includes('triplex')) return 3
+  if (type.includes('fourplex')) return 4
+  return null
+}
+
+function extractAnnualCost(html: string, labels: string[]) {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pattern = new RegExp(`${escaped}[^$0-9]{0,40}\\$?([0-9][0-9,.]{1,10})`, 'i')
+    const value = parseMoney(html.match(pattern)?.[1])
+    if (value !== null) return value
+  }
+  return null
+}
+
+function extractMonthlyCost(html: string, labels: string[]) {
+  const value = extractAnnualCost(html, labels)
+  if (value === null) return null
+  return value > 2000 ? Math.round(value / 12) : value
 }
 
 function buildTitle(params: { title?: string | null; address?: string | null; city?: string | null; state?: string | null; sourceType: string }) {
@@ -429,10 +461,15 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
   const beds = parseNumber(firstMatch(html, [/([0-9]+(?:\.[0-9]+)?)\s*(?:bd|beds?|bedrooms?)\b/i]))
   const baths = parseNumber(firstMatch(html, [/([0-9]+(?:\.[0-9]+)?)\s*(?:ba|baths?|bathrooms?)\b/i]))
   const sqft = parseInteger(firstMatch(html, [/([0-9][0-9,]{2,6})\s*(?:sq\.?\s*ft|sqft|square feet)\b/i]))
-  const units = parseInteger(firstMatch(html, [/([0-9]+)\s*(?:units?|doors?)\b/i])) || (inferPropertyType(`${title || ''} ${description || ''}`)?.includes('Duplex') ? 2 : null)
+  const combinedText = `${title || ''} ${description || ''} ${html.slice(0, 50000)}`
+  const propertyType = inferPropertyType(combinedText)
+  const units = inferUnits(combinedText, propertyType)
   const marketRent = extractMonthlyRentFromHtml(html)
   const structuredPrice = parseMoney(structuredFacts.price ?? structuredFacts.priceValue ?? structuredFacts.amount)
   const listPrice = extractSalePriceFromHtml(html, structuredPrice)
+  const taxesAnnual = extractAnnualCost(html, ['property tax', 'taxes', 'annual tax'])
+  const hoaMonthly = extractMonthlyCost(html, ['hoa', 'association fee', 'condo fee'])
+  const insuranceAnnual = extractAnnualCost(html, ['insurance'])
 
   return {
     source_type: sourceType,
@@ -444,7 +481,7 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
     state,
     zip_code: zip,
     county: null,
-    property_type: inferPropertyType(`${title || ''} ${description || ''}`),
+    property_type: propertyType,
     units,
     bedrooms: beds,
     bathrooms: baths,
@@ -459,9 +496,9 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
     market_rent: marketRent,
     hud_rent: null,
     estimated_rent: marketRent,
-    taxes_annual: null,
-    insurance_annual: null,
-    hoa_monthly: null,
+    taxes_annual: taxesAnnual,
+    insurance_annual: insuranceAnnual,
+    hoa_monthly: hoaMonthly,
     utilities_monthly: null,
     description,
     broker_name: firstMatch(html, [/(?:broker|agent|listed by)[^A-Za-z0-9]{0,20}([A-Z][A-Za-z .'-]{3,80})/i]),
@@ -482,6 +519,10 @@ export async function fetchAndNormalizeMarketUrl(inputUrl: string, sourceTypeInp
         hasAddress: Boolean(address),
         hasListPrice: Boolean(listPrice),
         hasMarketRent: Boolean(marketRent),
+        hasPropertyType: Boolean(propertyType),
+        hasUnits: Boolean(units),
+        hasTaxes: Boolean(taxesAnnual),
+        hasHoa: Boolean(hoaMonthly),
         imageCount: images.length,
       },
     },
@@ -534,24 +575,24 @@ export function parseMarketCsvText(rawText: string, sourceType: MarketSourceType
       state: cleanText(row.state),
       zip_code: cleanText(row.zip || row.zip_code || row.postal_code),
       county: cleanText(row.county),
-      property_type: normalizePropertyType(row.property_type || row.type),
-      units: parseInteger(row.units || row.doors) || 1,
+      property_type: normalizePropertyType(row.property_type || row.property_subtype || row.asset_type || row.asset_class || row.type),
+      units: parseInteger(row.units || row.doors || row.unit_count || row.number_of_units) || 1,
       bedrooms: parseNumber(row.bedrooms || row.beds),
       bathrooms: parseNumber(row.bathrooms || row.baths),
-      sqft: parseInteger(row.sqft || row.square_feet),
+      sqft: parseInteger(row.sqft || row.square_feet || row.building_sqft || row.living_area),
       lot_size: cleanText(row.lot_size),
       year_built: parseInteger(row.year_built),
-      list_price: parseMoney(row.list_price || row.price || row.asking_price),
-      asking_price: parseMoney(row.asking_price || row.list_price || row.price),
+      list_price: parseMoney(row.list_price || row.price || row.asking_price || row.ask_price),
+      asking_price: parseMoney(row.asking_price || row.ask_price || row.list_price || row.price),
       arv: parseMoney(row.arv),
       rehab_estimate: parseMoney(row.rehab_estimate || row.rehab),
-      current_rent: parseRent(row.current_rent),
-      market_rent: parseRent(row.market_rent || row.estimated_rent),
+      current_rent: parseRent(row.current_rent || row.actual_rent || row.in_place_rent),
+      market_rent: parseRent(row.market_rent || row.estimated_rent || row.pro_forma_rent),
       hud_rent: parseRent(row.hud_rent || row.section8_rent || row.section_8_rent),
       estimated_rent: parseRent(row.estimated_rent || row.market_rent),
-      taxes_annual: parseMoney(row.taxes_annual || row.taxes),
+      taxes_annual: parseMoney(row.taxes_annual || row.annual_taxes || row.property_taxes || row.taxes),
       insurance_annual: parseMoney(row.insurance_annual || row.insurance),
-      hoa_monthly: parseMoney(row.hoa_monthly || row.hoa),
+      hoa_monthly: parseMoney(row.hoa_monthly || row.monthly_hoa || row.hoa_fee || row.hoa),
       utilities_monthly: parseMoney(row.utilities_monthly || row.utilities),
       description: cleanText(row.description || row.notes),
       broker_name: cleanText(row.broker_name || row.agent_name),

@@ -67,6 +67,32 @@ async function countRecentProviderImports(supabase: SupabaseServer, organization
   return count || 0
 }
 
+async function ensurePlanImportQuota(params: { supabase: SupabaseServer; workspace: Workspace; requested?: number }) {
+  if (params.workspace.access.isPlatformAdmin) return
+  const organizationId = params.workspace.organization?.id
+  if (!organizationId) return
+
+  const requested = Math.max(1, Number(params.requested || 1))
+  const isPaidAccess = ['subscription', 'trial', 'user_override'].includes(params.workspace.access.accessSource)
+  const limitKey = isPaidAccess ? 'max_imports_per_month' : 'max_imports_per_7_days'
+  const limit = params.workspace.access.limits?.[limitKey]
+  if (limit === null || limit === undefined) return
+
+  const since = new Date(Date.now() - (isPaidAccess ? 30 : 7) * 24 * 60 * 60 * 1000).toISOString()
+  const { count } = await params.supabase
+    .from('market_import_audit_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId)
+    .eq('event_type', 'listing_imported')
+    .gte('created_at', since)
+
+  const used = count || 0
+  if (used + requested > Number(limit)) {
+    const period = isPaidAccess ? 'month' : '7 days'
+    throw new Error(`Import limit reached: ${used}/${limit} used this ${period}. Upgrade or wait for the window to reset.`)
+  }
+}
+
 async function auditImportEvent(supabase: SupabaseServer, params: { organizationId: string; userId?: string | null; batchId?: string | null; listingId?: string | null; eventType: string; message: string; metadata?: Record<string, any> }) {
   await supabase.from('market_import_audit_events').insert({
     organization_id: params.organizationId,
@@ -320,6 +346,12 @@ export async function analyzeImportUrlAction(formData: FormData) {
   const remaining = Math.max(0, policy.maxListingsPerHour - recent)
   if (remaining <= 0) redirect(`/imports?error=${encodeURIComponent(`${policy.label} rate limit reached. Try again after the rolling hour window.`)}`)
 
+  try {
+    await ensurePlanImportQuota({ supabase, workspace, requested: 1 })
+  } catch (error) {
+    redirect(`/imports?error=${encodeURIComponent(error instanceof Error ? error.message : 'Import limit reached')}`)
+  }
+
   const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,
@@ -537,6 +569,12 @@ export async function importPreviewItemsAction(formData: FormData) {
   const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, 10))
   if (error) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(error.message)}`)
   if (!items?.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('No importable preview items found. Generate preview first, or select rows with status new/duplicate/existing.')}`)
+
+  try {
+    await ensurePlanImportQuota({ supabase, workspace, requested: items.length })
+  } catch (quotaError) {
+    redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(quotaError instanceof Error ? quotaError.message : 'Import limit reached')}`)
+  }
 
   let created = 0
   let updated = 0

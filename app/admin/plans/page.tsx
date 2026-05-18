@@ -2,7 +2,7 @@ import { ArrowRight, BadgeDollarSign, Building2, CheckCircle2, RotateCw, Trash2 
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { savePlanAction, deletePlanAction, syncOrganizationSubscriptionAction, cancelOrganizationSubscriptionAction, deleteOrganizationSubscriptionAction } from './actions'
+import { savePlanAction, deletePlanAction, syncPlanStripeAction, syncOrganizationSubscriptionAction, cancelOrganizationSubscriptionAction, deleteOrganizationSubscriptionAction } from './actions'
 import { ACCOUNT_TYPE_CONFIGS } from '@/lib/product/accountTypes'
 import { FEATURE_KEYS, featureLabels } from '@/lib/billing/features'
 
@@ -22,11 +22,16 @@ const statusOptions = [
 ]
 
 function dollars(cents: number | null | undefined) {
-  return ((cents || 0) / 100).toFixed(0)
+  return ((cents || 0) / 100).toFixed(2).replace(/\.00$/, '')
 }
 
 function money(cents: number | null | undefined) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(cents || 0) / 100)
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: Number(cents || 0) % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(Number(cents || 0) / 100)
+}
+
+function shortId(value?: string | null) {
+  if (!value) return 'not synced'
+  return `${value.slice(0, 10)}…${value.slice(-4)}`
 }
 
 function numberText(value: number | null | undefined) {
@@ -59,6 +64,10 @@ function LimitFields({ limits }: { limits?: Record<string, unknown> }) {
       <label className="block text-sm"><span className="text-slate-300">AI reviews</span><input name="max_ai_reviews" type="number" min="0" defaultValue={Number(values.max_ai_reviews ?? 0)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
       <label className="block text-sm"><span className="text-slate-300">Deal pages</span><input name="max_deal_landing_pages" type="number" min="0" defaultValue={Number(values.max_deal_landing_pages ?? 5)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
       <label className="block text-sm"><span className="text-slate-300">Community members</span><input name="max_community_members" type="number" min="0" defaultValue={Number(values.max_community_members ?? 0)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+      <label className="block text-sm"><span className="text-slate-300">Imports / month</span><input name="max_imports_per_month" type="number" min="0" defaultValue={Number(values.max_imports_per_month ?? 100)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+      <label className="block text-sm"><span className="text-slate-300">Free imports / 7 days</span><input name="max_imports_per_7_days" type="number" min="0" defaultValue={Number(values.max_imports_per_7_days ?? 1)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+      <label className="block text-sm"><span className="text-slate-300">Visible opportunities</span><input name="max_visible_opportunities" type="number" min="0" defaultValue={Number(values.max_visible_opportunities ?? 2)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+      <label className="block text-sm"><span className="text-slate-300">Detail cooldown hours</span><input name="opportunity_detail_cooldown_hours" type="number" min="0" defaultValue={Number(values.opportunity_detail_cooldown_hours ?? 48)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
     </div>
   )
 }
@@ -113,8 +122,8 @@ function PlanForm({ plan }: { plan?: Row }) {
       </label>
 
       <div className="grid gap-4 sm:grid-cols-4">
-        <label className="block text-sm"><span className="text-slate-300">Monthly $</span><input name="monthly_price" type="number" min="0" defaultValue={plan ? dollars(plan.monthly_price_cents) : '49'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
-        <label className="block text-sm"><span className="text-slate-300">Annual $</span><input name="annual_price" type="number" min="0" defaultValue={plan ? dollars(plan.annual_price_cents) : '470'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+        <label className="block text-sm"><span className="text-slate-300">Monthly $</span><input name="monthly_price" type="number" min="0" step="0.01" defaultValue={plan ? dollars(plan.monthly_price_cents) : '12.99'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+        <label className="block text-sm"><span className="text-slate-300">Annual $</span><input name="annual_price" type="number" min="0" step="0.01" defaultValue={plan ? dollars(plan.annual_price_cents) : '150'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
         <label className="block text-sm"><span className="text-slate-300">Currency</span><input name="currency" defaultValue={plan?.currency || 'usd'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
         <label className="block text-sm"><span className="text-slate-300">Order</span><input name="display_order" type="number" min="0" defaultValue={Number(plan?.display_order ?? 100)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
       </div>
@@ -176,7 +185,7 @@ export default async function AdminPlansPage({ searchParams }: AdminPlansPagePro
   const [plansResult, organizationsResult, subscriptionsResult, planUseResult] = await Promise.all([
     supabase.from('billing_plans').select('*').order('display_order', { ascending: true }),
     supabase.from('organizations').select('id, name, slug').order('name', { ascending: true }).limit(200),
-    supabase.from('organization_subscriptions').select('id, organization_id, plan_id, status, current_period_start, current_period_end, notes, updated_at, organizations(id, name, slug), billing_plans(id, name, code, monthly_price_cents)').order('updated_at', { ascending: false }).limit(40),
+    supabase.from('organization_subscriptions').select('id, organization_id, plan_id, status, current_period_start, current_period_end, notes, updated_at, stripe_customer_id, stripe_subscription_id, stripe_price_id, stripe_interval, stripe_cancel_at_period_end, organizations(id, name, slug), billing_plans(id, name, code, monthly_price_cents)').order('updated_at', { ascending: false }).limit(40),
     supabase.from('organization_subscriptions').select('id, plan_id'),
   ])
 
@@ -260,6 +269,19 @@ export default async function AdminPlansPage({ searchParams }: AdminPlansPagePro
 
                       <div className="mt-5 border-t border-white/10 pt-5">
                         <PlanForm plan={plan} />
+                        <div className="mt-4 rounded-2xl border border-blue-400/20 bg-blue-400/10 p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="text-sm">
+                              <div className="font-black text-blue-100">Stripe sync</div>
+                              <div className="mt-1 text-xs text-blue-100/75">Status: {plan.stripe_sync_status || 'pending'} · Product: {shortId(plan.stripe_product_id)} · Monthly: {shortId(plan.stripe_monthly_price_id)} · Yearly: {shortId(plan.stripe_annual_price_id)}</div>
+                              {plan.stripe_last_error ? <div className="mt-2 rounded-xl border border-amber-400/20 bg-amber-400/10 p-2 text-xs text-amber-100">{plan.stripe_last_error}</div> : null}
+                            </div>
+                            <form action={syncPlanStripeAction}>
+                              <input type="hidden" name="plan_id" value={plan.id} />
+                              <button className="rounded-xl border border-blue-300/30 px-4 py-3 text-sm font-black text-blue-100 hover:bg-blue-400/10">Sync Stripe now</button>
+                            </form>
+                          </div>
+                        </div>
                         <form action={deletePlanAction} className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
                           <input type="hidden" name="plan_id" value={plan.id} />
                           <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
@@ -347,6 +369,7 @@ export default async function AdminPlansPage({ searchParams }: AdminPlansPagePro
                         <div className="font-black">{org?.name || sub.organization_id}</div>
                         <div className="mt-1 text-xs text-slate-500">{plan?.name || 'No plan'} · {statusLabel(sub.status)} · period ends {dateText(sub.current_period_end)}</div>
                         <div className="mt-1 text-xs text-slate-600">Org ID: {sub.organization_id}</div>
+                        <div className="mt-1 text-xs text-slate-600">Stripe: {shortId(sub.stripe_subscription_id)} · {sub.stripe_interval || 'manual'} {sub.stripe_cancel_at_period_end ? '· cancels at period end' : ''}</div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <form action={syncOrganizationSubscriptionAction}>

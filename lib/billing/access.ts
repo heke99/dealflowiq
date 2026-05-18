@@ -28,6 +28,11 @@ export type OrganizationSubscription = {
   current_period_start: string | null
   current_period_end: string | null
   trial_source: string | null
+  stripe_customer_id: string | null
+  stripe_subscription_id: string | null
+  stripe_price_id: string | null
+  stripe_interval: string | null
+  stripe_cancel_at_period_end: boolean | null
   notes: string | null
   features_override: FeatureMap | null
   limits_override: Partial<LimitMap> | null
@@ -111,6 +116,11 @@ function normalizeSubscription(row: any, plan: BillingPlan | null): Organization
     current_period_start: row.current_period_start,
     current_period_end: row.current_period_end,
     trial_source: row.trial_source,
+    stripe_customer_id: row.stripe_customer_id || null,
+    stripe_subscription_id: row.stripe_subscription_id || null,
+    stripe_price_id: row.stripe_price_id || null,
+    stripe_interval: row.stripe_interval || null,
+    stripe_cancel_at_period_end: row.stripe_cancel_at_period_end ?? null,
     notes: row.notes,
     features_override: parseObject<FeatureMap>(row.features_override, {}),
     limits_override: parseObject<Partial<LimitMap>>(row.limits_override, {}),
@@ -152,7 +162,7 @@ export async function getWorkspaceAccess(params: {
   const [{ data }, overrideResult] = await Promise.all([
     supabase
       .from('organization_subscriptions')
-      .select('id, organization_id, plan_id, status, trial_start_at, trial_end_at, current_period_start, current_period_end, trial_source, notes, features_override, limits_override, billing_plans(id, code, name, description, monthly_price_cents, annual_price_cents, currency, trial_days, is_public, is_active, features, limits)')
+      .select('id, organization_id, plan_id, status, trial_start_at, trial_end_at, current_period_start, current_period_end, trial_source, stripe_customer_id, stripe_subscription_id, stripe_price_id, stripe_interval, stripe_cancel_at_period_end, notes, features_override, limits_override, billing_plans(id, code, name, description, monthly_price_cents, annual_price_cents, currency, trial_days, is_public, is_active, features, limits)')
       .eq('organization_id', params.organizationId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -192,11 +202,12 @@ export async function getWorkspaceAccess(params: {
   const trialEndsAt = subscription?.trial_end_at || null
   const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
   const isOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
-  const isSubscriptionActive = ['active', 'paid', 'comped'].includes(status)
+  const isFreePlan = Boolean(plan && (plan.code === 'free' || (Number(plan.monthly_price_cents || 0) <= 0 && Number(plan.annual_price_cents || 0) <= 0 && status === 'active')))
+  const isSubscriptionActive = ['active', 'paid', 'comped', 'manually_granted'].includes(status) && !isFreePlan
 
   let accessSource: AccessSource = 'free'
-  let features: FeatureMap = FREE_FEATURES
-  let limits: LimitMap = FREE_LIMITS
+  let features: FeatureMap = isFreePlan ? mergeFeatures(FREE_FEATURES, plan?.features, subscription?.features_override) : FREE_FEATURES
+  let limits: LimitMap = isFreePlan ? { ...FREE_LIMITS, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) } : FREE_LIMITS
 
   if (isPlatformAdmin) {
     accessSource = 'platform_admin'
@@ -205,15 +216,15 @@ export async function getWorkspaceAccess(params: {
   } else if (isOverrideActive) {
     accessSource = 'user_override'
     features = mergeFeatures(defaultFeatures, plan?.features, userOverride?.features_override)
-    limits = { ...(plan?.limits || {}), ...fullLimits, ...(userOverride?.limits_override || {}) }
+    limits = { ...fullLimits, ...(plan?.limits || {}), ...(userOverride?.limits_override || {}) }
   } else if (isSubscriptionActive) {
     accessSource = 'subscription'
     features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
-    limits = { ...(plan?.limits || {}), ...fullLimits, ...(subscription?.limits_override || {}) }
+    limits = { ...fullLimits, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) }
   } else if (isTrialActive) {
     accessSource = 'trial'
     features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
-    limits = { ...(plan?.limits || {}), ...fullLimits, ...(subscription?.limits_override || {}) }
+    limits = { ...fullLimits, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) }
   } else if (['past_due', 'unpaid', 'incomplete'].includes(status)) {
     accessSource = 'payment_required'
   }

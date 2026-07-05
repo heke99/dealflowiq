@@ -156,6 +156,26 @@ export async function signUpAction(formData: FormData) {
   redirect('/dashboard')
 }
 
+export async function resendConfirmationEmailAction(formData: FormData) {
+  const email = String(formData.get('email') || '').trim().toLowerCase()
+  if (!email) {
+    redirect(`/login?error=${toMessage('Enter your email above, then use resend.')}`)
+  }
+
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: getAuthRedirectUrl('/dashboard') },
+  })
+
+  if (error) {
+    redirect(`/login?error=${toMessage(error.message)}`)
+  }
+
+  redirect(`/login?message=${toMessage('Confirmation email sent. Check your inbox (and spam folder).')}`)
+}
+
 export async function requestPasswordResetAction(formData: FormData) {
   const email = String(formData.get('email') || '').trim().toLowerCase()
   if (!email) {

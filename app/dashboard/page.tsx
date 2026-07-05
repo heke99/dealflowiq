@@ -1,8 +1,10 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
+import { retrySubscriptionSetupAction, retryWorkspaceSetupAction } from '@/app/onboarding/actions'
 import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { rowString, type Row } from '@/lib/types/rows'
 
@@ -77,12 +79,20 @@ function OpportunityRow({ listing }: { listing: Row }) {
   )
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const query = await searchParams
   const workspace = await getCurrentWorkspace()
+
+  // First-run users go through the (skippable) onboarding wizard once.
+  if (workspace.profile && !workspace.profile.onboarding_completed) {
+    redirect('/onboarding')
+  }
+
   const accountType = workspace.access.accountType
   const config = getAccountTypeConfig(accountType)
   const supabase = await createSupabaseServerClient()
   const orgId = workspace.organization?.id
+  const missingSubscription = Boolean(orgId && !workspace.access.subscription && !workspace.access.isPlatformAdmin)
 
   const [dealsResult, listingsResult, opportunitiesResult, strongResult, reviewResult, importJobsResult, buyerMatchResult, watchResult, notificationsResult, sourcesResult] = orgId
     ? await Promise.all([
@@ -108,6 +118,38 @@ export default async function DashboardPage() {
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
       <div className="space-y-8">
+        {query?.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {query?.message ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{String(query.message)}</div> : null}
+
+        {!orgId ? (
+          <section className="rounded-3xl border border-amber-400/30 bg-amber-400/10 p-6">
+            <h2 className="text-xl font-bold text-amber-100">Your workspace is missing</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/80">
+              Your account exists but no workspace/organization is connected yet — usually because the signup bootstrap was interrupted. Retry it now (safe to run multiple times), or contact support if it keeps failing.
+            </p>
+            <form action={retryWorkspaceSetupAction} className="mt-4">
+              <input type="hidden" name="return_to" value="/dashboard" />
+              <button className="rounded-xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 hover:bg-amber-200">Retry workspace setup</button>
+            </form>
+          </section>
+        ) : null}
+
+        {missingSubscription ? (
+          <section className="rounded-3xl border border-amber-400/30 bg-amber-400/10 p-6">
+            <h2 className="text-xl font-bold text-amber-100">No subscription found for this workspace</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/80">
+              Your workspace has no plan or trial attached, so you are on restricted free access. Restore the default plan/trial now or pick a plan on the billing page.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <form action={retrySubscriptionSetupAction}>
+                <input type="hidden" name="return_to" value="/dashboard" />
+                <button className="rounded-xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 hover:bg-amber-200">Restore default plan</button>
+              </form>
+              <Link href="/settings/billing" className="rounded-xl border border-amber-300/40 px-5 py-3 text-sm font-bold text-amber-100 hover:bg-amber-400/10">Open billing</Link>
+            </div>
+          </section>
+        ) : null}
+
         <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-blue-500/10 p-6 sm:p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
             <div>

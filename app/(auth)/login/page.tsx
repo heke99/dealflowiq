@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { ArrowRight, BadgeCheck, BarChart3, Building2, LockKeyhole, Search, ShieldCheck, Target } from 'lucide-react'
-import { signInAction } from '@/lib/auth/actions'
+import { resendConfirmationEmailAction, signInAction } from '@/lib/auth/actions'
 
 type LoginPageProps = {
   searchParams?: Promise<{ error?: string; message?: string; next?: string }> | { error?: string; message?: string; next?: string }
@@ -83,6 +83,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               {params.error ? (
                 <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-medium text-red-100">
                   {decodeURIComponent(params.error)}
+                  {/(confirm|not confirmed|verification)/i.test(decodeURIComponent(params.error)) ? (
+                    <form action={resendConfirmationEmailAction} className="mt-3 flex flex-wrap items-center gap-2">
+                      <input
+                        name="email"
+                        type="email"
+                        required
+                        placeholder="you@example.com"
+                        className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600"
+                      />
+                      <button className="rounded-xl border border-red-300/30 px-4 py-2 text-xs font-black uppercase tracking-wide text-red-100 hover:bg-red-500/20">
+                        Resend confirmation
+                      </button>
+                    </form>
+                  ) : null}
                 </div>
               ) : null}
 

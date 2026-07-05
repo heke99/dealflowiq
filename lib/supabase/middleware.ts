@@ -33,6 +33,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const protectedPrefixes = [
     '/dashboard',
+    '/onboarding',
     '/deals',
     '/buyers',
     '/settings',

@@ -2,6 +2,7 @@ import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
 import { buildRentConfidenceBreakdown } from '@/lib/market/rentIntelligence'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
+import { asRow, rowString } from '@/lib/types/rows'
 import type { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import type { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -9,7 +10,7 @@ type SupabaseLike = Awaited<ReturnType<typeof createSupabaseServerClient>> | Ret
 
 type ApplyParams = {
   supabase: SupabaseLike
-  listing: Record<string, any>
+  listing: Record<string, unknown>
   organizationId: string
   userId?: string | null
   trigger?: 'auto_import' | 'manual_market_rent' | 'manual_hud' | 'manual_override'
@@ -55,15 +56,15 @@ export async function applyAutomatedRentIntelligence(params: ApplyParams) {
       hudRaw = { error: error instanceof Error ? error.message : 'HUD lookup failed' }
       await createInAppNotification(supabase, {
         organizationId,
-        userId: userId || listing.created_by || null,
+        userId: userId || rowString(listing.created_by) || null,
         actorId: userId || null,
         type: 'hud_lookup_failed',
         title: 'HUD/FMR lookup failed',
         message: `${listing.title || 'Listing'} needs manual HUD/FMR review.`,
         relatedEntityType: 'market_listing',
-        relatedEntityId: listing.id,
+        relatedEntityId: String(listing.id),
         actionHref: `/market/${listing.id}`,
-        metadata: { zip, error: (hudRaw as any).error },
+        metadata: { zip, error: asRow(hudRaw)?.error },
       })
     }
   }
@@ -92,7 +93,7 @@ export async function applyAutomatedRentIntelligence(params: ApplyParams) {
     created_by: userId || null,
   })
 
-  const update: Record<string, any> = {
+  const update: Record<string, unknown> = {
     market_rent: listing.market_rent || rent.estimatedRent || null,
     estimated_rent: listing.estimated_rent || rent.estimatedRent || null,
     hud_rent: listing.hud_rent || hudSelectedRent || null,
@@ -108,7 +109,7 @@ export async function applyAutomatedRentIntelligence(params: ApplyParams) {
 
   await recordMarketListingActivity(supabase, {
     organizationId,
-    listingId: listing.id,
+    listingId: String(listing.id),
     actorId: userId || null,
     eventType: 'rent_analysis',
     title: 'Rent intelligence calculated',
@@ -119,13 +120,13 @@ export async function applyAutomatedRentIntelligence(params: ApplyParams) {
   if (rent.confidenceScore < 65) {
     await createInAppNotification(supabase, {
       organizationId,
-      userId: userId || listing.created_by || null,
+      userId: userId || rowString(listing.created_by) || null,
       actorId: userId || null,
       type: 'rent_analysis_failed',
       title: 'Rent analysis needs review',
       message: `${listing.title || 'Listing'} has low rent confidence and needs manual review.`,
       relatedEntityType: 'market_listing',
-      relatedEntityId: listing.id,
+      relatedEntityId: String(listing.id),
       actionHref: `/market/${listing.id}`,
       metadata: { confidenceScore: rent.confidenceScore, missingFields: rent.missingFields },
     })

@@ -1,5 +1,7 @@
 type SupabaseLike = {
-  from: (table: string) => any
+  from: (table: string) => {
+    insert: (values: Record<string, unknown>) => PromiseLike<unknown>
+  }
 }
 
 type ActivityInput = {
@@ -9,7 +11,7 @@ type ActivityInput = {
   eventType: string
   title: string
   description?: string | null
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 export async function recordMarketListingActivity(supabase: SupabaseLike, input: ActivityInput) {

@@ -1,5 +1,7 @@
 type SupabaseLike = {
-  from: (table: string) => any
+  from: (table: string) => {
+    insert: (values: Record<string, unknown>) => PromiseLike<{ error: { message: string } | null }>
+  }
 }
 
 export type NotificationInput = {
@@ -12,7 +14,7 @@ export type NotificationInput = {
   relatedEntityType?: string | null
   relatedEntityId?: string | null
   actionHref?: string | null
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 export async function createInAppNotification(supabase: SupabaseLike, input: NotificationInput) {

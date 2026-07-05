@@ -3,18 +3,11 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createBuyBoxAction, runBuyBoxNowAction, archiveBuyBoxAction } from '@/app/buy-boxes/actions'
+import { rowNumber, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function dateText(value: string | null | undefined) {
+function dateText(value: unknown) {
   if (!value) return 'Not scheduled'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
-}
-
-function money(value: number | string | null | undefined) {
-  const parsed = Number(value || 0)
-  if (!parsed) return '—'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(parsed)
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
 function Field({ label, name, placeholder, type = 'text', defaultValue }: { label: string; name: string; placeholder?: string; type?: string; defaultValue?: string }) {
@@ -26,23 +19,23 @@ function BuyBoxCard({ buyBox }: { buyBox: Row }) {
     <article className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 transition hover:border-white/20 hover:bg-white/[0.055]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Link href={`/buy-boxes/${buyBox.id}`} className="text-xl font-bold hover:underline">{buyBox.name}</Link>
+          <Link href={`/buy-boxes/${buyBox.id}`} className="text-xl font-bold hover:underline">{rowString(buyBox.name)}</Link>
           <p className="mt-1 text-sm text-slate-400">{[buyBox.city, buyBox.state, buyBox.zip_code].filter(Boolean).join(', ') || 'Any selected market'}</p>
         </div>
-        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${buyBox.status === 'active' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : 'border-white/10 bg-white/5 text-slate-300'}`}>{buyBox.status}</span>
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${buyBox.status === 'active' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : 'border-white/10 bg-white/5 text-slate-300'}`}>{rowString(buyBox.status)}</span>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Min score</div><div className="font-bold">{buyBox.min_deal_score || 70}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold">{buyBox.min_rent_confidence || 50}+</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Last found</div><div className="font-bold">{buyBox.last_results_count || 0}</div></div>
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Opportunities</div><div className="font-bold text-emerald-300">{buyBox.last_opportunities_count || 0}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Min score</div><div className="font-bold">{rowNumber(buyBox.min_deal_score) || 70}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Rent confidence</div><div className="font-bold">{rowNumber(buyBox.min_rent_confidence) || 50}+</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Last found</div><div className="font-bold">{rowNumber(buyBox.last_results_count) || 0}</div></div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Opportunities</div><div className="font-bold text-emerald-300">{rowNumber(buyBox.last_opportunities_count) || 0}</div></div>
       </div>
       <div className="mt-4 text-xs text-slate-500">Next run: {dateText(buyBox.next_run_at)}</div>
-      {buyBox.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{buyBox.last_error}</div> : null}
+      {buyBox.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{String(buyBox.last_error)}</div> : null}
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
-        <form action={runBuyBoxNowAction}><input type="hidden" name="buy_box_id" value={buyBox.id} /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Run now</button></form>
+        <form action={runBuyBoxNowAction}><input type="hidden" name="buy_box_id" value={String(buyBox.id)} /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Run now</button></form>
         <Link href={`/buy-boxes/${buyBox.id}`} className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-slate-100">Details</Link>
-        <form action={archiveBuyBoxAction}><input type="hidden" name="buy_box_id" value={buyBox.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Archive</button></form>
+        <form action={archiveBuyBoxAction}><input type="hidden" name="buy_box_id" value={String(buyBox.id)} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Archive</button></form>
       </div>
     </article>
   )
@@ -99,7 +92,7 @@ export default async function BuyBoxesPage() {
           </div>
 
           <div className="space-y-4">
-            {(buyBoxes || []).map((buyBox: Row) => <BuyBoxCard key={buyBox.id} buyBox={buyBox} />)}
+            {(buyBoxes || []).map((buyBox: Row) => <BuyBoxCard key={String(buyBox.id)} buyBox={buyBox} />)}
             {!(buyBoxes || []).length ? <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No Buy Boxes yet</h2><p className="mt-2 text-slate-400">Create your first buy box so DealFlowIQ can start searching automatically.</p></div> : null}
           </div>
         </section>

@@ -6,6 +6,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { runMarketSourceNow } from '@/lib/market/importRunner'
+import { asRow, asRows } from '@/lib/types/rows'
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -194,25 +195,25 @@ export async function updateBuyBoxAction(formData: FormData) {
     .eq('buy_box_id', buyBoxId)
     .eq('organization_id', workspace.organization.id)
 
-  for (const source of linkedSources || []) {
+  for (const source of asRows(linkedSources)) {
     await supabase.from('market_sources').update({
       auto_import_enabled: schedule !== 'manual',
       schedule_frequency: schedule === 'manual' ? 'daily' : schedule,
       opportunity_score_threshold: minDealScore,
       next_run_at: schedule === 'manual' ? null : new Date().toISOString(),
       settings: {
-        ...((source as any).settings || {}),
+        ...(asRow(source.settings) || {}),
         buy_box_id: buyBoxId,
         source_urls: sourceUrls,
         opportunity_score_threshold: minDealScore,
         min_rent_confidence: minRentConfidence,
       },
-    }).eq('id', (source as any).id)
+    }).eq('id', source.id)
 
     if (sourceUrls.length) {
       await supabase.from('market_source_queue_items').upsert(sourceUrls.map((inputUrl) => ({
         organization_id: workspace.organization!.id,
-        source_id: (source as any).id,
+        source_id: source.id,
         buy_box_id: buyBoxId,
         input_url: inputUrl,
         status: 'queued',
@@ -244,8 +245,8 @@ export async function runBuyBoxNowAction(formData: FormData) {
   let updated = 0
   let failed = 0
 
-  for (const source of sources || []) {
-    const result = await runMarketSourceNow(source as any, { maxUrls: 10 })
+  for (const source of asRows(sources)) {
+    const result = await runMarketSourceNow(source, { maxUrls: 10 })
     found += result.found
     created += result.created
     updated += result.updated

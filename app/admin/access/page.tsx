@@ -4,6 +4,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { ACCOUNT_TYPE_CONFIGS } from '@/lib/product/accountTypes'
 import { FEATURE_KEYS, featureLabels } from '@/lib/billing/features'
+import { asRows, firstRow, rowString, type Row } from '@/lib/types/rows'
 
 type AdminAccessPageProps = {
   searchParams?: Promise<{ error?: string; saved?: string }> | { error?: string; saved?: string }
@@ -57,11 +58,11 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
     .eq('status', 'active')
     .order('created_at', { ascending: false })
     .limit(250)
-  const memberUserIds = Array.from(new Set((memberRows || []).map((row: any) => row.user_id).filter(Boolean)))
+  const memberUserIds = Array.from(new Set(asRows(memberRows).map((row) => rowString(row.user_id)).filter((id): id is string => Boolean(id))))
   const { data: profiles } = memberUserIds.length
     ? await supabase.from('profiles').select('id, email, full_name').in('id', memberUserIds)
-    : { data: [] as any[] }
-  const profileById = new Map((profiles || []).map((profile: any) => [profile.id, profile]))
+    : { data: [] as Row[] }
+  const profileById = new Map(asRows(profiles).map((profile) => [String(profile.id), profile]))
   const { data: overrides } = await supabase
     .from('member_access_overrides')
     .select('id, organization_id, user_id, status, starts_at, expires_at, notes, created_at, organizations(id, name)')
@@ -107,7 +108,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
 
               <input type="hidden" name="trial_days" value="0" />
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-sm"><span className="text-slate-300">Plan</span><select name="plan_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Default by account type</option>{(plans || []).map((plan: any) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select></label>
+                <label className="block text-sm"><span className="text-slate-300">Plan</span><select name="plan_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Default by account type</option>{asRows(plans).map((plan) => <option key={String(plan.id)} value={String(plan.id)}>{rowString(plan.name)}</option>)}</select></label>
                 <label className="block text-sm"><span className="text-slate-300">Invite expires in days</span><input name="expires_in_days" type="number" min="0" defaultValue="30" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
               </div>
 
@@ -137,21 +138,21 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
             <h2 className="text-xl font-bold">Recent invites</h2>
             <div className="mt-5 space-y-3">
-              {(invites || []).map((invite: any) => {
-                const plan = Array.isArray(invite.billing_plans) ? invite.billing_plans[0] : invite.billing_plans
+              {asRows(invites).map((invite) => {
+                const plan = firstRow(invite.billing_plans)
                 return (
-                  <div key={invite.id} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                  <div key={String(invite.id)} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">{invite.email}</div>
-                        <div className="mt-1 text-xs text-slate-500">{invite.account_type} · {invite.role} · {plan?.name || 'default plan'}</div>
-                        <div className="mt-2 text-xs text-slate-500">Token: {invite.invite_token}</div>
+                        <div className="font-semibold">{rowString(invite.email)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{rowString(invite.account_type)} · {rowString(invite.role)} · {rowString(plan?.name) || 'default plan'}</div>
+                        <div className="mt-2 text-xs text-slate-500">Token: {rowString(invite.invite_token)}</div>
                       </div>
-                      <div className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">{invite.status}</div>
+                      <div className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">{rowString(invite.status)}</div>
                     </div>
                     {invite.status === 'active' ? (
                       <form action={revokeAdminAccessInviteAction} className="mt-4">
-                        <input type="hidden" name="id" value={invite.id} />
+                        <input type="hidden" name="id" value={String(invite.id)} />
                         <button className="rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/10">Revoke</button>
                       </form>
                     ) : null}
@@ -167,8 +168,8 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
             <h2 className="text-xl font-bold">Grant full access to an existing member</h2>
             <p className="mt-2 text-sm leading-6 text-slate-400">Use this when a user is already a member of a workspace and you want them to bypass trial/payment restrictions. Platform admins never need this; they already bypass billing.</p>
             <form action={grantMemberFullAccessOverrideAction} className="mt-6 space-y-5">
-              <label className="block text-sm"><span className="text-slate-300">Organization</span><select name="organization_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select organization</option>{(organizations || []).map((org: any) => <option key={org.id} value={org.id}>{org.name}</option>)}</select></label>
-              <label className="block text-sm"><span className="text-slate-300">Member</span><select name="user_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select member</option>{(memberRows || []).map((member: any) => { const org = Array.isArray(member.organizations) ? member.organizations[0] : member.organizations; const profile = profileById.get(member.user_id) as any; return <option key={member.id} value={member.user_id}>{profile?.email || member.user_id} · {org?.name || member.organization_id} · {member.role}</option> })}</select></label>
+              <label className="block text-sm"><span className="text-slate-300">Organization</span><select name="organization_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select organization</option>{asRows(organizations).map((org) => <option key={String(org.id)} value={String(org.id)}>{rowString(org.name)}</option>)}</select></label>
+              <label className="block text-sm"><span className="text-slate-300">Member</span><select name="user_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select member</option>{asRows(memberRows).map((member) => { const org = firstRow(member.organizations); const profile = profileById.get(String(member.user_id)); return <option key={String(member.id)} value={String(member.user_id)}>{rowString(profile?.email) || String(member.user_id)} · {rowString(org?.name) || String(member.organization_id)} · {rowString(member.role)}</option> })}</select></label>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block text-sm"><span className="text-slate-300">Expires in days</span><input name="expires_in_days" type="number" min="0" defaultValue="0" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">0 means no expiry.</span></label>
                 <label className="block text-sm"><span className="text-slate-300">Admin note</span><input name="notes" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" placeholder="Reason for full access" /></label>
@@ -180,19 +181,19 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
             <h2 className="text-xl font-bold">Active member overrides</h2>
             <div className="mt-5 space-y-3">
-              {(overrides || []).map((override: any) => {
-                const org = Array.isArray(override.organizations) ? override.organizations[0] : override.organizations
-                const profile = profileById.get(override.user_id) as any
+              {asRows(overrides).map((override) => {
+                const org = firstRow(override.organizations)
+                const profile = profileById.get(String(override.user_id))
                 return (
-                  <div key={override.id} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                  <div key={String(override.id)} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-semibold">{profile?.email || override.user_id}</div>
-                        <div className="mt-1 text-xs text-slate-500">{org?.name || override.organization_id} · {String(override.status).replaceAll('_', ' ')} · expires {override.expires_at ? new Date(override.expires_at).toLocaleDateString('en-US') : 'never'}</div>
-                        {override.notes ? <div className="mt-2 text-xs text-slate-500">{override.notes}</div> : null}
+                        <div className="font-semibold">{rowString(profile?.email) || String(override.user_id)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{rowString(org?.name) || String(override.organization_id)} · {String(override.status).replaceAll('_', ' ')} · expires {override.expires_at ? new Date(String(override.expires_at)).toLocaleDateString('en-US') : 'never'}</div>
+                        {override.notes ? <div className="mt-2 text-xs text-slate-500">{String(override.notes)}</div> : null}
                       </div>
                       <form action={revokeMemberAccessOverrideAction}>
-                        <input type="hidden" name="id" value={override.id} />
+                        <input type="hidden" name="id" value={String(override.id)} />
                         <button className="rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/10">Revoke</button>
                       </form>
                     </div>

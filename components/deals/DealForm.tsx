@@ -1,13 +1,15 @@
+import Link from 'next/link'
 import type { createDealAction, updateDealAction } from '@/app/deals/actions'
 import type { UnderwritingDefaults } from '@/lib/underwriting/defaults'
+import type { Row } from '@/lib/types/rows'
 
 type Action = typeof createDealAction | typeof updateDealAction
 
 type DealFormProps = {
   action: Action
   submitLabel: string
-  deal?: Record<string, any> | null
-  property?: Record<string, any> | null
+  deal?: Row | null
+  property?: Row | null
   error?: string | null
   assumptionDefaults?: UnderwritingDefaults | null
 }
@@ -40,7 +42,7 @@ const propertyTypes = [
   'Land',
 ]
 
-function value(row: Record<string, any> | null | undefined, key: string) {
+function value(row: Row | null | undefined, key: string) {
   const current = row?.[key]
   return current === null || current === undefined ? '' : String(current)
 }
@@ -78,7 +80,7 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
   const defaults = assumptionDefaults
   return (
     <form action={action} encType="multipart/form-data" className="space-y-6">
-      {deal?.id ? <input type="hidden" name="deal_id" value={deal.id} /> : null}
+      {deal?.id ? <input type="hidden" name="deal_id" value={String(deal.id)} /> : null}
       {error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
 
       <Section title="Deal basics" description="Create the core record first. Calculators and projections will use these numbers later.">
@@ -201,7 +203,7 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
 
       <div className="flex flex-wrap items-center gap-3">
         <button className="rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 transition hover:bg-slate-200">{submitLabel}</button>
-        <a href="/deals" className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-slate-100 transition hover:bg-white/10">Cancel</a>
+        <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-slate-100 transition hover:bg-white/10">Cancel</Link>
       </div>
     </form>
   )

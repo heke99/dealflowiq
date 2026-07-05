@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { createStripeCheckoutSession, createStripePortalSession, syncPlanWithStripe, type StripeBillingInterval } from '@/lib/billing/stripe'
+import { createStripeCheckoutSession, createStripePortalSession, syncPlanWithStripe, type StripeBillingInterval, type StripePlanRow } from '@/lib/billing/stripe'
+import { asRow, rowString } from '@/lib/types/rows'
 
 function intervalValue(value: FormDataEntryValue | null): StripeBillingInterval {
   return String(value || 'month') === 'year' ? 'year' : 'month'
@@ -35,7 +36,7 @@ export async function startCheckoutAction(formData: FormData) {
 
   if (planError || !plan) redirect(`/settings/billing?error=${encodeURIComponent(planError?.message || 'Plan not found')}`)
 
-  const priceCents = interval === 'year' ? Number((plan as any).annual_price_cents || 0) : Number((plan as any).monthly_price_cents || 0)
+  const priceCents = interval === 'year' ? Number(asRow(plan)?.annual_price_cents || 0) : Number(asRow(plan)?.monthly_price_cents || 0)
   if (priceCents <= 0) {
     const { error } = await supabase.from('organization_subscriptions').upsert({
       organization_id: workspace.organization.id,
@@ -54,7 +55,7 @@ export async function startCheckoutAction(formData: FormData) {
     redirect('/settings/billing?checkout=free')
   }
 
-  let stripeReadyPlan = plan as any
+  let stripeReadyPlan = plan as StripePlanRow
   const missingPrice = interval === 'year' ? !stripeReadyPlan.stripe_annual_price_id : !stripeReadyPlan.stripe_monthly_price_id
   if (missingPrice) {
     const sync = await syncPlanWithStripe(stripeReadyPlan)
@@ -65,7 +66,7 @@ export async function startCheckoutAction(formData: FormData) {
       .select('*')
       .single()
     if (updateError) redirect(`/settings/billing?error=${encodeURIComponent(updateError.message)}`)
-    stripeReadyPlan = updatedPlan as any
+    stripeReadyPlan = updatedPlan as StripePlanRow
   }
 
   const session = await createStripeCheckoutSession({
@@ -74,7 +75,7 @@ export async function startCheckoutAction(formData: FormData) {
     userEmail: workspace.user.email,
     plan: stripeReadyPlan,
     interval,
-    stripeCustomerId: (subscription as any)?.stripe_customer_id || null,
+    stripeCustomerId: rowString(asRow(subscription)?.stripe_customer_id) || null,
   }).catch((error) => {
     redirect(`/settings/billing?error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not create Stripe Checkout session')}`)
   })
@@ -94,7 +95,7 @@ export async function openBillingPortalAction() {
     .maybeSingle()
 
   if (error) redirect(`/settings/billing?error=${encodeURIComponent(error.message)}`)
-  const customerId = (subscription as any)?.stripe_customer_id
+  const customerId = rowString(asRow(subscription)?.stripe_customer_id)
   if (!customerId) redirect('/settings/billing?error=No Stripe customer is connected to this workspace yet')
 
   const session = await createStripePortalSession({ stripeCustomerId: customerId }).catch((portalError) => {

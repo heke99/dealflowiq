@@ -6,7 +6,8 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
 import { importZillowRentalByUrl } from '@/lib/integrations/zillow/zillowClient'
-import { MAX_REASONABLE_MONTHLY_RENT, MIN_REASONABLE_MONTHLY_RENT, isReasonableMonthlyRent, summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
+import { MAX_REASONABLE_MONTHLY_RENT, MIN_REASONABLE_MONTHLY_RENT, isReasonableMonthlyRent, summarizeMarketRentComps, type MarketRentComp } from '@/lib/underwriting/rentIntelligence'
+import { asRow, asRows, firstRow, rowNumber, type Row } from '@/lib/types/rows'
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -40,6 +41,19 @@ function sourceType(formData: FormData) {
   return ['manual', 'zillow_url', 'crexi_url', 'licensed_api', 'csv_upload', 'pdf_upload', 'ai_extracted', 'other'].includes(value) ? value : 'manual'
 }
 
+function compRentValue(value: unknown): number | string | null {
+  return typeof value === 'number' || typeof value === 'string' ? value : null
+}
+
+function toMarketRentComps(rows: unknown): MarketRentComp[] {
+  return asRows(rows).map((row) => ({
+    monthly_rent: compRentValue(row.monthly_rent),
+    bedrooms: compRentValue(row.bedrooms),
+    square_feet: compRentValue(row.square_feet),
+    confidence_score: compRentValue(row.confidence_score),
+  }))
+}
+
 async function requireDeal(dealId: string) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
@@ -51,8 +65,8 @@ async function requireDeal(dealId: string) {
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
   if (error || !deal) redirect(`/deals?error=${encodeURIComponent(error?.message || 'Deal not found')}`)
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
-  return { workspace, supabase, deal: deal as any, property: property as any }
+  const dealRow = deal as Row
+  return { workspace, supabase, deal: dealRow, property: firstRow(dealRow.properties) }
 }
 
 async function refreshMarketRentFromComps(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, dealId: string) {
@@ -61,7 +75,7 @@ async function refreshMarketRentFromComps(supabase: Awaited<ReturnType<typeof cr
     .select('monthly_rent, bedrooms, square_feet, confidence_score, import_status')
     .eq('organization_id', organizationId)
     .eq('deal_id', dealId)
-  const summary = summarizeMarketRentComps((comps || []) as any)
+  const summary = summarizeMarketRentComps(toMarketRentComps(comps))
   if (summary.recommendedRent) {
     await supabase
       .from('deals')
@@ -96,7 +110,7 @@ async function applyHudLookupToDeal(params: {
     rent_4br: result.rents[4],
     source: result.hudYearMode === 'auto' ? 'HUDUSER_AUTO_LATEST' : 'HUDUSER_MANUAL_YEAR',
     source_url: result.sourceUrl,
-    raw_response: { ...(result.raw as any), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears, entityId: result.entityId, entitySource: result.entitySource, action_source: params.source } } as any,
+    raw_response: { ...(asRow(result.raw) ?? {}), dealflowiq_lookup: { hudYearMode: result.hudYearMode, attemptedYears: result.attemptedYears, entityId: result.entityId, entitySource: result.entitySource, action_source: params.source } },
     fetched_at: new Date().toISOString(),
   }, { onConflict: 'zip_code,hud_year' })
 
@@ -207,7 +221,7 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
       notes: imported.notes,
       confidence_score: manualRentOverride ? 80 : 70,
       import_status: 'imported',
-      raw_payload: imported.raw as any,
+      raw_payload: imported.raw,
     })
 
     if (error) throw new Error(error.message)
@@ -254,8 +268,8 @@ export async function lookupHudRentAction(formData: FormData) {
   const dealId = String(formData.get('deal_id') || '').trim()
   if (!dealId) redirect('/deals?error=Missing deal id')
   const { workspace, supabase, property } = await requireDeal(dealId)
-  const zipCode = text(formData, 'zip_code') || property?.zip_code || ''
-  const bedrooms = numberValue(formData, 'bedrooms') ?? property?.bedrooms ?? null
+  const zipCode = String(text(formData, 'zip_code') || property?.zip_code || '')
+  const bedrooms = numberValue(formData, 'bedrooms') ?? rowNumber(property?.bedrooms)
   const hudYearRaw = String(formData.get('hud_year') || 'auto').trim().toLowerCase()
   const hudYear = hudYearRaw && hudYearRaw !== 'auto' ? Number(hudYearRaw) : 'auto'
   const redirectTo = String(formData.get('redirect_to') || `/deals/${dealId}/rent-intelligence`)
@@ -287,8 +301,8 @@ export async function smartAnalyzeDealAction(formData: FormData) {
 
   const { workspace, supabase, deal, property } = await requireDeal(dealId)
   const redirectTo = String(formData.get('redirect_to') || `/deals/${dealId}/analyzer`)
-  const zipCode = property?.zip_code || ''
-  const bedrooms = property?.bedrooms ?? null
+  const zipCode = String(property?.zip_code || '')
+  const bedrooms = rowNumber(property?.bedrooms)
   const messages: string[] = []
 
   try {

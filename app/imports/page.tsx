@@ -4,8 +4,8 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { analyzeImportUrlAction, generateImportPreviewAction, importPreviewItemsAction, runProviderCleanupAction, skipPreviewItemsAction, updateImportBatchStatusAction } from '@/app/imports/actions'
 import { SubmitButton } from '@/components/forms/SubmitButton'
+import { asRow, asRows, rowNumber, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
 type Search = Record<string, string | string[] | undefined>
 
 function one(value: string | string[] | undefined, fallback = '') {
@@ -13,15 +13,15 @@ function one(value: string | string[] | undefined, fallback = '') {
   return value || fallback
 }
 
-function money(value: number | string | null | undefined) {
+function money(value: unknown) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(parsed)
 }
 
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
 function statusTone(status: string) {
@@ -31,7 +31,7 @@ function statusTone(status: string) {
   return 'border-amber-400/30 bg-amber-400/10 text-amber-100'
 }
 
-function prettyStatus(value?: string | null) {
+function prettyStatus(value?: unknown) {
   return String(value || 'unknown').replaceAll('_', ' ')
 }
 
@@ -39,16 +39,16 @@ function BatchActions({ batch }: { batch: Row }) {
   return (
     <div className="flex flex-wrap gap-2">
       <form action={generateImportPreviewAction}>
-        <input type="hidden" name="batch_id" value={batch.id} />
+        <input type="hidden" name="batch_id" value={String(batch.id)} />
         <SubmitButton pendingText="Generating preview..." className="rounded-xl bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Generate / refresh preview</SubmitButton>
       </form>
       <form action={importPreviewItemsAction}>
-        <input type="hidden" name="batch_id" value={batch.id} />
+        <input type="hidden" name="batch_id" value={String(batch.id)} />
         <input type="hidden" name="import_first_10" value="true" />
         <SubmitButton pendingText="Importing first 10..." className="rounded-xl border border-emerald-400/30 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Import first 10 preview rows</SubmitButton>
       </form>
       <form action={updateImportBatchStatusAction}>
-        <input type="hidden" name="batch_id" value={batch.id} />
+        <input type="hidden" name="batch_id" value={String(batch.id)} />
         <input type="hidden" name="status" value="needs_review" />
         <SubmitButton pendingText="Updating status..." className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Mark needs review</SubmitButton>
       </form>
@@ -64,18 +64,18 @@ function BatchCard({ batch, selected }: { batch: Row; selected: boolean }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(String(batch.status))}`}>{prettyStatus(batch.status)}</span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{batch.source_type}</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{rowString(batch.source_type)}</span>
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{prettyStatus(batch.import_mode)}</span>
           </div>
-          <h2 className="mt-3 text-xl font-bold text-white">{batch.source_name || batch.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{batch.last_error || batch.summary || 'URL analyzed and ready for provider import workflow.'}</p>
+          <h2 className="mt-3 text-xl font-bold text-white">{rowString(batch.source_name) || rowString(batch.title)}</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{rowString(batch.last_error) || rowString(batch.summary) || 'URL analyzed and ready for provider import workflow.'}</p>
           <div className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Location</div><div className="mt-1 font-semibold">{location}</div></div>
             <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Max price</div><div className="mt-1 font-semibold">{money(batch.max_price)}</div></div>
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Preview</div><div className="mt-1 font-semibold">{batch.queue_summary?.previewCount ?? 0}</div></div>
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Imported</div><div className="mt-1 font-semibold">{batch.imported_count || 0}</div></div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Preview</div><div className="mt-1 font-semibold">{rowNumber(asRow(batch.queue_summary)?.previewCount) ?? 0}</div></div>
+            <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Imported</div><div className="mt-1 font-semibold">{rowNumber(batch.imported_count) || 0}</div></div>
           </div>
-          <div className="mt-4 truncate text-xs text-slate-600">{batch.normalized_url || batch.input_url}</div>
+          <div className="mt-4 truncate text-xs text-slate-600">{rowString(batch.normalized_url) || rowString(batch.input_url)}</div>
         </div>
         <div className="shrink-0">
           <Link href={`/imports?batch=${batch.id}`} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Open batch</Link>
@@ -87,13 +87,13 @@ function BatchCard({ batch, selected }: { batch: Row; selected: boolean }) {
 }
 
 function DataQualityPreview({ item }: { item: Row }) {
-  const checklist = Array.isArray(item.data_quality?.checklist) ? item.data_quality.checklist : []
+  const checklist = asRows(asRow(item.data_quality)?.checklist)
   if (!checklist.length) return null
   return (
     <div className="mt-3 flex flex-wrap gap-2">
-      {checklist.slice(0, 6).map((entry: any, index: number) => (
+      {checklist.slice(0, 6).map((entry, index) => (
         <span key={`${entry.label || index}`} className={`rounded-full border px-2 py-1 text-[11px] ${entry.ok ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-100' : 'border-amber-400/20 bg-amber-400/10 text-amber-100'}`}>
-          {entry.ok ? '✓' : '⚠'} {entry.label || entry.key || 'Check'}
+          {entry.ok ? '✓' : '⚠'} {rowString(entry.label) || rowString(entry.key) || 'Check'}
         </span>
       ))}
     </div>
@@ -190,14 +190,14 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Provider policies</h2>
               <div className="mt-5 space-y-2">
-                {policyRows.map((policy) => <div key={`${policy.organization_id || 'global'}-${policy.source_type}`} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="flex items-center justify-between gap-3"><div className="font-semibold capitalize">{policy.provider_label || policy.source_type}</div><span className={policy.is_active ? 'text-xs text-emerald-300' : 'text-xs text-slate-500'}>{policy.is_active ? 'active' : 'inactive'}</span></div><div className="mt-1 text-xs text-slate-500">{policy.max_listings_per_hour || 0}/hour · {policy.storage_days || 15} day retention · search {policy.search_import_allowed ? 'on' : 'off'} · listing {policy.listing_import_allowed ? 'on' : 'off'}</div></div>)}
+                {policyRows.map((policy) => <div key={`${policy.organization_id || 'global'}-${policy.source_type}`} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="flex items-center justify-between gap-3"><div className="font-semibold capitalize">{rowString(policy.provider_label) || rowString(policy.source_type)}</div><span className={policy.is_active ? 'text-xs text-emerald-300' : 'text-xs text-slate-500'}>{policy.is_active ? 'active' : 'inactive'}</span></div><div className="mt-1 text-xs text-slate-500">{rowNumber(policy.max_listings_per_hour) || 0}/hour · {rowNumber(policy.storage_days) || 15} day retention · search {policy.search_import_allowed ? 'on' : 'off'} · listing {policy.listing_import_allowed ? 'on' : 'off'}</div></div>)}
               </div>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Retention cleanup</h2><p className="mt-2 text-sm text-slate-400">Provider data is cleaned after its policy retention period. DealFlowIQ analysis, scores, notes and source links stay.</p></div><form action={runProviderCleanupAction}><SubmitButton pendingText="Running cleanup..." className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Run cleanup now</SubmitButton></form></div>
               <div className="mt-5 space-y-2">
-                {expiringRows.map((row) => <Link key={row.id} href={`/market/${row.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm hover:bg-white/5"><span className="font-semibold text-white">{row.title}</span><span className="ml-2 text-xs text-slate-500">expires {dateText(row.provider_data_expires_at)}</span></Link>)}
+                {expiringRows.map((row) => <Link key={String(row.id)} href={`/market/${row.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm hover:bg-white/5"><span className="font-semibold text-white">{rowString(row.title)}</span><span className="ml-2 text-xs text-slate-500">expires {dateText(row.provider_data_expires_at)}</span></Link>)}
                 {!expiringRows.length ? <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No provider data expiring soon.</div> : null}
               </div>
             </div>
@@ -208,10 +208,10 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
               <div className="rounded-3xl border border-emerald-400/30 bg-emerald-400/[0.06] p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(String(selectedBatch.status))}`}>{prettyStatus(selectedBatch.status)}</span><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{selectedBatch.source_type}</span><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{prettyStatus(selectedBatch.import_mode)}</span></div>
+                    <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(String(selectedBatch.status))}`}>{prettyStatus(selectedBatch.status)}</span><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{rowString(selectedBatch.source_type)}</span><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{prettyStatus(selectedBatch.import_mode)}</span></div>
                     <h2 className="mt-3 text-2xl font-black text-white">Selected import batch</h2>
-                    <p className="mt-2 text-sm text-slate-300">{selectedBatch.last_error || selectedBatch.summary}</p>
-                    <div className="mt-3 truncate text-xs text-slate-500">{selectedBatch.normalized_url || selectedBatch.input_url}</div>
+                    <p className="mt-2 text-sm text-slate-300">{rowString(selectedBatch.last_error) || rowString(selectedBatch.summary)}</p>
+                    <div className="mt-3 truncate text-xs text-slate-500">{rowString(selectedBatch.normalized_url) || rowString(selectedBatch.input_url)}</div>
                   </div>
                 </div>
                 <div className="mt-5"><BatchActions batch={selectedBatch} /></div>
@@ -234,17 +234,17 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                 <form action={importPreviewItemsAction} className="mt-5 space-y-3">
                   <input type="hidden" name="batch_id" value={selectedBatchId} />
                   {previewRows.map((item) => (
-                    <label key={item.id} className="flex gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-                      <input type="checkbox" name="preview_item_id" value={item.id} disabled={['imported','ignored','failed'].includes(String(item.status))} className="mt-1" />
+                    <label key={String(item.id)} className="flex gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                      <input type="checkbox" name="preview_item_id" value={String(item.id)} disabled={['imported','ignored','failed'].includes(String(item.status))} className="mt-1" />
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-xs ${statusTone(String(item.status))}`}>{prettyStatus(item.status)}</span><span className="text-xs text-slate-500">{item.source_type}</span>{item.duplicate_listing_id ? <span className="text-xs text-amber-300">possible duplicate</span> : null}</div>
-                        <div className="mt-2 font-semibold text-white">{item.title || item.address || item.source_url}</div>
-                        <div className="mt-1 text-sm text-slate-400">{[item.address, item.city, item.state, item.zip_code].filter(Boolean).join(', ') || 'Location pending'} · {money(item.price)} · {item.bedrooms || '—'} bd / {item.bathrooms || '—'} ba · {item.sqft ? `${Number(item.sqft).toLocaleString()} sqft` : 'sqft pending'}</div>
+                        <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-xs ${statusTone(String(item.status))}`}>{prettyStatus(item.status)}</span><span className="text-xs text-slate-500">{rowString(item.source_type)}</span>{item.duplicate_listing_id ? <span className="text-xs text-amber-300">possible duplicate</span> : null}</div>
+                        <div className="mt-2 font-semibold text-white">{rowString(item.title) || rowString(item.address) || rowString(item.source_url)}</div>
+                        <div className="mt-1 text-sm text-slate-400">{[item.address, item.city, item.state, item.zip_code].filter(Boolean).join(', ') || 'Location pending'} · {money(item.price)} · {rowNumber(item.bedrooms) || '—'} bd / {rowNumber(item.bathrooms) || '—'} ba · {item.sqft ? `${Number(item.sqft).toLocaleString()} sqft` : 'sqft pending'}</div>
                         {item.imported_listing_id ? <Link href={`/market/${item.imported_listing_id}`} className="mt-3 inline-flex rounded-lg border border-emerald-400/30 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/10">Open imported listing</Link> : null}
                         {item.ignore_reason ? <div className="mt-2 text-xs text-amber-200">Ignored previously — {prettyStatus(item.ignore_reason)}</div> : null}
-                        {item.error_message ? <div className="mt-2 text-xs text-red-200">{item.error_message}</div> : null}
+                        {item.error_message ? <div className="mt-2 text-xs text-red-200">{rowString(item.error_message)}</div> : null}
                         <DataQualityPreview item={item} />
-                        <div className="mt-2 truncate text-xs text-slate-600">{item.source_url}</div>
+                        <div className="mt-2 truncate text-xs text-slate-600">{rowString(item.source_url)}</div>
                       </div>
                     </label>
                   ))}
@@ -257,18 +257,18 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
               <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <h2 className="text-xl font-bold">Imported listings from this batch</h2>
                 <div className="mt-4 grid gap-3">
-                  {importedPreviewRows.map((row) => <Link key={row.id} href={`/market/${row.imported_listing_id}`} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 hover:bg-white/5"><div className="font-semibold text-white">{row.title || row.address || 'Imported listing'}</div><div className="mt-1 text-sm text-slate-400">{money(row.price)} · imported {dateText(row.imported_at)}</div></Link>)}
+                  {importedPreviewRows.map((row) => <Link key={String(row.id)} href={`/market/${row.imported_listing_id}`} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 hover:bg-white/5"><div className="font-semibold text-white">{rowString(row.title) || rowString(row.address) || 'Imported listing'}</div><div className="mt-1 text-sm text-slate-400">{money(row.price)} · imported {dateText(row.imported_at)}</div></Link>)}
                 </div>
               </div>
             ) : null}
 
-            {selectedBatchId ? <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6"><h2 className="text-xl font-bold">Import audit log</h2><div className="mt-4 space-y-2">{auditRows.map((event) => <div key={event.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-sm font-semibold text-white">{prettyStatus(event.event_type)}</div><div className="mt-1 text-xs text-slate-500">{dateText(event.created_at)}</div><p className="mt-2 text-sm text-slate-400">{event.message}</p></div>)}{!auditRows.length ? <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No audit events yet.</div> : null}</div></div> : null}
+            {selectedBatchId ? <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6"><h2 className="text-xl font-bold">Import audit log</h2><div className="mt-4 space-y-2">{auditRows.map((event) => <div key={String(event.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-sm font-semibold text-white">{prettyStatus(event.event_type)}</div><div className="mt-1 text-xs text-slate-500">{dateText(event.created_at)}</div><p className="mt-2 text-sm text-slate-400">{rowString(event.message)}</p></div>)}{!auditRows.length ? <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No audit events yet.</div> : null}</div></div> : null}
           </section>
         </div>
 
         <section className="space-y-4">
           <h2 className="text-xl font-bold">Recent batches</h2>
-          {rows.map((batch) => <BatchCard key={batch.id} batch={batch} selected={batch.id === selectedBatchId} />)}
+          {rows.map((batch) => <BatchCard key={String(batch.id)} batch={batch} selected={batch.id === selectedBatchId} />)}
           {!rows.length ? <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No URL batches yet</h2><p className="mt-2 text-slate-400">Paste a Zillow/Redfin/Realtor/Crexi/LoopNet URL to create your first real import batch.</p></div> : null}
         </section>
 
@@ -276,10 +276,10 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
           <h2 className="text-xl font-bold">Recent import jobs</h2>
           <div className="mt-5 space-y-3">
             {((jobs || []) as Row[]).map((job) => (
-              <div key={job.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-                <div className="flex items-center justify-between gap-3"><div className="text-sm font-semibold capitalize">{prettyStatus(job.job_type)}</div><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(String(job.status))}`}>{job.status}</span></div>
-                <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · created {job.items_created || 0} · updated {job.items_updated || 0} · failed {job.items_failed || 0}</div>
-                {job.error_message ? <div className="mt-2 text-xs text-red-200">{job.error_message}</div> : null}
+              <div key={String(job.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                <div className="flex items-center justify-between gap-3"><div className="text-sm font-semibold capitalize">{prettyStatus(job.job_type)}</div><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(String(job.status))}`}>{rowString(job.status)}</span></div>
+                <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · created {rowNumber(job.items_created) || 0} · updated {rowNumber(job.items_updated) || 0} · failed {rowNumber(job.items_failed) || 0}</div>
+                {job.error_message ? <div className="mt-2 text-xs text-red-200">{rowString(job.error_message)}</div> : null}
               </div>
             ))}
             {!((jobs || []) as Row[]).length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No import jobs yet.</div> : null}

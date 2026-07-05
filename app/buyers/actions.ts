@@ -7,8 +7,7 @@ import { canUseFeature } from '@/lib/billing/features'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createInAppNotification } from '@/lib/notifications'
 import { recordMarketListingActivity } from '@/lib/market/activity'
-
-type Row = Record<string, any>
+import { rowString, type Row } from '@/lib/types/rows'
 
 type MatchResult = {
   matchScore: number
@@ -120,7 +119,7 @@ function capRatePercent(value: unknown) {
   return parsed > 1 ? parsed / 100 : parsed
 }
 
-function strategyMatches(buyerStrategies: string[], strategyFit: string | null | undefined) {
+function strategyMatches(buyerStrategies: string[], strategyFit: unknown) {
   if (!buyerStrategies.length) return true
   const fit = String(strategyFit || '').toLowerCase()
   return buyerStrategies.some((strategy) => {
@@ -462,13 +461,13 @@ export async function runBuyerMatchingAction(formData: FormData) {
           title: 'Strong buyer match found',
           message: `A buyer matched a listing with ${Math.round(Number(row.match_score || 0))}/100 fit.`,
           relatedEntityType: 'market_listing',
-          relatedEntityId: row.listing_id,
+          relatedEntityId: rowString(row.listing_id),
           actionHref: `/market/${row.listing_id}`,
           metadata: { buyerId: row.buyer_id, matchScore: row.match_score },
         })
         await recordMarketListingActivity(supabase, {
           organizationId: workspace.organization.id,
-          listingId: row.listing_id,
+          listingId: String(row.listing_id),
           actorId: workspace.user.id,
           eventType: 'buyer_matched',
           title: 'Buyer matched',

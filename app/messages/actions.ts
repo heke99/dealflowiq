@@ -6,10 +6,9 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createInAppNotification } from '@/lib/notifications'
 import { hasFullOpportunityAccess } from '@/lib/billing/freemium'
+import { firstRow, type Row } from '@/lib/types/rows'
 
 const FREE_MESSAGE_COOLDOWN_HOURS = 48
-
-type Row = Record<string, any>
 
 function cleanText(value: FormDataEntryValue | null, max = 4000) {
   return String(value || '').trim().slice(0, max)
@@ -133,14 +132,14 @@ async function sendMessage(params: {
 
   if (params.listing.organization_id) {
     await createInAppNotification(params.supabase, {
-      organizationId: params.listing.organization_id,
+      organizationId: String(params.listing.organization_id),
       userId: params.recipientUserId,
       actorId: params.senderUserId,
       type: 'message_received',
       title: 'New listing message',
       message: `${params.listing.title || 'A listing'} received a new message.`,
       relatedEntityType: 'listing_conversation',
-      relatedEntityId: params.conversation.id,
+      relatedEntityId: String(params.conversation.id),
       actionHref: `/messages/${params.conversation.id}`,
       metadata: { listingId: params.listing.id, conversationId: params.conversation.id },
     })
@@ -206,8 +205,8 @@ export async function replyListingConversationAction(formData: FormData) {
 
   await enforceFreeMessageLimit({ supabase, userId: workspace.user.id, hasFullMessagingAccess: hasFullOpportunityAccess(workspace.access), returnTo })
 
-  const listing = (Array.isArray(row.market_listings) ? row.market_listings[0] : row.market_listings) || { id: row.listing_id, organization_id: row.organization_id, title: 'Listing' }
-  const recipientUserId = workspace.user.id === row.buyer_user_id ? row.owner_user_id : row.buyer_user_id
+  const listing = firstRow(row.market_listings) || { id: row.listing_id, organization_id: row.organization_id, title: 'Listing' }
+  const recipientUserId = String(workspace.user.id === row.buyer_user_id ? row.owner_user_id : row.buyer_user_id)
   await sendMessage({ conversation: row, listing, senderUserId: workspace.user.id, recipientUserId, body, supabase })
 
   revalidatePath('/messages')

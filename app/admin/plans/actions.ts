@@ -6,7 +6,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { requirePlatformAdmin } from '@/lib/auth/admin'
 import { FEATURE_KEYS, type FeatureMap } from '@/lib/billing/features'
 import { ACCOUNT_TYPES } from '@/lib/product/accountTypes'
-import { syncPlanWithStripe } from '@/lib/billing/stripe'
+import { syncPlanWithStripe, type StripePlanRow } from '@/lib/billing/stripe'
+import { asRow, type Row } from '@/lib/types/rows'
 
 const SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'past_due', 'canceled', 'expired', 'comped', 'manually_granted', 'incomplete', 'unpaid'])
 const ACTIVE_OR_BILLING_STATUSES = ['trialing', 'active', 'past_due', 'comped', 'manually_granted', 'incomplete', 'unpaid']
@@ -81,11 +82,11 @@ function refreshAdminPaths() {
 async function loadPlanById(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, id: string) {
   const { data, error } = await supabase.from('billing_plans').select('*').eq('id', id).maybeSingle()
   if (error) throw new Error(error.message)
-  return data as Record<string, any> | null
+  return asRow(data)
 }
 
-async function persistStripeSync(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, plan: Record<string, any>, force?: { forceMonthlyPrice?: boolean; forceAnnualPrice?: boolean }) {
-  const sync = await syncPlanWithStripe(plan as any, force)
+async function persistStripeSync(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, plan: Row, force?: { forceMonthlyPrice?: boolean; forceAnnualPrice?: boolean }) {
+  const sync = await syncPlanWithStripe(plan as StripePlanRow, force)
   const { error } = await supabase.from('billing_plans').update(sync).eq('id', plan.id)
   if (error) throw new Error(error.message)
   return sync
@@ -148,7 +149,7 @@ export async function savePlanAction(formData: FormData) {
   }
 
   try {
-    await persistStripeSync(supabase, response.data as any, { forceMonthlyPrice, forceAnnualPrice })
+    await persistStripeSync(supabase, response.data, { forceMonthlyPrice, forceAnnualPrice })
   } catch (error) {
     redirect(`/admin/plans?error=${encodeURIComponent(error instanceof Error ? error.message : 'Plan saved but Stripe sync failed')}`)
   }

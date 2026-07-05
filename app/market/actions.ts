@@ -10,6 +10,7 @@ import { runMarketSourceNow } from '@/lib/market/importRunner'
 import { determineDealReviewStatus } from '@/lib/market/review'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
+import { firstRow, rowString, type Row } from '@/lib/types/rows'
 import { runListingRentIntelligence, applyMarketRentEstimateToListing, applyHudFmrToListing, rescoreListingAfterIntelligence, buildDataQualityChecklist, buildConfidenceBreakdown } from '@/lib/market/rentIntelligenceEngine'
 import {
   buildNormalizedListingKey,
@@ -91,7 +92,7 @@ function scoreThresholdValue(formData: FormData) {
 }
 
 function listingInsertPayload(params: {
-  listing: NormalizedMarketListing | Record<string, any>
+  listing: NormalizedMarketListing | Row
   organizationId: string
   userId: string
   sourceId?: string | null
@@ -99,7 +100,7 @@ function listingInsertPayload(params: {
   visibility?: string
   status?: string
 }) {
-  const listing: Record<string, any> = params.listing
+  const listing: Row = params.listing
   return {
     organization_id: params.organizationId,
     created_by: params.userId,
@@ -146,7 +147,7 @@ function listingInsertPayload(params: {
   }
 }
 
-async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, listing: Record<string, any>, organizationId: string | null) {
+async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, listing: Row, organizationId: string | null) {
   const score = scoreMarketListing(listing)
   const calculatedAt = new Date().toISOString()
   const { data: insertedScore } = await supabase.from('market_listing_scores').insert({
@@ -177,7 +178,7 @@ async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createS
     calculated_at: calculatedAt,
   }).select('id').single()
 
-  const review = determineDealReviewStatus(score as any, listing)
+  const review = determineDealReviewStatus(score, listing)
   if (listing.id && organizationId) {
     await supabase
       .from('market_listings')
@@ -196,15 +197,15 @@ async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createS
         latest_estimated_cap_rate: score.estimatedCapRate,
         latest_break_even_rent: score.breakEvenRent,
         latest_score_calculated_at: calculatedAt,
-        data_quality_checklist: buildDataQualityChecklist(listing, score as any),
-        confidence_breakdown: buildConfidenceBreakdown(listing, score as any),
+        data_quality_checklist: buildDataQualityChecklist(listing, score),
+        confidence_breakdown: buildConfidenceBreakdown(listing, score),
       })
       .eq('id', listing.id)
       .eq('organization_id', organizationId)
 
     await recordMarketListingActivity(supabase, {
       organizationId,
-      listingId: listing.id,
+      listingId: String(listing.id),
       eventType: 'score_calculated',
       title: 'Score calculated',
       description: `${Math.round(score.dealScore)}/100 score · rent confidence ${Math.round(score.rentConfidenceScore)}/100`,
@@ -214,24 +215,24 @@ async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createS
     if (review.dealStatus === 'ready') {
       await createInAppNotification(supabase, {
         organizationId,
-        userId: listing.created_by || null,
+        userId: rowString(listing.created_by),
         type: 'opportunity_found',
         title: 'New qualified opportunity',
         message: `${listing.title || 'A market listing'} reached ${Math.round(score.dealScore)}/100 with rent confidence ${Math.round(score.rentConfidenceScore)}/100.`,
         relatedEntityType: 'market_listing',
-        relatedEntityId: listing.id,
+        relatedEntityId: String(listing.id),
         actionHref: `/market/${listing.id}`,
         metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore },
       })
     } else if (review.dealStatus === 'low_confidence') {
       await createInAppNotification(supabase, {
         organizationId,
-        userId: listing.created_by || null,
+        userId: rowString(listing.created_by),
         type: 'rent_confidence_review',
         title: 'Rent confidence needs review',
         message: `${listing.title || 'A market listing'} has a promising score but rent confidence is below the Opportunity gate.`,
         relatedEntityType: 'market_listing',
-        relatedEntityId: listing.id,
+        relatedEntityId: String(listing.id),
         actionHref: `/market/${listing.id}`,
         metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore },
       })
@@ -241,7 +242,7 @@ async function insertScoreForListing(supabase: Awaited<ReturnType<typeof createS
 
 async function upsertNormalizedListing(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
-  listing: NormalizedMarketListing | Record<string, any>
+  listing: NormalizedMarketListing | Row
   organizationId: string
   userId: string
   sourceId?: string | null
@@ -257,8 +258,8 @@ async function upsertNormalizedListing(params: {
     visibility: params.visibility,
   })
 
-  const dedupeKey = buildNormalizedListingKey(payload as NormalizedMarketListing)
-  let existing: any = null
+  const dedupeKey = buildNormalizedListingKey(payload as unknown as NormalizedMarketListing)
+  let existing: Row | null = null
   if (payload.source_url) {
     const { data } = await params.supabase
       .from('market_listings')
@@ -292,9 +293,9 @@ async function upsertNormalizedListing(params: {
       .select('*')
       .single()
     if (error || !data) throw new Error(error?.message || 'Could not update imported listing')
-    await insertScoreForListing(params.supabase, data as any, params.organizationId)
+    await insertScoreForListing(params.supabase, data, params.organizationId)
     await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing updated from import', description: 'Existing market listing was updated from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
-    return { listing: data as any, created: false }
+    return { listing: data as Row, created: false }
   }
 
   const { data, error } = await params.supabase
@@ -303,9 +304,9 @@ async function upsertNormalizedListing(params: {
     .select('*')
     .single()
   if (error || !data) throw new Error(error?.message || 'Could not create imported listing')
-  await insertScoreForListing(params.supabase, data as any, params.organizationId)
+  await insertScoreForListing(params.supabase, data, params.organizationId)
   await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId, eventType: 'imported', title: 'Listing imported', description: 'New market listing was created from a controlled import.', metadata: { sourceType: payload.source_type, sourceUrl: payload.source_url } })
-  return { listing: data as any, created: true }
+  return { listing: data as Row, created: true }
 }
 
 function requireSourceImports(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
@@ -389,7 +390,7 @@ export async function importMarketUrlAction(formData: FormData) {
 
   if (jobError || !job) redirect(`/imports?error=${encodeURIComponent(jobError?.message || 'Could not create import job')}`)
 
-  const previewRows: Record<string, any>[] = []
+  const previewRows: Record<string, unknown>[] = []
   const listingIds: string[] = []
   let created = 0
   let updated = 0
@@ -705,7 +706,7 @@ export async function convertListingToDealAction(formData: FormData) {
     .maybeSingle()
   if (listingError || !listing) redirect(`/market?error=${encodeURIComponent(listingError?.message || 'Listing not found')}`)
 
-  const row = listing as any
+  const row = listing as Row
   const { data: deal, error: dealError } = await supabase.from('deals').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,
@@ -808,7 +809,7 @@ export async function runMarketSourceAction(formData: FormData) {
   if (error || !source) redirect(`/imports?error=${encodeURIComponent(error?.message || 'Source not found')}`)
 
   try {
-    await runMarketSourceNow(source as any, { maxUrls: 5 })
+    await runMarketSourceNow(source, { maxUrls: 5 })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run market source'
     redirect(`/imports?error=${encodeURIComponent(message)}`)
@@ -836,7 +837,8 @@ export async function publishDealToMarketAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
   if (dealError || !deal) redirect(`/deals/${dealId}?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
+  const dealRow = deal as Row
+  const property = firstRow(dealRow.properties)
 
   const publishedAt = new Date().toISOString()
   const { error: updateError } = await supabase.from('deals').update({
@@ -846,7 +848,7 @@ export async function publishDealToMarketAction(formData: FormData) {
   }).eq('id', dealId).eq('organization_id', workspace.organization.id)
   if (updateError) redirect(`/deals/${dealId}?error=${encodeURIComponent(updateError.message)}`)
 
-  const title = text(formData, 'title') || (deal as any).title
+  const title = text(formData, 'title') || dealRow.title
   const postPayload = {
     deal_id: dealId,
     organization_id: workspace.organization.id,
@@ -854,8 +856,8 @@ export async function publishDealToMarketAction(formData: FormData) {
     visibility,
     community_id: text(formData, 'community_id'),
     title,
-    summary: text(formData, 'summary') || (deal as any).notes,
-    asking_price: numberValue(formData, 'asking_price') || (deal as any).asking_price || (deal as any).purchase_price,
+    summary: text(formData, 'summary') || dealRow.notes,
+    asking_price: numberValue(formData, 'asking_price') || dealRow.asking_price || dealRow.purchase_price,
     assignment_fee: numberValue(formData, 'assignment_fee'),
     contact_name: text(formData, 'contact_name'),
     contact_email: text(formData, 'contact_email') || workspace.user.email,
@@ -880,34 +882,34 @@ export async function publishDealToMarketAction(formData: FormData) {
   const listingPayload = {
     source_type: visibility === 'community' ? 'community_deal' : 'public_deal',
     external_listing_id: dealId,
-    source_url: (deal as any).source_url,
+    source_url: dealRow.source_url,
     title,
     address: property?.address,
     city: property?.city,
     state: property?.state,
     zip_code: property?.zip_code,
     county: property?.county,
-    property_type: (deal as any).property_type,
+    property_type: dealRow.property_type,
     units: property?.number_of_units || 1,
     bedrooms: property?.bedrooms,
     bathrooms: property?.bathrooms,
     sqft: property?.square_feet,
     lot_size: property?.lot_size,
     year_built: property?.year_built,
-    list_price: (deal as any).asking_price || (deal as any).purchase_price,
-    asking_price: (deal as any).asking_price || (deal as any).purchase_price,
-    arv: (deal as any).arv,
-    rehab_estimate: (deal as any).rehab_estimate,
-    current_rent: (deal as any).current_rent,
-    market_rent: (deal as any).market_rent,
-    hud_rent: (deal as any).section8_rent,
-    taxes_annual: (deal as any).taxes_annual,
-    insurance_annual: (deal as any).insurance_annual,
-    hoa_monthly: (deal as any).hoa_monthly,
-    utilities_monthly: (deal as any).utilities_monthly,
-    description: text(formData, 'summary') || (deal as any).notes,
-    primary_image_url: (deal as any).primary_image_url,
-    image_urls: (deal as any).image_urls || [],
+    list_price: dealRow.asking_price || dealRow.purchase_price,
+    asking_price: dealRow.asking_price || dealRow.purchase_price,
+    arv: dealRow.arv,
+    rehab_estimate: dealRow.rehab_estimate,
+    current_rent: dealRow.current_rent,
+    market_rent: dealRow.market_rent,
+    hud_rent: dealRow.section8_rent,
+    taxes_annual: dealRow.taxes_annual,
+    insurance_annual: dealRow.insurance_annual,
+    hoa_monthly: dealRow.hoa_monthly,
+    utilities_monthly: dealRow.utilities_monthly,
+    description: text(formData, 'summary') || dealRow.notes,
+    primary_image_url: dealRow.primary_image_url,
+    image_urls: dealRow.image_urls || [],
     visibility,
     status: 'active',
     raw_payload: { source: 'published_deal', dealId, createdAt: publishedAt },
@@ -946,7 +948,7 @@ export async function archiveMarketListingAction(formData: FormData) {
     .maybeSingle()
   if (listingError || !listing) redirect(`${returnTo}?error=${encodeURIComponent(listingError?.message || 'Listing not found')}`)
 
-  const row = listing as any
+  const row = listing as Row
   const isOwner = row.created_by === workspace.user.id
   const membershipRole = String(workspace.membership?.role || '')
   const isOrgAdmin = workspace.access.isPlatformAdmin || ['owner', 'admin'].includes(membershipRole)
@@ -1067,7 +1069,7 @@ export async function updateMarketListingReviewStatusAction(formData: FormData) 
 async function loadOrgListing(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, listingId: string, organizationId: string) {
   const { data, error } = await supabase.from('market_listings').select('*').eq('id', listingId).eq('organization_id', organizationId).maybeSingle()
   if (error || !data) throw new Error(error?.message || 'Listing not found')
-  return data as Record<string, any>
+  return data as Row
 }
 
 
@@ -1233,7 +1235,7 @@ export async function addListingManualOverrideAction(formData: FormData) {
     const oldValue = listing[safeField] == null ? null : String(listing[safeField])
     const { error: overrideError } = await supabase.from('listing_manual_overrides').insert({ organization_id: workspace.organization.id, listing_id: listingId, field_name: safeField, old_value: oldValue, new_value: String(parsedOverrideValue), reason, apply_to_score: applyToScore, created_by: workspace.user.id })
     if (overrideError) throw new Error(`Manual override history failed: ${overrideError.message}`)
-    const listingUpdate: Record<string, any> = { [safeField]: parsedOverrideValue, review_reason: `Manual override applied to ${safeField}: ${reason}` }
+    const listingUpdate: Record<string, unknown> = { [safeField]: parsedOverrideValue, review_reason: `Manual override applied to ${safeField}: ${reason}` }
     if (safeField === 'market_rent') listingUpdate.estimated_rent = parsedOverrideValue
     const { data: updatedListing, error: listingUpdateError } = await supabase.from('market_listings').update(listingUpdate).eq('id', listingId).eq('organization_id', workspace.organization.id).select('*').single()
     if (listingUpdateError || !updatedListing) throw new Error(listingUpdateError?.message || 'Manual override did not update the listing.')

@@ -8,30 +8,29 @@ import { canUseFeature } from '@/lib/billing/features'
 import { getNextFreeOpportunityDetailUnlock, hasFullOpportunityAccess, lockedPremiumText, recordOpportunityDetailView } from '@/lib/billing/freemium'
 import { dealStatusLabel } from '@/lib/market/review'
 import { startListingConversationAction, updateListingContactSettingsAction } from '@/app/messages/actions'
+import { asRow, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function money(value: number | string | null | undefined, compact = false) {
+function money(value: unknown, compact = false) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
-function numberText(value: number | string | null | undefined) {
+function numberText(value: unknown) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return parsed.toLocaleString()
 }
 
-function percent(value: number | string | null | undefined) {
+function percent(value: unknown) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return '—'
   return `${(parsed * 100).toFixed(1)}%`
 }
 
-function dateText(value: string | null | undefined) {
+function dateText(value: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(String(value)))
 }
 
 function asStringArray(value: unknown) {
@@ -49,9 +48,9 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
   )
 }
 
-function daysUntil(value: string | null | undefined) {
+function daysUntil(value: unknown) {
   if (!value) return null
-  const days = Math.ceil((new Date(value).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+  const days = Math.ceil((new Date(String(value)).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
   return Number.isFinite(days) ? days : null
 }
 
@@ -69,7 +68,7 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
   const supabase = await createSupabaseServerClient()
 
   const buyersEnabled = canUseFeature(workspace.access.features, 'buyer_matching') || Boolean(workspace.access.isPlatformAdmin)
-  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }, { data: rentEstimates }, { data: hudSnapshots }, { data: manualOverrides }, { data: contactSettings }] = await Promise.all([
+  const [{ data: listing }, { data: scores }, { data: watch }, { data: buyerMatches }, { data: notes }, { data: activity }, { data: rentEstimates }, { data: hudSnapshots }, , { data: contactSettings }] = await Promise.all([
     supabase.from('market_listings').select('*').eq('id', id).maybeSingle(),
     supabase.from('market_listing_scores').select('*').eq('listing_id', id).order('deal_score', { ascending: false }).order('calculated_at', { ascending: false }).limit(1),
     workspace.organization?.id ? supabase.from('market_watchlist').select('*').eq('listing_id', id).eq('user_id', workspace.user.id).maybeSingle() : Promise.resolve({ data: null }),
@@ -119,7 +118,6 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
   const activityRows = (activity || []) as Row[]
   const rentRows = (rentEstimates || []) as Row[]
   const hudRows = (hudSnapshots || []) as Row[]
-  const overrideRows = (manualOverrides || []) as Row[]
   const images = [row.primary_image_url, ...asStringArray(row.image_urls)].filter(Boolean).filter((value, index, arr) => arr.indexOf(value) === index).slice(0, 8)
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
@@ -127,7 +125,7 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
   const location = [row.address, row.city, row.state, row.zip_code].filter(Boolean).join(', ')
   const expiryDays = daysUntil(row.provider_data_expires_at)
   const dataChecklist = Array.isArray(row.data_quality_checklist) ? row.data_quality_checklist : []
-  const confidenceBreakdown = row.confidence_breakdown && typeof row.confidence_breakdown === 'object' ? row.confidence_breakdown : {}
+  const confidenceBreakdown: Row = asRow(row.confidence_breakdown) ?? {}
   const confidencePositives = Array.isArray(confidenceBreakdown.positives) ? confidenceBreakdown.positives : []
   const confidenceNegatives = Array.isArray(confidenceBreakdown.negatives) ? confidenceBreakdown.negatives : []
   const contact = (contactSettings || {}) as Row
@@ -135,8 +133,8 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
   const canManageContact = Boolean(workspace.access.isPlatformAdmin || row.created_by === workspace.user.id || ['owner', 'admin'].includes(String(workspace.membership?.role || '').toLowerCase()))
   const emailVisibility = String(contact.email_visibility || 'hidden')
   const phoneVisibility = String(contact.phone_visibility || 'hidden')
-  const visibleEmail = emailVisibility === 'all_logged_in' || (emailVisibility === 'paid_only' && fullContactAccess) ? (contact.contact_email || row.broker_email || '') : ''
-  const visiblePhone = phoneVisibility === 'all_logged_in' || (phoneVisibility === 'paid_only' && fullContactAccess) ? (contact.contact_phone || row.broker_phone || '') : ''
+  const visibleEmail = emailVisibility === 'all_logged_in' || (emailVisibility === 'paid_only' && fullContactAccess) ? String(contact.contact_email || row.broker_email || '') : ''
+  const visiblePhone = phoneVisibility === 'all_logged_in' || (phoneVisibility === 'paid_only' && fullContactAccess) ? String(contact.contact_phone || row.broker_phone || '') : ''
 
   return (
     <AppShell
@@ -156,25 +154,25 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
             <div>
               <Link href="/market" className="text-sm font-medium text-slate-400 hover:text-white">← Back to Market</Link>
               <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                <span>{row.source_type || 'market'}</span>
+                <span>{String(row.source_type || 'market')}</span>
                 <span>•</span>
-                <span>{row.visibility || 'private'}</span>
+                <span>{String(row.visibility || 'private')}</span>
                 <span>•</span>
-                <span>{dealStatusLabel(row.deal_status)}</span>
+                <span>{dealStatusLabel(rowString(row.deal_status))}</span>
                 <span>•</span>
                 <span>{dateText(row.created_at)}</span>
               </div>
-              <h1 className="mt-3 max-w-4xl text-3xl font-bold tracking-tight sm:text-5xl">{row.title}</h1>
+              <h1 className="mt-3 max-w-4xl text-3xl font-bold tracking-tight sm:text-5xl">{rowString(row.title)}</h1>
               <p className="mt-3 text-slate-300">{location || 'Location pending'}</p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link href="#contact-owner" className="rounded-xl bg-sky-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-sky-200">Message listing owner</Link>
-                {row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Open source listing</a> : null}
+                {row.source_url ? <a href={String(row.source_url)} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Open source listing</a> : null}
               </div>
             </div>
             <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
               <div className="text-xs font-semibold uppercase tracking-wide">{premiumAccess ? 'Deal Score' : 'Deal Score locked'}</div>
               <div className="mt-1 text-5xl font-black">{premiumAccess ? dealScore || '—' : '🔒'}</div>
-              <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : dealStatusLabel(row.deal_status)}</div>
+              <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : dealStatusLabel(rowString(row.deal_status))}</div>
             </div>
           </div>
         </section>
@@ -203,11 +201,11 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 <Metric label="Risk" value={String(score?.risk_level || 'medium')} />
                 <Metric label="Confidence" value={String(score?.data_confidence || 'low')} />
                 <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : undefined} />
-                <Metric label="Deal status" value={dealStatusLabel(row.deal_status)} />
+                <Metric label="Deal status" value={dealStatusLabel(rowString(row.deal_status))} />
                 <Metric label="Best strategy" value={String(score?.strategy_fit || 'Needs review')} />
               </div>
-              {row.why_this_deal ? <div className="mt-5 rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4 text-sm leading-6 text-sky-50">{row.why_this_deal}</div> : null}
-              {row.review_reason ? <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-6 text-slate-300">Review note: {row.review_reason}</div> : null}
+              {row.why_this_deal ? <div className="mt-5 rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4 text-sm leading-6 text-sky-50">{String(row.why_this_deal)}</div> : null}
+              {row.review_reason ? <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-6 text-slate-300">Review note: {String(row.review_reason)}</div> : null}
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
                   <div className="text-sm font-bold text-emerald-100">Positive signals</div>
@@ -234,26 +232,26 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 <span className="rounded-full border border-emerald-400/25 px-3 py-1 text-xs font-semibold uppercase text-emerald-100">Syncs score</span>
               </div>
               <form action={updateMarketListingAnalysisInputsAction} className="mt-5">
-                <input type="hidden" name="listing_id" value={row.id} />
+                <input type="hidden" name="listing_id" value={String(row.id)} />
                 <div className="grid gap-3 md:grid-cols-3">
-                  <input name="list_price" defaultValue={row.list_price || ''} placeholder="List price" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="asking_price" defaultValue={row.asking_price || ''} placeholder="Asking price" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="arv" defaultValue={row.arv || ''} placeholder="ARV" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="current_rent" defaultValue={row.current_rent || ''} placeholder="Current rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="market_rent" defaultValue={row.market_rent || row.estimated_rent || ''} placeholder="Market rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="hud_rent" defaultValue={row.hud_rent || ''} placeholder="HUD/FMR rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="target_rent" defaultValue={row.target_rent || ''} placeholder="Target rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="rehab_estimate" defaultValue={row.rehab_estimate || ''} placeholder="Rehab estimate" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="taxes_annual" defaultValue={row.taxes_annual || ''} placeholder="Annual taxes" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="insurance_annual" defaultValue={row.insurance_annual || ''} placeholder="Annual insurance" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="hoa_monthly" defaultValue={row.hoa_monthly || ''} placeholder="Monthly HOA" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="utilities_monthly" defaultValue={row.utilities_monthly || ''} placeholder="Monthly utilities" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="capex_monthly" defaultValue={row.capex_monthly || ''} placeholder="Monthly capex" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="vacancy_percent" defaultValue={row.vacancy_percent || ''} placeholder="Vacancy %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="management_percent" defaultValue={row.management_percent || ''} placeholder="Management %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="down_payment_percent" defaultValue={row.down_payment_percent || ''} placeholder="Down payment %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="interest_rate_percent" defaultValue={row.interest_rate_percent || ''} placeholder="Interest rate %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                  <input name="loan_term_months" defaultValue={row.loan_term_months || ''} placeholder="Loan term months" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="list_price" defaultValue={String(row.list_price || '')} placeholder="List price" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="asking_price" defaultValue={String(row.asking_price || '')} placeholder="Asking price" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="arv" defaultValue={String(row.arv || '')} placeholder="ARV" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="current_rent" defaultValue={String(row.current_rent || '')} placeholder="Current rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="market_rent" defaultValue={String(row.market_rent || row.estimated_rent || '')} placeholder="Market rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="hud_rent" defaultValue={String(row.hud_rent || '')} placeholder="HUD/FMR rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="target_rent" defaultValue={String(row.target_rent || '')} placeholder="Target rent" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="rehab_estimate" defaultValue={String(row.rehab_estimate || '')} placeholder="Rehab estimate" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="taxes_annual" defaultValue={String(row.taxes_annual || '')} placeholder="Annual taxes" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="insurance_annual" defaultValue={String(row.insurance_annual || '')} placeholder="Annual insurance" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="hoa_monthly" defaultValue={String(row.hoa_monthly || '')} placeholder="Monthly HOA" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="utilities_monthly" defaultValue={String(row.utilities_monthly || '')} placeholder="Monthly utilities" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="capex_monthly" defaultValue={String(row.capex_monthly || '')} placeholder="Monthly capex" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="vacancy_percent" defaultValue={String(row.vacancy_percent || '')} placeholder="Vacancy %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="management_percent" defaultValue={String(row.management_percent || '')} placeholder="Management %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="down_payment_percent" defaultValue={String(row.down_payment_percent || '')} placeholder="Down payment %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="interest_rate_percent" defaultValue={String(row.interest_rate_percent || '')} placeholder="Interest rate %" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                  <input name="loan_term_months" defaultValue={String(row.loan_term_months || '')} placeholder="Loan term months" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                 </div>
                 <button className="mt-4 rounded-xl bg-emerald-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-200">Update analysis & sync score</button>
               </form>
@@ -267,28 +265,28 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 <Metric label="Rent confidence" value={rentConfidence ? `${rentConfidence}/100` : '—'} tone={rentConfidence >= 65 ? 'text-emerald-300' : 'text-amber-300'} />
               </div>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Latest market rent estimates</div>{rentRows.length ? <div className="mt-3 space-y-2 text-sm text-slate-300">{rentRows.map((rent) => <div key={rent.id}>• {money(rent.estimated_rent)} ({rent.confidence_score || 0}/100) · {dateText(rent.created_at)}</div>)}</div> : <p className="mt-3 text-sm text-slate-500">No market rent run yet.</p>}</div>
-                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Latest HUD/FMR snapshots</div>{hudRows.length ? <div className="mt-3 space-y-2 text-sm text-slate-300">{hudRows.map((hud) => <div key={hud.id}>• HUD {hud.hud_year || '—'} · {money(hud.selected_fmr)} · {hud.lookup_status}</div>)}</div> : <p className="mt-3 text-sm text-slate-500">No HUD/FMR lookup yet.</p>}</div>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Latest market rent estimates</div>{rentRows.length ? <div className="mt-3 space-y-2 text-sm text-slate-300">{rentRows.map((rent) => <div key={String(rent.id)}>• {money(rent.estimated_rent)} ({Number(rent.confidence_score || 0)}/100) · {dateText(rent.created_at)}</div>)}</div> : <p className="mt-3 text-sm text-slate-500">No market rent run yet.</p>}</div>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Latest HUD/FMR snapshots</div>{hudRows.length ? <div className="mt-3 space-y-2 text-sm text-slate-300">{hudRows.map((hud) => <div key={String(hud.id)}>• HUD {String(hud.hud_year || '—')} · {money(hud.selected_fmr)} · {rowString(hud.lookup_status)}</div>)}</div> : <p className="mt-3 text-sm text-slate-500">No HUD/FMR lookup yet.</p>}</div>
               </div>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Data quality & confidence</h2>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Checklist</div><div className="mt-3 space-y-2 text-sm">{dataChecklist.length ? dataChecklist.map((item: Row, index: number) => <div key={item.key || index} className={item.ok ? 'text-emerald-200' : 'text-amber-200'}>{item.ok ? '✓' : '⚠'} {item.label}</div>) : <p className="text-slate-500">Run rent intelligence to generate checklist.</p>}</div></div>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Checklist</div><div className="mt-3 space-y-2 text-sm">{dataChecklist.length ? dataChecklist.map((item: Row, index: number) => <div key={String(item.key || index)} className={item.ok ? 'text-emerald-200' : 'text-amber-200'}>{item.ok ? '✓' : '⚠'} {rowString(item.label)}</div>) : <p className="text-slate-500">Run rent intelligence to generate checklist.</p>}</div></div>
                 <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-sm font-bold">Confidence breakdown</div><div className="mt-3 grid gap-3 text-sm"><div>{confidencePositives.map((item: string, index: number) => <div key={index} className="text-emerald-200">+ {item}</div>)}</div><div>{confidenceNegatives.map((item: string, index: number) => <div key={index} className="text-amber-200">- {item}</div>)}</div>{!confidencePositives.length && !confidenceNegatives.length ? <p className="text-slate-500">No confidence breakdown yet.</p> : null}</div></div>
               </div>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Description</h2>
-              <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-300">{row.description || 'No source description imported yet. Use original source or add this listing as a deal to enrich the analysis.'}</p>
+              <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-300">{String(row.description || 'No source description imported yet. Use original source or add this listing as a deal to enrich the analysis.')}</p>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Deal notes</h2>
               <form action={addMarketListingNoteAction} className="mt-4 grid gap-3">
-                <input type="hidden" name="listing_id" value={row.id} />
+                <input type="hidden" name="listing_id" value={String(row.id)} />
                 <select name="note_type" defaultValue="internal" className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none">
                   <option value="internal">Internal note</option>
                   <option value="seller_call">Seller / broker call</option>
@@ -301,7 +299,7 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Add note</button>
               </form>
               <div className="mt-5 space-y-3">
-                {noteRows.map((note) => <div key={note.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{String(note.note_type).replaceAll('_', ' ')} · {dateText(note.created_at)}</div><p className="mt-2 text-sm leading-6 text-slate-300">{note.note}</p></div>)}
+                {noteRows.map((note) => <div key={String(note.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{String(note.note_type).replaceAll('_', ' ')} · {dateText(note.created_at)}</div><p className="mt-2 text-sm leading-6 text-slate-300">{rowString(note.note)}</p></div>)}
                 {!noteRows.length ? <p className="text-sm text-slate-500">No notes yet.</p> : null}
               </div>
             </div>
@@ -309,7 +307,7 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Activity timeline</h2>
               <div className="mt-5 space-y-3">
-                {activityRows.map((event) => <div key={event.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-white">{event.title}</div><div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{String(event.event_type).replaceAll('_', ' ')}</div></div><div className="text-xs text-slate-500">{dateText(event.created_at)}</div></div>{event.description ? <p className="mt-2 text-sm leading-6 text-slate-400">{event.description}</p> : null}</div>)}
+                {activityRows.map((event) => <div key={String(event.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-white">{rowString(event.title)}</div><div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{String(event.event_type).replaceAll('_', ' ')}</div></div><div className="text-xs text-slate-500">{dateText(event.created_at)}</div></div>{event.description ? <p className="mt-2 text-sm leading-6 text-slate-400">{String(event.description)}</p> : null}</div>)}
                 {!activityRows.length ? <p className="text-sm text-slate-500">Timeline will fill as this deal is imported, scored, saved, matched and reviewed.</p> : null}
               </div>
             </div>
@@ -325,12 +323,12 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 <span className="rounded-full border border-sky-300/30 bg-sky-300/10 px-3 py-1 text-xs font-semibold text-sky-100">Deal conversation</span>
               </div>
               <form action={startListingConversationAction} className="mt-4 space-y-3">
-                <input type="hidden" name="listing_id" value={row.id} />
+                <input type="hidden" name="listing_id" value={String(row.id)} />
                 <textarea name="body" rows={4} required placeholder="Hi, I’m interested in this listing. Is it still available?" className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
                 <button className="w-full rounded-xl bg-sky-300 px-5 py-3 text-sm font-bold text-slate-950 hover:bg-sky-200">Send message</button>
               </form>
               <dl className="mt-5 space-y-3 text-sm">
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Contact name</dt><dd className="text-right text-slate-200">{row.broker_name || 'Listing owner'}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Contact name</dt><dd className="text-right text-slate-200">{String(row.broker_name || 'Listing owner')}</dd></div>
                 <div className="flex justify-between gap-4"><dt className="text-slate-500">Phone</dt><dd className="text-right text-slate-200">{visiblePhone || (phoneVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
                 <div className="flex justify-between gap-4"><dt className="text-slate-500">Email</dt><dd className="text-right text-slate-200">{visibleEmail || (emailVisibility === 'hidden' ? 'Hidden by owner' : 'Upgrade required')}</dd></div>
               </dl>
@@ -340,34 +338,34 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
               <h2 className="text-xl font-bold">Actions</h2>
               <div className="mt-5 grid gap-3">
                 <form action={convertListingToDealAction}>
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <button className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Analyze as Deal</button>
                 </form>
                 <form action={saveOpportunityAction}>
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <input type="hidden" name="status" value="saved" />
                   <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Save to Watchlist</button>
                 </form>
                 <form action={rescoreMarketListingAction}>
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Recalculate score</button>
                 </form>
                 <form action={runListingFullIntelligenceAction}>
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <button className="w-full rounded-xl border border-emerald-400/30 px-5 py-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/10">Run Market Rent + HUD/FMR</button>
                 </form>
                 <form action={runListingMarketRentAction}>
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Run Market Rent</button>
                 </form>
                 <form action={runListingHudLookupAction}>
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <button className="w-full rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Run HUD/FMR Lookup</button>
                 </form>
                 <form action={updateMarketListingReviewStatusAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Review status</label>
-                  <select name="deal_status" defaultValue={row.deal_status || 'needs_review'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
+                  <select name="deal_status" defaultValue={String(row.deal_status || 'needs_review')} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
                     <option value="ready">Ready / Opportunity</option>
                     <option value="needs_review">Needs review</option>
                     <option value="missing_data">Missing data</option>
@@ -378,15 +376,15 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                   <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Update review</button>
                 </form>
                 <form action={updateMarketListingStageAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Deal stage</label>
-                  <select name="deal_stage" defaultValue={row.deal_stage || 'imported'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
+                  <select name="deal_stage" defaultValue={String(row.deal_stage || 'imported')} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
                     <option value="imported">Imported</option><option value="needs_review">Needs Review</option><option value="analyzed">Analyzed</option><option value="watchlist">Watchlist</option><option value="opportunity">Opportunity</option><option value="underwriting">Underwriting</option><option value="offer_made">Offer Made</option><option value="rejected">Rejected</option><option value="archived">Archived</option>
                   </select>
                   <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Update stage</button>
                 </form>
                 <form action={addListingManualOverrideAction} className="rounded-2xl border border-white/10 bg-slate-950/40 p-3">
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Manual override</label>
                   <select name="field_name" defaultValue="market_rent" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="market_rent">Market rent</option><option value="hud_rent">HUD rent</option><option value="current_rent">Current rent</option><option value="estimated_rent">Estimated rent</option><option value="target_rent">Target rent</option><option value="list_price">List price</option><option value="rehab_estimate">Rehab estimate</option></select>
                   <input name="new_value" placeholder="New value" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
@@ -395,13 +393,13 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                   <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Save override</button>
                 </form>
                 <form action={ignoreMarketListingAction} className="rounded-2xl border border-red-400/20 bg-red-400/5 p-3">
-                  <input type="hidden" name="listing_id" value={row.id} />
+                  <input type="hidden" name="listing_id" value={String(row.id)} />
                   <label className="block text-xs font-semibold uppercase tracking-wide text-red-200">Ignore / do not re-import</label>
                   <select name="ignore_reason" defaultValue="not_investment_suitable" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="bad_area">Bad area</option><option value="wrong_asset_type">Wrong asset type</option><option value="duplicate">Duplicate</option><option value="already_reviewed">Already reviewed</option><option value="unrealistic_price">Unrealistic price</option><option value="not_investment_suitable">Not investment suitable</option><option value="other">Other</option></select>
                   <input name="ignore_notes" placeholder="Optional note" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
                   <button className="mt-2 w-full rounded-xl border border-red-400/30 px-3 py-2 text-sm font-semibold text-red-100 hover:bg-red-400/10">Ignore listing</button>
                 </form>
-                {row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-center text-sm font-semibold text-slate-100 hover:bg-white/10">Open source</a> : null}
+                {row.source_url ? <a href={String(row.source_url)} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-center text-sm font-semibold text-slate-100 hover:bg-white/10">Open source</a> : null}
               </div>
               {watch?.status ? <p className="mt-4 text-xs text-slate-500">Your status: {String((watch as Row).status).replaceAll('_', ' ')}</p> : null}
             </div>
@@ -430,11 +428,11 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                   {matches.map((match) => {
                     const buyer = match.buyers as Row | null
                     return (
-                      <div key={match.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                      <div key={String(match.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="font-semibold text-white">{buyer?.name || 'Buyer'}</div>
-                            <div className="mt-1 text-xs text-slate-500">{buyer?.company_name || buyer?.email || buyer?.phone || 'Contact pending'}</div>
+                            <div className="font-semibold text-white">{String(buyer?.name || 'Buyer')}</div>
+                            <div className="mt-1 text-xs text-slate-500">{String(buyer?.company_name || buyer?.email || buyer?.phone || 'Contact pending')}</div>
                           </div>
                           <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">{Math.round(Number(match.match_score || 0))}</span>
                         </div>
@@ -450,13 +448,13 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
               <form action={updateListingContactSettingsAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
                 <h2 className="text-xl font-bold">Owner contact settings</h2>
                 <p className="mt-2 text-sm text-slate-400">Email and phone are hidden by default. Choose who can see direct contact info.</p>
-                <input type="hidden" name="listing_id" value={row.id} />
+                <input type="hidden" name="listing_id" value={String(row.id)} />
                 <label className="mt-4 flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-300"><input type="checkbox" name="allow_in_app_messages" defaultChecked={contact.allow_in_app_messages !== false} /> Allow in-app messages</label>
-                <input name="contact_email" defaultValue={contact.contact_email || row.broker_email || ''} placeholder="Contact email" className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                <select name="email_visibility" defaultValue={contact.email_visibility || 'hidden'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="hidden">Hide email</option><option value="paid_only">Show email to paid/trial users only</option><option value="all_logged_in">Show email to all logged-in users</option></select>
-                <input name="contact_phone" defaultValue={contact.contact_phone || row.broker_phone || ''} placeholder="Contact phone" className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
-                <select name="phone_visibility" defaultValue={contact.phone_visibility || 'hidden'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="hidden">Hide phone</option><option value="paid_only">Show phone to paid/trial users only</option><option value="all_logged_in">Show phone to all logged-in users</option></select>
-                <select name="preferred_contact_method" defaultValue={contact.preferred_contact_method || 'in_app'} className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="in_app">Prefer in-app chat</option><option value="email">Prefer email</option><option value="phone">Prefer phone</option></select>
+                <input name="contact_email" defaultValue={String(contact.contact_email || row.broker_email || '')} placeholder="Contact email" className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                <select name="email_visibility" defaultValue={String(contact.email_visibility || 'hidden')} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="hidden">Hide email</option><option value="paid_only">Show email to paid/trial users only</option><option value="all_logged_in">Show email to all logged-in users</option></select>
+                <input name="contact_phone" defaultValue={String(contact.contact_phone || row.broker_phone || '')} placeholder="Contact phone" className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600" />
+                <select name="phone_visibility" defaultValue={String(contact.phone_visibility || 'hidden')} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="hidden">Hide phone</option><option value="paid_only">Show phone to paid/trial users only</option><option value="all_logged_in">Show phone to all logged-in users</option></select>
+                <select name="preferred_contact_method" defaultValue={String(contact.preferred_contact_method || 'in_app')} className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none"><option value="in_app">Prefer in-app chat</option><option value="email">Prefer email</option><option value="phone">Prefer phone</option></select>
                 <button className="mt-3 w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/10">Save contact settings</button>
               </form>
             ) : null}

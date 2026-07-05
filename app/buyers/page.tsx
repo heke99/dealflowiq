@@ -5,8 +5,8 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { archiveBuyerAction, createBuyerAction, createBuyerInteractionAction, runBuyerMatchingAction } from '@/app/buyers/actions'
+import { firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
 type Search = Record<string, string | string[] | undefined>
 
 const buyerTypes = [
@@ -32,21 +32,21 @@ function one(value: string | string[] | undefined, fallback = '') {
   return value || fallback
 }
 
-function money(value: number | string | null | undefined, compact = false) {
+function money(value: unknown, compact = false) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
-function percent(value: number | string | null | undefined) {
+function percent(value: unknown) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || !parsed) return '—'
   return `${(parsed * 100).toFixed(1)}%`
 }
 
-function dateText(value: string | null | undefined) {
+function dateText(value: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(String(value)))
 }
 
 function listText(value: unknown) {
@@ -101,10 +101,10 @@ function BuyerCard({ buyer, matchCount }: { buyer: Row; matchCount: number }) {
             <span>•</span>
             <span>{String(buyer.relationship_stage || 'new').replaceAll('_', ' ')}</span>
           </div>
-          <h3 className="mt-2 truncate text-xl font-bold text-white">{buyer.name}</h3>
-          <p className="mt-1 truncate text-sm text-slate-400">{buyer.company_name || buyer.email || buyer.phone || 'Contact details pending'}</p>
+          <h3 className="mt-2 truncate text-xl font-bold text-white">{rowString(buyer.name)}</h3>
+          <p className="mt-1 truncate text-sm text-slate-400">{rowString(buyer.company_name) || rowString(buyer.email) || rowString(buyer.phone) || 'Contact details pending'}</p>
         </div>
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{buyer.status}</span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{rowString(buyer.status)}</span>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -117,24 +117,24 @@ function BuyerCard({ buyer, matchCount }: { buyer: Row; matchCount: number }) {
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-6 text-slate-400">
         <div><span className="text-slate-500">Property:</span> {listText(buyer.property_types)}</div>
         <div><span className="text-slate-500">Strategy:</span> {listText(buyer.strategies)}</div>
-        <div><span className="text-slate-500">Min targets:</span> Cashflow {money(buyer.min_cashflow)} · DSCR {buyer.min_dscr || '—'} · Cap {buyer.min_cap_rate ? percent(buyer.min_cap_rate) : '—'}</div>
+        <div><span className="text-slate-500">Min targets:</span> Cashflow {money(buyer.min_cashflow)} · DSCR {rowNumber(buyer.min_dscr) || '—'} · Cap {buyer.min_cap_rate ? percent(buyer.min_cap_rate) : '—'}</div>
       </div>
 
-      {buyer.notes ? <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-400">{buyer.notes}</p> : null}
+      {buyer.notes ? <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-400">{String(buyer.notes)}</p> : null}
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <form action={runBuyerMatchingAction}>
-          <input type="hidden" name="buyer_id" value={buyer.id} />
+          <input type="hidden" name="buyer_id" value={String(buyer.id)} />
           <button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Match now</button>
         </form>
         <form action={archiveBuyerAction}>
-          <input type="hidden" name="buyer_id" value={buyer.id} />
+          <input type="hidden" name="buyer_id" value={String(buyer.id)} />
           <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Archive</button>
         </form>
       </div>
 
       <form action={createBuyerInteractionAction} className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-        <input type="hidden" name="buyer_id" value={buyer.id} />
+        <input type="hidden" name="buyer_id" value={String(buyer.id)} />
         <input type="hidden" name="interaction_type" value="note" />
         <input type="hidden" name="direction" value="internal" />
         <textarea name="summary" rows={2} placeholder="Add quick note / follow-up..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
@@ -156,7 +156,7 @@ function MatchCard({ match }: { match: Row }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-xs font-bold uppercase tracking-wide text-emerald-300">Buyer match</div>
-          <Link href={`/market/${listing.id}`} className="mt-2 block text-lg font-bold text-white hover:underline">{listing.title || listing.address || 'Market listing'}</Link>
+          <Link href={`/market/${listing.id}`} className="mt-2 block text-lg font-bold text-white hover:underline">{rowString(listing.title) || rowString(listing.address) || 'Market listing'}</Link>
           <p className="mt-1 text-sm text-slate-400">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</p>
         </div>
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-center text-emerald-100">
@@ -165,8 +165,8 @@ function MatchCard({ match }: { match: Row }) {
         </div>
       </div>
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-        <div className="text-sm font-semibold text-white">{buyer.name}{buyer.company_name ? ` · ${buyer.company_name}` : ''}</div>
-        <div className="mt-1 text-xs text-slate-500">{buyer.email || buyer.phone || 'Contact pending'} · {String(match.status || 'auto_matched').replaceAll('_', ' ')}</div>
+        <div className="text-sm font-semibold text-white">{rowString(buyer.name)}{buyer.company_name ? ` · ${buyer.company_name}` : ''}</div>
+        <div className="mt-1 text-xs text-slate-500">{rowString(buyer.email) || rowString(buyer.phone) || 'Contact pending'} · {String(match.status || 'auto_matched').replaceAll('_', ' ')}</div>
         {reasons.length ? <ul className="mt-3 space-y-1 text-sm leading-6 text-slate-300">{reasons.slice(0, 3).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul> : null}
         {risks.length ? <p className="mt-2 text-xs text-amber-200">Risk: {String(risks[0])}</p> : null}
       </div>
@@ -289,7 +289,7 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
                 </nav>
               </div>
               <div className="mt-5 grid gap-5 lg:grid-cols-2">
-                {buyers.map((buyer) => <BuyerCard key={buyer.id} buyer={buyer} matchCount={matchCountMap.get(String(buyer.id)) || 0} />)}
+                {buyers.map((buyer) => <BuyerCard key={String(buyer.id)} buyer={buyer} matchCount={matchCountMap.get(String(buyer.id)) || 0} />)}
                 {!buyers.length ? <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-sm text-slate-500 lg:col-span-2">No buyers in this status yet. Add your first buyer to start matching opportunities.</div> : null}
               </div>
             </div>
@@ -306,7 +306,7 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
               <Link href="/opportunities" className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Opportunities</Link>
             </div>
             <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              {matches.map((match) => <MatchCard key={match.id} match={match} />)}
+              {matches.map((match) => <MatchCard key={String(match.id)} match={match} />)}
               {!matches.length ? <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-sm text-slate-500 lg:col-span-2">No buyer matches yet. Add buyers, make sure Market has scored listings, then click Run buyer matching.</div> : null}
             </div>
           </div>
@@ -315,9 +315,9 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
             <h2 className="text-xl font-bold">Recent notes</h2>
             <div className="mt-5 space-y-3">
               {(interactionsResult.data || []).map((item: Row) => (
-                <div key={item.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-                  <div className="text-sm font-semibold text-white">{item.buyers?.name || 'Buyer'}</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{item.summary}</p>
+                <div key={String(item.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <div className="text-sm font-semibold text-white">{rowString(firstRow(item.buyers)?.name) || 'Buyer'}</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">{rowString(item.summary)}</p>
                   <div className="mt-2 text-xs text-slate-500">{dateText(item.created_at)}{item.next_follow_up_at ? ` · Follow-up ${dateText(item.next_follow_up_at)}` : ''}</div>
                 </div>
               ))}

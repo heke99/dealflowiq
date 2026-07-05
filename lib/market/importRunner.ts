@@ -11,12 +11,14 @@ import {
   fetchAndNormalizeMarketUrl,
   type NormalizedMarketListing,
 } from '@/lib/market/sourceConnectors'
+import { asRow, asRows, rowString, type Row } from '@/lib/types/rows'
+import type { createSupabaseServerClient } from '@/lib/supabase/server'
 
-type SupabaseAny = ReturnType<typeof createSupabaseAdminClient>
+type SupabaseAny = ReturnType<typeof createSupabaseAdminClient> | Awaited<ReturnType<typeof createSupabaseServerClient>>
 
-type SourceRow = Record<string, any>
+type SourceRow = Record<string, unknown>
 
-function asArrayOfUrls(settings: Record<string, any>) {
+function asArrayOfUrls(settings: Record<string, unknown>) {
   const values = [settings.source_url, settings.sourceUrl, settings.url]
   const arrays = [settings.source_urls, settings.sourceUrls, settings.urls, settings.search_urls, settings.searchUrls]
   const urls = new Set<string>()
@@ -44,7 +46,7 @@ async function loadQueuedUrls(supabase: SupabaseAny, source: SourceRow, limit: n
     .limit(limit)
 
   if (error) return []
-  return (data || []).filter((item: any) => typeof item.input_url === 'string' && item.input_url.startsWith('http'))
+  return asRows(data).filter((item) => typeof item.input_url === 'string' && item.input_url.startsWith('http'))
 }
 
 async function seedSourceQueueFromSettings(supabase: SupabaseAny, source: SourceRow, urls: string[]) {
@@ -67,7 +69,7 @@ function retryAt(attempts: number) {
   return date.toISOString()
 }
 
-function nextRunFor(frequency: string | null | undefined) {
+function nextRunFor(frequency: unknown) {
   const now = new Date()
   const value = String(frequency || 'daily')
   if (value === 'hourly') now.setHours(now.getHours() + 1)
@@ -78,14 +80,14 @@ function nextRunFor(frequency: string | null | undefined) {
 }
 
 function listingInsertPayload(params: {
-  listing: NormalizedMarketListing | Record<string, any>
+  listing: NormalizedMarketListing | Record<string, unknown>
   organizationId: string
   userId?: string | null
   sourceId?: string | null
   importJobId?: string | null
   visibility?: string
 }) {
-  const listing: Record<string, any> = params.listing
+  const listing: Record<string, unknown> = params.listing
   return {
     organization_id: params.organizationId,
     created_by: params.userId || null,
@@ -129,9 +131,9 @@ function listingInsertPayload(params: {
     visibility: params.visibility || listing.visibility || 'private',
     status: listing.status || 'active',
     raw_payload: {
-      ...(listing.raw_payload || { source: 'scheduled_market_import', createdAt: new Date().toISOString() }),
+      ...(asRow(listing.raw_payload) || { source: 'scheduled_market_import', createdAt: new Date().toISOString() }),
       source_metadata: {
-        ...((listing.raw_payload && typeof listing.raw_payload === 'object' ? (listing.raw_payload as any).source_metadata : {}) || {}),
+        ...(asRow(asRow(listing.raw_payload)?.source_metadata) || {}),
         asset_class: listing.asset_class || null,
         latitude: listing.latitude || null,
         longitude: listing.longitude || null,
@@ -145,7 +147,7 @@ function listingInsertPayload(params: {
   }
 }
 
-export async function insertMarketListingScore(supabase: SupabaseAny, listing: Record<string, any>, organizationId: string | null) {
+export async function insertMarketListingScore(supabase: SupabaseAny, listing: Record<string, unknown>, organizationId: string | null) {
   const score = scoreMarketListing(listing)
   const calculatedAt = new Date().toISOString()
   const { data: insertedScore, error } = await supabase.from('market_listing_scores').insert({
@@ -178,7 +180,7 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
   if (error) throw new Error(error.message)
 
   if (organizationId && listing.id) {
-    const review = determineDealReviewStatus(score as any, listing)
+    const review = determineDealReviewStatus(score, listing)
     const rank = classifyOpportunity(score.dealScore, score.rentConfidenceScore, Array.isArray(score.missingFields) && score.missingFields.length > 0)
     await supabase
       .from('market_listings')
@@ -206,8 +208,8 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
 
     await recordMarketListingActivity(supabase, {
       organizationId,
-      listingId: listing.id,
-      actorId: listing.created_by || null,
+      listingId: String(listing.id),
+      actorId: rowString(listing.created_by) || null,
       eventType: 'score_calculated',
       title: 'Score calculated by import worker',
       description: `${Math.round(score.dealScore)}/100 score · rent confidence ${Math.round(score.rentConfidenceScore)}/100`,
@@ -217,24 +219,24 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
     if (review.dealStatus === 'ready') {
       await createInAppNotification(supabase, {
         organizationId,
-        userId: listing.created_by || null,
+        userId: rowString(listing.created_by) || null,
         type: 'opportunity_found',
         title: 'New high-score opportunity found',
         message: `${listing.title || 'A market listing'} reached ${Math.round(score.dealScore)}/100 and passed rent confidence rules.`,
         relatedEntityType: 'market_listing',
-        relatedEntityId: listing.id,
+        relatedEntityId: String(listing.id),
         actionHref: `/market/${listing.id}`,
         metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore },
       })
     } else if (review.dealStatus === 'low_confidence') {
       await createInAppNotification(supabase, {
         organizationId,
-        userId: listing.created_by || null,
+        userId: rowString(listing.created_by) || null,
         type: 'rent_confidence_review',
         title: 'Rent confidence needs review',
         message: `${listing.title || 'A market listing'} needs rent review before Opportunity promotion.`,
         relatedEntityType: 'market_listing',
-        relatedEntityId: listing.id,
+        relatedEntityId: String(listing.id),
         actionHref: `/market/${listing.id}`,
         metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore },
       })
@@ -246,7 +248,7 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
 
 export async function upsertMarketListingFromNormalized(params: {
   supabase: SupabaseAny
-  listing: NormalizedMarketListing | Record<string, any>
+  listing: NormalizedMarketListing | Record<string, unknown>
   organizationId: string
   userId?: string | null
   sourceId?: string | null
@@ -261,9 +263,9 @@ export async function upsertMarketListingFromNormalized(params: {
     importJobId: params.importJobId,
     visibility: params.visibility,
   })
-  const dedupeKey = buildNormalizedListingKey(payload as NormalizedMarketListing)
+  const dedupeKey = buildNormalizedListingKey(payload as unknown as NormalizedMarketListing)
 
-  let existing: any = null
+  let existing: Row | null = null
   if (payload.source_url) {
     const { data } = await params.supabase
       .from('market_listings')
@@ -298,11 +300,11 @@ export async function upsertMarketListingFromNormalized(params: {
       .select('*')
       .single()
     if (error || !data) throw new Error(error?.message || 'Could not update market listing')
-    await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data as any, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
+    await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
     const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
-    const score = await insertMarketListingScore(params.supabase, (refreshed || data) as any, params.organizationId)
+    const score = await insertMarketListingScore(params.supabase, refreshed || data, params.organizationId)
     await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing updated from source run', description: 'Existing listing was refreshed by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
-    return { listing: (refreshed || data) as any, created: false, score }
+    return { listing: refreshed || data, created: false, score }
   }
 
   const { data, error } = await params.supabase
@@ -311,11 +313,11 @@ export async function upsertMarketListingFromNormalized(params: {
     .select('*')
     .single()
   if (error || !data) throw new Error(error?.message || 'Could not create market listing')
-  await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data as any, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
+  await applyAutomatedRentIntelligence({ supabase: params.supabase, listing: data, organizationId: params.organizationId, userId: params.userId || null, trigger: 'auto_import' })
   const { data: refreshed } = await params.supabase.from('market_listings').select('*').eq('id', data.id).maybeSingle()
-  const score = await insertMarketListingScore(params.supabase, (refreshed || data) as any, params.organizationId)
+  const score = await insertMarketListingScore(params.supabase, refreshed || data, params.organizationId)
   await recordMarketListingActivity(params.supabase, { organizationId: params.organizationId, listingId: data.id, actorId: params.userId || null, eventType: 'imported', title: 'Listing imported from source run', description: 'New listing was created by the import worker.', metadata: { sourceId: params.sourceId, sourceType: payload.source_type } })
-  return { listing: (refreshed || data) as any, created: true, score }
+  return { listing: refreshed || data, created: true, score }
 }
 
 
@@ -334,7 +336,7 @@ function capRateNumber(value: unknown) {
   return parsed > 1 ? parsed / 100 : parsed
 }
 
-function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string, any>, score: Awaited<ReturnType<typeof insertMarketListingScore>>, threshold: number) {
+function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string, unknown>, score: Awaited<ReturnType<typeof insertMarketListingScore>>, threshold: number) {
   if (!buyBox) {
     return {
       matchScore: score.dealScore,
@@ -508,13 +510,13 @@ function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string
 
 export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?: number }) {
   const supabase = createSupabaseAdminClient()
-  const settings = (source.settings && typeof source.settings === 'object' ? source.settings : {}) as Record<string, any>
+  const settings = (source.settings && typeof source.settings === 'object' ? source.settings : {}) as Record<string, unknown>
   const maxUrls = options?.maxUrls || Number(settings.max_urls_per_run || 5) || 5
   const configuredUrls = asArrayOfUrls(settings)
   await seedSourceQueueFromSettings(supabase, source, configuredUrls)
   const queuedItems = await loadQueuedUrls(supabase, source, maxUrls)
-  const urls = queuedItems.length ? queuedItems.map((item: any) => item.input_url) : configuredUrls.slice(0, maxUrls)
-  const queueItemByUrl = new Map<string, any>()
+  const urls = queuedItems.length ? queuedItems.map((item) => String(item.input_url)) : configuredUrls.slice(0, maxUrls)
+  const queueItemByUrl = new Map<string, Row>()
   for (const item of queuedItems) queueItemByUrl.set(String(item.input_url), item)
   const threshold = Number(source.opportunity_score_threshold ?? settings.opportunity_score_threshold ?? OPPORTUNITY_SCORE_THRESHOLD)
   const { data: buyBox } = source.buy_box_id
@@ -574,11 +576,11 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       const result = await upsertMarketListingFromNormalized({
         supabase,
         listing: normalized,
-        organizationId: source.organization_id,
-        userId: source.created_by,
-        sourceId: source.id,
+        organizationId: String(source.organization_id),
+        userId: rowString(source.created_by),
+        sourceId: String(source.id),
         importJobId: job.id,
-        visibility: source.default_visibility || settings.default_visibility || 'private',
+        visibility: String(source.default_visibility || settings.default_visibility || 'private'),
       })
       if (result.created) created += 1
       else updated += 1
@@ -680,13 +682,13 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
   }).eq('id', source.id)
 
   await createInAppNotification(supabase, {
-    organizationId: source.organization_id,
-    userId: source.created_by || null,
+    organizationId: String(source.organization_id),
+    userId: rowString(source.created_by) || null,
     type: 'buy_box_run_completed',
     title: 'Import source run completed',
     message: `${source.source_name || 'Source'} finished: ${created} created, ${updated} updated, ${opportunities} opportunities, ${failed} failed.`,
     relatedEntityType: 'market_source',
-    relatedEntityId: source.id,
+    relatedEntityId: String(source.id),
     actionHref: '/market?tab=sources',
     metadata: { created, updated, failed, opportunities, topScore, listingIds },
   })

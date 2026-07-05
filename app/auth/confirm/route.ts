@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import type { EmailOtpType } from '@supabase/supabase-js'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
-const allowedOtpTypes = new Set(['signup', 'invite', 'magiclink', 'recovery', 'email', 'email_change'])
+const allowedOtpTypes = new Set<EmailOtpType>(['signup', 'invite', 'magiclink', 'recovery', 'email', 'email_change'])
+
+function isAllowedOtpType(value: string): value is EmailOtpType {
+  return allowedOtpTypes.has(value as EmailOtpType)
+}
 
 function safeNext(value: string | null, type: string) {
   const fallback = type === 'recovery' ? '/reset-password' : '/dashboard'
@@ -14,7 +19,7 @@ export async function GET(request: NextRequest) {
   const code = url.searchParams.get('code')
   const tokenHash = url.searchParams.get('token_hash')
   const rawType = url.searchParams.get('type') || 'email'
-  const type = allowedOtpTypes.has(rawType) ? rawType : 'email'
+  const type: EmailOtpType = isAllowedOtpType(rawType) ? rawType : 'email'
   const next = safeNext(url.searchParams.get('next'), type)
   const errorDescription = url.searchParams.get('error_description') || url.searchParams.get('error')
 
@@ -37,7 +42,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { error } = await supabase.auth.verifyOtp({
-    type: type as any,
+    type,
     token_hash: tokenHash,
   })
 

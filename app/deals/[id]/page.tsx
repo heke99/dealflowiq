@@ -6,21 +6,22 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { deleteDealAction, quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
 import { publishDealToMarketAction } from '@/app/market/actions'
+import { asRows, firstRow, type Row } from '@/lib/types/rows'
 
-function money(value: number | string | null | undefined) {
+function money(value: unknown) {
   const numberValue = Number(value || 0)
   if (!numberValue) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(numberValue)
 }
 
-function percent(value: number | string | null | undefined) {
+function percent(value: unknown) {
   const numberValue = Number(value || 0)
   if (!numberValue) return '—'
   return `${numberValue}%`
 }
 
 
-function DealHeroImage({ deal, heroImageUrl }: { deal: Record<string, any>; heroImageUrl?: string | null }) {
+function DealHeroImage({ deal, heroImageUrl }: { deal: Row; heroImageUrl?: string | null }) {
   const imageUrl = String(heroImageUrl || deal.primary_image_url || '')
   if (imageUrl) {
     return <div className="h-64 rounded-3xl border border-white/10 bg-cover bg-center" style={{ backgroundImage: `url(${imageUrl})` }} />
@@ -44,28 +45,30 @@ function row(label: string, value: React.ReactNode) {
   )
 }
 
-function QuickField({ label, name, defaultValue, placeholder }: { label: string; name: string; defaultValue?: string | number | null; placeholder?: string }) {
+function QuickField({ label, name, defaultValue, placeholder }: { label: string; name: string; defaultValue?: unknown; placeholder?: string }) {
   return (
     <label className="block">
       <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
-      <input name={name} type="number" step="0.01" defaultValue={defaultValue ?? ''} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+      <input name={name} type="number" step="0.01" defaultValue={String(defaultValue ?? '')} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
     </label>
   )
 }
 
-async function signDealFiles(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, files: Record<string, any>[]): Promise<Array<Record<string, any> & { signedUrl: string | null }>> {
-  const signed: Array<Record<string, any> & { signedUrl: string | null }> = []
+type SignedDealFile = Row & { signedUrl: string | null }
+
+async function signDealFiles(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, files: Row[]): Promise<SignedDealFile[]> {
+  const signed: SignedDealFile[] = []
   for (const file of files) {
-    const { data } = await supabase.storage.from(file.storage_bucket || 'deal-files').createSignedUrl(file.storage_path, 60 * 60)
+    const { data } = await supabase.storage.from(String(file.storage_bucket || 'deal-files')).createSignedUrl(String(file.storage_path), 60 * 60)
     signed.push({ ...file, signedUrl: data?.signedUrl || null })
   }
   return signed
 }
 
-function DealFilesSection({ files }: { files: Record<string, any>[] }) {
+function DealFilesSection({ files }: { files: SignedDealFile[] }) {
   if (!files.length) return null
-  const images = files.filter((file) => file.file_kind === 'image' && file.signedUrl)
-  const documents = files.filter((file) => file.file_kind === 'pdf' && file.signedUrl)
+  const images = files.filter((file): file is Row & { signedUrl: string } => file.file_kind === 'image' && Boolean(file.signedUrl))
+  const documents = files.filter((file): file is Row & { signedUrl: string } => file.file_kind === 'pdf' && Boolean(file.signedUrl))
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -78,9 +81,9 @@ function DealFilesSection({ files }: { files: Record<string, any>[] }) {
       {images.length ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {images.map((file) => (
-            <a key={file.id} href={file.signedUrl} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50">
+            <a key={String(file.id)} href={file.signedUrl} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50">
               <div className="h-44 bg-cover bg-center transition group-hover:scale-[1.02]" style={{ backgroundImage: `url(${file.signedUrl})` }} />
-              <div className="truncate px-3 py-2 text-xs text-slate-400">{file.file_name}</div>
+              <div className="truncate px-3 py-2 text-xs text-slate-400">{String(file.file_name)}</div>
             </a>
           ))}
         </div>
@@ -88,8 +91,8 @@ function DealFilesSection({ files }: { files: Record<string, any>[] }) {
       {documents.length ? (
         <div className="mt-5 grid gap-2">
           {documents.map((file) => (
-            <a key={file.id} href={file.signedUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm hover:bg-white/5">
-              <span className="truncate font-semibold text-slate-100">{file.file_name}</span>
+            <a key={String(file.id)} href={file.signedUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm hover:bg-white/5">
+              <span className="truncate font-semibold text-slate-100">{String(file.file_name)}</span>
               <span className="shrink-0 text-xs text-slate-500">Open PDF</span>
             </a>
           ))}
@@ -106,7 +109,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
   const supabase = await createSupabaseServerClient()
   const organizationId = workspace.organization?.id
 
-  const { data: deal } = organizationId
+  const { data: dealData } = organizationId
     ? await supabase
         .from('deals')
         .select('*, properties(*)')
@@ -115,7 +118,8 @@ export default async function DealDetailPage({ params, searchParams }: { params:
         .maybeSingle()
     : { data: null }
 
-  if (!deal) notFound()
+  if (!dealData) notFound()
+  const deal = dealData as Row
 
   const { data: dealFiles } = await supabase
     .from('deal_files')
@@ -125,15 +129,17 @@ export default async function DealDetailPage({ params, searchParams }: { params:
     .order('file_kind', { ascending: true })
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true })
-  const signedDealFiles = await signDealFiles(supabase, (dealFiles || []) as Record<string, any>[])
+  const signedDealFiles = await signDealFiles(supabase, asRows(dealFiles))
   const firstUploadedImage = signedDealFiles.find((file) => file.file_kind === 'image' && file.signedUrl)?.signedUrl || null
 
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
-  const currentRent = Number((deal as any).current_rent || 0)
-  const marketRent = Number((deal as any).market_rent || 0)
-  const hudRent = Number((deal as any).section8_rent || 0)
+  const property = firstRow(deal.properties)
+  const currentRent = Number(deal.current_rent || 0)
+  const marketRent = Number(deal.market_rent || 0)
+  const hudRent = Number(deal.section8_rent || 0)
   const rentGap = marketRent - currentRent
   const hudGap = hudRent - currentRent
+  const savedVisibility = deal.visibility
+  const publishVisibility = savedVisibility === 'public' || savedVisibility === 'community' || savedVisibility === 'team' ? savedVisibility : 'team'
 
   return (
     <AppShell
@@ -150,14 +156,14 @@ export default async function DealDetailPage({ params, searchParams }: { params:
         <section className="grid gap-6 rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:grid-cols-[1fr_360px] lg:items-start">
           <div>
             <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Deal Detail</div>
-            <h1 className="mt-2 text-3xl font-bold">{(deal as any).title}</h1>
+            <h1 className="mt-2 text-3xl font-bold">{String(deal.title)}</h1>
             <p className="mt-3 max-w-3xl text-slate-300">
               {[property?.address, property?.city, property?.state, property?.zip_code].filter(Boolean).join(', ') || 'No address entered yet'}
             </p>
             <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-              <span className="rounded-full border border-white/10 px-3 py-1">{String((deal as any).status || 'draft').replaceAll('_', ' ')}</span>
-              <span className="rounded-full border border-white/10 px-3 py-1">{(deal as any).property_type || 'Property type pending'}</span>
-              <span className="rounded-full border border-white/10 px-3 py-1">{property?.number_of_units || 1} unit(s)</span>
+              <span className="rounded-full border border-white/10 px-3 py-1">{String(deal.status || 'draft').replaceAll('_', ' ')}</span>
+              <span className="rounded-full border border-white/10 px-3 py-1">{String(deal.property_type || 'Property type pending')}</span>
+              <span className="rounded-full border border-white/10 px-3 py-1">{Number(property?.number_of_units || 1)} unit(s)</span>
             </div>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link href={`/deals/${id}/analyzer`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">Analyze</Link>
@@ -171,13 +177,13 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <div className="text-sm font-semibold text-slate-100">Publish to Market / Community</div>
             <p className="mt-1 text-xs leading-5 text-slate-500">Choose where this deal should appear. Team is internal, Community/Public can be premium deal-board posts.</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <select name="visibility" defaultValue={(deal as any).visibility === 'public' || (deal as any).visibility === 'community' || (deal as any).visibility === 'team' ? (deal as any).visibility : 'team'} className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
+              <select name="visibility" defaultValue={publishVisibility} className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
                 <option value="team">Team Market</option>
                 <option value="community">Community Deals</option>
                 <option value="public">Public Deals</option>
               </select>
               <input name="assignment_fee" type="number" placeholder="Assignment fee, optional" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
-              <input name="asking_price" type="number" defaultValue={(deal as any).asking_price || (deal as any).purchase_price || ''} placeholder="Asking price" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+              <input name="asking_price" type="number" defaultValue={String(deal.asking_price || deal.purchase_price || '')} placeholder="Asking price" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
               <input name="contact_email" type="email" defaultValue={workspace.user.email || ''} placeholder="Contact email" className="rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
             </div>
             <textarea name="summary" rows={3} placeholder="Short public/community summary. Leave blank to use deal notes." className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
@@ -190,7 +196,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <button className="mt-3 w-full rounded-xl border border-red-300/30 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20">Delete Deal</button>
           </form>
         </div>
-        <DealHeroImage deal={deal as any} heroImageUrl={firstUploadedImage} />
+        <DealHeroImage deal={deal} heroImageUrl={firstUploadedImage} />
         </section>
 
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
@@ -201,11 +207,11 @@ export default async function DealDetailPage({ params, searchParams }: { params:
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <div className="text-sm text-slate-400">Purchase Price</div>
-            <div className="mt-3 text-2xl font-bold">{money((deal as any).purchase_price)}</div>
+            <div className="mt-3 text-2xl font-bold">{money(deal.purchase_price)}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <div className="text-sm text-slate-400">ARV</div>
-            <div className="mt-3 text-2xl font-bold">{money((deal as any).arv)}</div>
+            <div className="mt-3 text-2xl font-bold">{money(deal.arv)}</div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
             <div className="text-sm text-slate-400">Market Rent Gap</div>
@@ -232,18 +238,18 @@ export default async function DealDetailPage({ params, searchParams }: { params:
           <form action={quickUpdateDealAssumptionsAction} className="mt-5 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
             <input type="hidden" name="deal_id" value={id} />
             <input type="hidden" name="redirect_to" value={`/deals/${id}`} />
-            <QuickField label="Purchase price" name="purchase_price" defaultValue={(deal as any).purchase_price} />
-            <QuickField label="Current rent" name="current_rent" defaultValue={(deal as any).current_rent} />
-            <QuickField label="Market rent" name="market_rent" defaultValue={(deal as any).market_rent} />
-            <QuickField label="HUD rent" name="section8_rent" defaultValue={(deal as any).section8_rent} />
-            <QuickField label="Taxes / year" name="taxes_annual" defaultValue={(deal as any).taxes_annual} />
-            <QuickField label="Insurance / year" name="insurance_annual" defaultValue={(deal as any).insurance_annual} />
-            <QuickField label="Vacancy %" name="vacancy_percent" defaultValue={(deal as any).vacancy_percent} />
-            <QuickField label="Management %" name="management_percent" defaultValue={(deal as any).management_percent} />
-            <QuickField label="Down payment %" name="down_payment_percent" defaultValue={(deal as any).down_payment_percent} />
-            <QuickField label="Interest %" name="interest_rate_percent" defaultValue={(deal as any).interest_rate_percent} />
-            <QuickField label="Loan months" name="loan_term_months" defaultValue={(deal as any).loan_term_months} />
-            <QuickField label="DSCR target" name="dscr_min_threshold" defaultValue={(deal as any).dscr_min_threshold} />
+            <QuickField label="Purchase price" name="purchase_price" defaultValue={deal.purchase_price} />
+            <QuickField label="Current rent" name="current_rent" defaultValue={deal.current_rent} />
+            <QuickField label="Market rent" name="market_rent" defaultValue={deal.market_rent} />
+            <QuickField label="HUD rent" name="section8_rent" defaultValue={deal.section8_rent} />
+            <QuickField label="Taxes / year" name="taxes_annual" defaultValue={deal.taxes_annual} />
+            <QuickField label="Insurance / year" name="insurance_annual" defaultValue={deal.insurance_annual} />
+            <QuickField label="Vacancy %" name="vacancy_percent" defaultValue={deal.vacancy_percent} />
+            <QuickField label="Management %" name="management_percent" defaultValue={deal.management_percent} />
+            <QuickField label="Down payment %" name="down_payment_percent" defaultValue={deal.down_payment_percent} />
+            <QuickField label="Interest %" name="interest_rate_percent" defaultValue={deal.interest_rate_percent} />
+            <QuickField label="Loan months" name="loan_term_months" defaultValue={deal.loan_term_months} />
+            <QuickField label="DSCR target" name="dscr_min_threshold" defaultValue={deal.dscr_min_threshold} />
             <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 md:col-span-3 xl:col-span-6">Update analysis inputs</button>
           </form>
         </section>
@@ -252,27 +258,27 @@ export default async function DealDetailPage({ params, searchParams }: { params:
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
             <h2 className="text-xl font-bold">Rent assumptions</h2>
             <dl className="mt-4 text-sm">
-              {row('Current rent', money((deal as any).current_rent))}
-              {row('Market rent', money((deal as any).market_rent))}
-              {row('Section 8 / HUD rent', money((deal as any).section8_rent))}
-              {row('Target rent', money((deal as any).target_rent))}
+              {row('Current rent', money(deal.current_rent))}
+              {row('Market rent', money(deal.market_rent))}
+              {row('Section 8 / HUD rent', money(deal.section8_rent))}
+              {row('Target rent', money(deal.target_rent))}
             </dl>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
             <h2 className="text-xl font-bold">Expense assumptions</h2>
             <dl className="mt-4 text-sm">
-              {row('Annual taxes', money((deal as any).taxes_annual))}
-              {row('Annual insurance', money((deal as any).insurance_annual))}
-              {row('Monthly HOA', money((deal as any).hoa_monthly))}
-              {row('Monthly utilities', money((deal as any).utilities_monthly))}
-              {row('Vacancy', percent((deal as any).vacancy_percent))}
-              {row('Management', percent((deal as any).management_percent))}
+              {row('Annual taxes', money(deal.taxes_annual))}
+              {row('Annual insurance', money(deal.insurance_annual))}
+              {row('Monthly HOA', money(deal.hoa_monthly))}
+              {row('Monthly utilities', money(deal.utilities_monthly))}
+              {row('Vacancy', percent(deal.vacancy_percent))}
+              {row('Management', percent(deal.management_percent))}
             </dl>
           </div>
         </section>
 
-        <FinancialSnapshot deal={deal as any} property={property as any} />
+        <FinancialSnapshot deal={deal} property={property} />
       </div>
     </AppShell>
   )

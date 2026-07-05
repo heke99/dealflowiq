@@ -22,7 +22,7 @@ export function SubmitButton({ children, pendingText = 'Working...', pendingHint
       disabled={disabled || isPending}
       aria-disabled={disabled || isPending}
       aria-live="polite"
-      formAction={formAction as any}
+      formAction={formAction}
       className={`${className} ${(disabled || isPending) ? 'cursor-wait opacity-70' : ''}`.trim()}
     >
       {isPending ? (

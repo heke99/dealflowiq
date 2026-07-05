@@ -3,16 +3,15 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createCommunityInviteAction, createCommunityTeamAction, revokeCommunityInviteAction } from '@/app/community/actions'
-
-type Row = Record<string, any>
+import { firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
 
 type CommunityPageProps = {
   searchParams?: Promise<{ error?: string; message?: string; code?: string }> | { error?: string; message?: string; code?: string }
 }
 
-function fmtDate(value?: string | null) {
+function fmtDate(value?: unknown) {
   if (!value) return 'No expiry'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(String(value)))
 }
 
 function inviteLink(code: string) {
@@ -114,7 +113,7 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
                   <label className="block"><span className="text-sm font-medium text-slate-300">Email address</span><input name="email" type="email" placeholder="member@example.com" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/30" /></label>
                   <label className="block"><span className="text-sm font-medium text-slate-300">Full name</span><input name="full_name" placeholder="Optional" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white/30" /></label>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block"><span className="text-sm font-medium text-slate-300">Team</span><select name="team_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30"><option value="">No team</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+                    <label className="block"><span className="text-sm font-medium text-slate-300">Team</span><select name="team_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30"><option value="">No team</option>{teams.map((team) => <option key={String(team.id)} value={String(team.id)}>{rowString(team.name)}</option>)}</select></label>
                     <label className="block"><span className="text-sm font-medium text-slate-300">Role</span><select name="role" defaultValue="member" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-white/30"><option value="member">Member</option><option value="viewer">Viewer</option><option value="buyer">Buyer</option><option value="acquisition_manager">Acquisition manager</option><option value="disposition_manager">Disposition manager</option><option value="admin">Admin</option></select></label>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -146,26 +145,27 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
               <div className="mt-5 space-y-3">
                 {invites.map((invite) => {
                   const code = String(invite.invite_code || '')
+                  const team = firstRow(invite.community_teams)
                   return (
-                    <div key={invite.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                    <div key={String(invite.id)} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <div className="font-mono text-lg font-bold tracking-wider text-white">{code}</div>
-                          <div className="mt-1 text-sm text-slate-400">{invite.email || 'Reusable code'}{invite.community_teams?.name ? ` · ${invite.community_teams.name}` : ''}</div>
+                          <div className="mt-1 text-sm text-slate-400">{rowString(invite.email) || 'Reusable code'}{team?.name ? ` · ${team.name}` : ''}</div>
                         </div>
-                        <StatusPill value={invite.status} />
+                        <StatusPill value={String(invite.status)} />
                       </div>
                       <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-4">
                         <div>Role <span className="block text-slate-200">{String(invite.role).replaceAll('_', ' ')}</span></div>
-                        <div>Uses <span className="block text-slate-200">{invite.accepted_count}/{invite.max_uses}</span></div>
+                        <div>Uses <span className="block text-slate-200">{rowNumber(invite.accepted_count)}/{rowNumber(invite.max_uses)}</span></div>
                         <div>Email <span className="block text-slate-200">{String(invite.delivery_status).replaceAll('_', ' ')}</span></div>
                         <div>Expires <span className="block text-slate-200">{fmtDate(invite.expires_at)}</span></div>
                       </div>
                       <div className="mt-4 flex flex-wrap gap-2 text-sm">
                         <Link href={inviteLink(code)} className="rounded-xl border border-white/10 px-3 py-2 font-semibold text-slate-100 hover:bg-white/10">Open signup link</Link>
-                        {invite.status === 'active' && canManage ? <form action={revokeCommunityInviteAction}><input type="hidden" name="invite_id" value={invite.id} /><button className="rounded-xl border border-red-400/20 px-3 py-2 font-semibold text-red-100 hover:bg-red-400/10">Revoke</button></form> : null}
+                        {invite.status === 'active' && canManage ? <form action={revokeCommunityInviteAction}><input type="hidden" name="invite_id" value={String(invite.id)} /><button className="rounded-xl border border-red-400/20 px-3 py-2 font-semibold text-red-100 hover:bg-red-400/10">Revoke</button></form> : null}
                       </div>
-                      {invite.delivery_error ? <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-100">Email note: {invite.delivery_error}</div> : null}
+                      {invite.delivery_error ? <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-100">Email note: {String(invite.delivery_error)}</div> : null}
                     </div>
                   )
                 })}
@@ -177,9 +177,9 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
               <div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-bold">Members & profiles</h2><p className="mt-2 text-sm text-slate-500">Community owners see members, roles, profile details, posted deals and conversion signals.</p></div></div>
               <div className="mt-5 space-y-3">
                 {members.map((member) => {
-                  const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles
+                  const profile = firstRow(member.profiles)
                   const stats = memberStats.get(String(member.user_id)) || { posted: 0, saved: 0, contacted: 0, converted: 0 }
-                  return <div key={member.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-sm"><div className="flex items-start justify-between gap-4"><div><div className="font-semibold text-white">{profile?.full_name || profile?.email || 'Member'}</div><div className="mt-1 text-slate-500">{profile?.email}</div><div className="mt-1 text-xs text-slate-600">{profile?.account_type || 'investor'} · joined {fmtDate(member.created_at)}</div></div><div className="text-right"><div className="capitalize text-slate-200">{String(member.role).replaceAll('_', ' ')}</div><div className="mt-1 text-xs text-slate-500">{member.status}</div></div></div><div className="mt-4 grid grid-cols-4 gap-2 text-xs text-slate-400"><div>Posted <span className="block font-bold text-white">{stats.posted}</span></div><div>Saved <span className="block font-bold text-white">{stats.saved}</span></div><div>Contacted <span className="block font-bold text-white">{stats.contacted}</span></div><div>Converted <span className="block font-bold text-white">{stats.converted}</span></div></div></div>
+                  return <div key={String(member.id)} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-sm"><div className="flex items-start justify-between gap-4"><div><div className="font-semibold text-white">{rowString(profile?.full_name) || rowString(profile?.email) || 'Member'}</div><div className="mt-1 text-slate-500">{rowString(profile?.email)}</div><div className="mt-1 text-xs text-slate-600">{rowString(profile?.account_type) || 'investor'} · joined {fmtDate(member.created_at)}</div></div><div className="text-right"><div className="capitalize text-slate-200">{String(member.role).replaceAll('_', ' ')}</div><div className="mt-1 text-xs text-slate-500">{rowString(member.status)}</div></div></div><div className="mt-4 grid grid-cols-4 gap-2 text-xs text-slate-400"><div>Posted <span className="block font-bold text-white">{stats.posted}</span></div><div>Saved <span className="block font-bold text-white">{stats.saved}</span></div><div>Contacted <span className="block font-bold text-white">{stats.contacted}</span></div><div>Converted <span className="block font-bold text-white">{stats.converted}</span></div></div></div>
                 })}
                 {!members.length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No members yet.</div> : null}
               </div>

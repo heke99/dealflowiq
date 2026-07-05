@@ -3,8 +3,8 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { deleteAllNotificationsAction, deleteNotificationAction, deleteSelectedNotificationsAction, markAllNotificationsReadAction, markNotificationReadAction, markSelectedNotificationsReadAction } from '@/app/notifications/actions'
+import { rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
 type Search = Record<string, string | string[] | undefined>
 
 const filters = [
@@ -23,16 +23,16 @@ function one(value: string | string[] | undefined, fallback = '') {
   return value || fallback
 }
 
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
-function typeLabel(value?: string | null) {
+function typeLabel(value?: unknown) {
   return String(value || 'system').replaceAll('_', ' ')
 }
 
-function filterQuery(query: any, filter: string) {
+function filterQuery<T extends { is(column: string, value: null): T; in(column: string, values: string[]): T; eq(column: string, value: string): T }>(query: T, filter: string): T {
   if (filter === 'unread') return query.is('read_at', null)
   if (filter === 'community') return query.in('type', ['community_deal', 'community_activity'])
   if (filter === 'billing') return query.in('type', ['trial_ending', 'payment_required', 'subscription_updated'])
@@ -106,26 +106,26 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           </form>
 
           {notifications.map((item) => (
-            <article key={item.id} className={`rounded-3xl border p-4 ${item.read_at ? 'border-white/10 bg-white/[0.025]' : 'border-emerald-400/25 bg-emerald-400/[0.06]'}`}>
+            <article key={String(item.id)} className={`rounded-3xl border p-4 ${item.read_at ? 'border-white/10 bg-white/[0.025]' : 'border-emerald-400/25 bg-emerald-400/[0.06]'}`}>
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-3">
-                  <input form="bulk-notifications-form" type="checkbox" name="notification_id" value={item.id} className="mt-1 h-4 w-4 rounded border-white/20 bg-slate-900" />
+                  <input form="bulk-notifications-form" type="checkbox" name="notification_id" value={String(item.id)} className="mt-1 h-4 w-4 rounded border-white/20 bg-slate-900" />
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="line-clamp-1 text-lg font-bold text-white">{item.title}</h2>
+                      <h2 className="line-clamp-1 text-lg font-bold text-white">{rowString(item.title)}</h2>
                       {!item.read_at ? <span className="rounded-full bg-emerald-300 px-2 py-0.5 text-[11px] font-black text-slate-950">New</span> : null}
                       <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{typeLabel(item.type)}</span>
                     </div>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">{item.message}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">{rowString(item.message)}</p>
                     <div className="mt-2 text-xs text-slate-600">{dateText(item.created_at)}</div>
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
                   {item.action_href ? <Link href={String(item.action_href)} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-200">Open</Link> : null}
                   {!item.read_at ? (
-                    <form action={markNotificationReadAction}><input type="hidden" name="notification_id" value={item.id} /><input type="hidden" name="return_to" value="/notifications" /><button className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">Read</button></form>
+                    <form action={markNotificationReadAction}><input type="hidden" name="notification_id" value={String(item.id)} /><input type="hidden" name="return_to" value="/notifications" /><button className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">Read</button></form>
                   ) : null}
-                  <form action={deleteNotificationAction}><input type="hidden" name="notification_id" value={item.id} /><input type="hidden" name="return_to" value="/notifications" /><button className="rounded-xl border border-red-400/25 px-4 py-2 text-sm font-semibold text-red-100 hover:bg-red-400/10">Delete</button></form>
+                  <form action={deleteNotificationAction}><input type="hidden" name="notification_id" value={String(item.id)} /><input type="hidden" name="return_to" value="/notifications" /><button className="rounded-xl border border-red-400/25 px-4 py-2 text-sm font-semibold text-red-100 hover:bg-red-400/10">Delete</button></form>
                 </div>
               </div>
             </article>

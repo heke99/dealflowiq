@@ -2,16 +2,15 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { asRows, firstRow, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function numberText(value: number | null | undefined) {
+function numberText(value: unknown) {
   return new Intl.NumberFormat('en-US').format(Number(value || 0))
 }
 
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
 function Stat({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: 'default' | 'green' | 'amber' | 'red' }) {
@@ -47,7 +46,7 @@ export default async function AdminDashboardPage() {
   }
 
   const orgId = workspace.organization?.id
-  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult, notificationsResult] = await Promise.all([
+  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult] = await Promise.all([
     supabase.from('billing_plans').select('id', { count: 'exact', head: true }),
     supabase.from('admin_access_invites').select('id,email,organization_name,account_type,role,status,expires_at,created_at,billing_plans(name)').order('created_at', { ascending: false }).limit(8),
     supabase.from('admin_access_invites').select('id', { count: 'exact', head: true }).eq('status', 'active'),
@@ -57,8 +56,8 @@ export default async function AdminDashboardPage() {
     orgId ? supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).is('read_at', null).is('archived_at', null) : Promise.resolve({ count: 0 }),
   ])
 
-  const jobs = (jobsResult.data || []) as Row[]
-  const invites = (invitesResult.data || []) as Row[]
+  const jobs = asRows(jobsResult.data)
+  const invites = asRows(invitesResult.data)
 
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={workspace.access.accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
@@ -95,15 +94,15 @@ export default async function AdminDashboardPage() {
             </div>
             <div className="mt-5 space-y-3">
               {invites.length ? invites.map((invite) => {
-                const plan = Array.isArray(invite.billing_plans) ? invite.billing_plans[0] : invite.billing_plans
+                const plan = firstRow(invite.billing_plans)
                 return (
-                  <div key={invite.id} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+                  <div key={String(invite.id)} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <div className="truncate font-bold">{invite.email}</div>
-                        <div className="mt-1 text-xs text-slate-500">{invite.organization_name || 'Workspace pending'} · {invite.account_type} · {plan?.name || 'default plan'}</div>
+                        <div className="truncate font-bold">{rowString(invite.email)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{rowString(invite.organization_name) || 'Workspace pending'} · {rowString(invite.account_type)} · {rowString(plan?.name) || 'default plan'}</div>
                       </div>
-                      <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold uppercase text-slate-300">{invite.status}</span>
+                      <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold uppercase text-slate-300">{rowString(invite.status)}</span>
                     </div>
                     <div className="mt-3 text-xs text-slate-500">Created {dateText(invite.created_at)} · Expires {dateText(invite.expires_at)}</div>
                   </div>
@@ -126,7 +125,7 @@ export default async function AdminDashboardPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="font-bold capitalize">{String(job.status || 'queued').replaceAll('_', ' ')}</div>
-                      <div className="mt-1 truncate text-xs text-slate-500">{job.source_url || 'Import job'}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">{rowString(job.source_url) || 'Import job'}</div>
                     </div>
                     <span className="text-xs text-slate-500">{dateText(job.created_at)}</span>
                   </div>
@@ -135,7 +134,7 @@ export default async function AdminDashboardPage() {
                     <div>Updated <span className="block font-bold text-slate-100">{numberText(job.items_updated || 0)}</span></div>
                     <div>Failed <span className="block font-bold text-slate-100">{numberText(job.items_failed || 0)}</span></div>
                   </div>
-                  {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
+                  {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{String(job.error_message)}</div> : null}
                 </div>
               )) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No jobs yet.</div>}
             </div>

@@ -5,22 +5,21 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { replyListingConversationAction, reportConversationAction, updateConversationStatusAction } from '@/app/messages/actions'
 import { hasFullOpportunityAccess } from '@/lib/billing/freemium'
+import { firstRow, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function dateTime(value?: string | null) {
+function dateTime(value?: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
-function money(value: number | string | null | undefined) {
+function money(value: unknown) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: 'compact' }).format(parsed)
 }
 
 function listingFrom(conversation: Row) {
-  return (Array.isArray(conversation.market_listings) ? conversation.market_listings[0] : conversation.market_listings) || {}
+  return firstRow(conversation.market_listings) || {}
 }
 
 export default async function MessageConversationPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
@@ -77,7 +76,7 @@ export default async function MessageConversationPage({ params, searchParams }: 
               {listing.primary_image_url ? <div className="h-24 w-32 shrink-0 rounded-2xl bg-cover bg-center" style={{ backgroundImage: `url(${listing.primary_image_url})` }} /> : <div className="flex h-24 w-32 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-900 text-xs text-slate-500">No image</div>}
               <div className="min-w-0">
                 <Link href="/messages" className="text-sm font-medium text-slate-400 hover:text-white">← Back to Messages</Link>
-                <h1 className="mt-2 line-clamp-2 text-2xl font-black text-white">{listing.title || listing.address || 'Listing conversation'}</h1>
+                <h1 className="mt-2 line-clamp-2 text-2xl font-black text-white">{rowString(listing.title) || rowString(listing.address) || 'Listing conversation'}</h1>
                 <p className="mt-1 text-sm text-slate-400">{location}</p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                   <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{money(listing.list_price || listing.asking_price)}</span>
@@ -88,7 +87,7 @@ export default async function MessageConversationPage({ params, searchParams }: 
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href={`/market/${listing.id}`} className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-200">View listing</Link>
-              {listing.source_url ? <a href={listing.source_url} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/10">Source</a> : null}
+              {listing.source_url ? <a href={String(listing.source_url)} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/10">Source</a> : null}
             </div>
           </div>
         </section>
@@ -103,9 +102,9 @@ export default async function MessageConversationPage({ params, searchParams }: 
               {messages.map((message) => {
                 const own = message.sender_user_id === workspace.user.id
                 return (
-                  <div key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
+                  <div key={String(message.id)} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[85%] rounded-3xl border p-4 ${own ? 'border-sky-300/20 bg-sky-300/10 text-sky-50' : 'border-white/10 bg-slate-950/60 text-slate-100'}`}>
-                      <p className="whitespace-pre-wrap text-sm leading-6">{message.body}</p>
+                      <p className="whitespace-pre-wrap text-sm leading-6">{String(message.body || '')}</p>
                       <div className="mt-2 text-[11px] text-slate-500">{dateTime(message.created_at)}{own && message.read_at ? ' · read' : ''}</div>
                     </div>
                   </div>
@@ -129,7 +128,7 @@ export default async function MessageConversationPage({ params, searchParams }: 
             <form action={updateConversationStatusAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
               <input type="hidden" name="conversation_id" value={id} />
               <label className="text-sm font-semibold text-slate-300">Conversation status</label>
-              <select name="status" defaultValue={row.status || 'new'} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
+              <select name="status" defaultValue={String(row.status || 'new')} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none">
                 <option value="new">New</option>
                 <option value="replied">Replied</option>
                 <option value="contacted">Contacted</option>

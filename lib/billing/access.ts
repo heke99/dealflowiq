@@ -1,7 +1,8 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isCurrentUserPlatformAdmin } from '@/lib/auth/admin'
+import { asRow, firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
 import { normalizeAccountType, type AccountType } from '@/lib/product/accountTypes'
-import { ALL_FEATURES, CORE_FEATURES, FREE_FEATURES, FREE_LIMITS, TRIAL_LIMITS, accountTypeDefaultFeatures, mergeFeatures, type FeatureMap, type LimitMap } from '@/lib/billing/features'
+import { ALL_FEATURES, CORE_FEATURES, FREE_FEATURES, FREE_LIMITS, TRIAL_LIMITS, accountTypeDefaultFeatures, mergeFeatures, mergeLimits, type FeatureMap, type LimitMap } from '@/lib/billing/features'
 
 export type BillingPlan = {
   id: string
@@ -75,17 +76,17 @@ function parseObject<T extends Record<string, unknown>>(value: unknown, fallback
   return value as T
 }
 
-function normalizePlan(rawPlan: any): BillingPlan | null {
+function normalizePlan(rawPlan: Row | null): BillingPlan | null {
   if (!rawPlan) return null
   return {
-    id: rawPlan.id,
-    code: rawPlan.code,
-    name: rawPlan.name,
-    description: rawPlan.description,
-    monthly_price_cents: rawPlan.monthly_price_cents,
-    annual_price_cents: rawPlan.annual_price_cents,
-    currency: rawPlan.currency || 'usd',
-    trial_days: Number(rawPlan.trial_days || 0),
+    id: String(rawPlan.id),
+    code: String(rawPlan.code || ''),
+    name: String(rawPlan.name || ''),
+    description: rowString(rawPlan.description),
+    monthly_price_cents: rowNumber(rawPlan.monthly_price_cents),
+    annual_price_cents: rowNumber(rawPlan.annual_price_cents),
+    currency: rowString(rawPlan.currency) || 'usd',
+    trial_days: rowNumber(rawPlan.trial_days) || 0,
     is_public: Boolean(rawPlan.is_public),
     is_active: Boolean(rawPlan.is_active),
     features: parseObject<FeatureMap>(rawPlan.features, {}),
@@ -104,24 +105,24 @@ function getRestrictionReason(accessSource: AccessSource, status: string, hasOrg
   return null
 }
 
-function normalizeSubscription(row: any, plan: BillingPlan | null): OrganizationSubscription | null {
+function normalizeSubscription(row: Row | null, plan: BillingPlan | null): OrganizationSubscription | null {
   if (!row) return null
   return {
-    id: row.id,
-    organization_id: row.organization_id,
-    plan_id: row.plan_id,
-    status: row.status,
-    trial_start_at: row.trial_start_at,
-    trial_end_at: row.trial_end_at,
-    current_period_start: row.current_period_start,
-    current_period_end: row.current_period_end,
-    trial_source: row.trial_source,
-    stripe_customer_id: row.stripe_customer_id || null,
-    stripe_subscription_id: row.stripe_subscription_id || null,
-    stripe_price_id: row.stripe_price_id || null,
-    stripe_interval: row.stripe_interval || null,
-    stripe_cancel_at_period_end: row.stripe_cancel_at_period_end ?? null,
-    notes: row.notes,
+    id: String(row.id),
+    organization_id: String(row.organization_id),
+    plan_id: rowString(row.plan_id),
+    status: rowString(row.status) || 'trialing',
+    trial_start_at: rowString(row.trial_start_at),
+    trial_end_at: rowString(row.trial_end_at),
+    current_period_start: rowString(row.current_period_start),
+    current_period_end: rowString(row.current_period_end),
+    trial_source: rowString(row.trial_source),
+    stripe_customer_id: rowString(row.stripe_customer_id),
+    stripe_subscription_id: rowString(row.stripe_subscription_id),
+    stripe_price_id: rowString(row.stripe_price_id),
+    stripe_interval: rowString(row.stripe_interval),
+    stripe_cancel_at_period_end: typeof row.stripe_cancel_at_period_end === 'boolean' ? row.stripe_cancel_at_period_end : null,
+    notes: rowString(row.notes),
     features_override: parseObject<FeatureMap>(row.features_override, {}),
     limits_override: parseObject<Partial<LimitMap>>(row.limits_override, {}),
     plan,
@@ -180,19 +181,19 @@ export async function getWorkspaceAccess(params: {
       : Promise.resolve({ data: null }),
   ])
 
-  const row = data as any
-  const rawPlan = Array.isArray(row?.billing_plans) ? row.billing_plans[0] : row?.billing_plans
+  const row = asRow(data)
+  const rawPlan = firstRow(row?.billing_plans)
   const plan = normalizePlan(rawPlan)
   const subscription = normalizeSubscription(row, plan)
-  const overrideRow = overrideResult.data as any
+  const overrideRow = asRow(overrideResult.data)
   const userOverride: UserAccessOverride | null = overrideRow
     ? {
-        id: overrideRow.id,
-        user_id: overrideRow.user_id,
-        organization_id: overrideRow.organization_id,
-        status: overrideRow.status,
-        reason: overrideRow.reason,
-        expires_at: overrideRow.expires_at,
+        id: String(overrideRow.id),
+        user_id: String(overrideRow.user_id),
+        organization_id: rowString(overrideRow.organization_id),
+        status: rowString(overrideRow.status) || 'active',
+        reason: rowString(overrideRow.reason),
+        expires_at: rowString(overrideRow.expires_at),
         features_override: parseObject<FeatureMap>(overrideRow.features_override, {}),
         limits_override: parseObject<Partial<LimitMap>>(overrideRow.limits_override, {}),
       }
@@ -207,7 +208,7 @@ export async function getWorkspaceAccess(params: {
 
   let accessSource: AccessSource = 'free'
   let features: FeatureMap = isFreePlan ? mergeFeatures(FREE_FEATURES, plan?.features, subscription?.features_override) : FREE_FEATURES
-  let limits: LimitMap = isFreePlan ? { ...FREE_LIMITS, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) } : FREE_LIMITS
+  let limits: LimitMap = isFreePlan ? mergeLimits(FREE_LIMITS, plan?.limits, subscription?.limits_override) : FREE_LIMITS
 
   if (isPlatformAdmin) {
     accessSource = 'platform_admin'
@@ -216,15 +217,15 @@ export async function getWorkspaceAccess(params: {
   } else if (isOverrideActive) {
     accessSource = 'user_override'
     features = mergeFeatures(defaultFeatures, plan?.features, userOverride?.features_override)
-    limits = { ...fullLimits, ...(plan?.limits || {}), ...(userOverride?.limits_override || {}) }
+    limits = mergeLimits(fullLimits, plan?.limits, userOverride?.limits_override)
   } else if (isSubscriptionActive) {
     accessSource = 'subscription'
     features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
-    limits = { ...fullLimits, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) }
+    limits = mergeLimits(fullLimits, plan?.limits, subscription?.limits_override)
   } else if (isTrialActive) {
     accessSource = 'trial'
     features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
-    limits = { ...fullLimits, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) }
+    limits = mergeLimits(fullLimits, plan?.limits, subscription?.limits_override)
   } else if (['past_due', 'unpaid', 'incomplete'].includes(status)) {
     accessSource = 'payment_required'
   }

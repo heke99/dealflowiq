@@ -3,8 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { grantUserFullAccessOverrideAction, revokeUserAccessOverrideAction } from '@/app/admin/users/actions'
-
-type Row = Record<string, any>
+import { firstRow, rowString, type Row } from '@/lib/types/rows'
 
 type AdminUsersPageProps = {
   searchParams?: Promise<{ q?: string; role?: string; access?: string; community?: string; saved?: string; error?: string }> | { q?: string; role?: string; access?: string; community?: string; saved?: string; error?: string }
@@ -14,9 +13,9 @@ function numberText(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US').format(Number(value || 0))
 }
 
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(String(value)))
 }
 
 function badge(value: string, tone = 'default') {
@@ -31,9 +30,9 @@ function badge(value: string, tone = 'default') {
 }
 
 function accessFor(row: Row, activeOverride: Row | null) {
-  const subscription = Array.isArray(row.organization_subscriptions) ? row.organization_subscriptions[0] : row.organization_subscriptions
+  const subscription = firstRow(row.organization_subscriptions)
   const status = String(subscription?.status || 'free')
-  const trialEnds = subscription?.trial_end_at ? new Date(subscription.trial_end_at).getTime() : 0
+  const trialEnds = subscription?.trial_end_at ? new Date(String(subscription.trial_end_at)).getTime() : 0
   if (activeOverride) return { label: 'override', tone: 'blue' }
   if (status === 'trialing' && trialEnds > Date.now()) return { label: 'trial', tone: 'amber' }
   if (['active', 'paid', 'comped'].includes(status)) return { label: 'paid', tone: 'green' }
@@ -80,7 +79,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
 
   let rows = profiles.map((profile) => {
     const member = memberByUser.get(String(profile.id)) || null
-    const org = Array.isArray(member?.organizations) ? member.organizations[0] : member?.organizations
+    const org = firstRow(member?.organizations)
     const activeOverride = overrideByUser.get(String(profile.id)) || null
     const access = accessFor(org || {}, activeOverride)
     return { profile, member, org, activeOverride, access }
@@ -124,7 +123,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
             <input name="q" defaultValue={q} placeholder="Search name, email, org..." className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-white/30" />
             <select name="role" defaultValue={roleFilter} className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm"><option value="">All roles</option>{['owner','admin','acquisition_manager','disposition_manager','member','buyer','viewer'].map((role) => <option key={role} value={role}>{role.replaceAll('_',' ')}</option>)}</select>
             <select name="access" defaultValue={accessFilter} className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm"><option value="">All access</option>{['free','trial','paid','payment required','override'].map((access) => <option key={access} value={access}>{access}</option>)}</select>
-            <select name="community" defaultValue={communityFilter} className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm"><option value="">All communities</option>{communities.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>
+            <select name="community" defaultValue={communityFilter} className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm"><option value="">All communities</option>{communities.map((team) => <option key={String(team.id)} value={String(team.id)}>{rowString(team.name)}</option>)}</select>
             <button className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-950">Filter</button>
           </div>
           {params.error ? <div className="mt-3 rounded-xl border border-red-400/25 bg-red-400/10 p-3 text-sm text-red-100">{params.error}</div> : null}
@@ -137,16 +136,16 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
           </div>
           <div className="divide-y divide-white/10">
             {rows.map(({ profile, member, org, activeOverride, access }) => (
-              <div key={profile.id} className="grid grid-cols-[1.3fr_1fr_0.8fr_0.9fr_1fr] gap-4 px-5 py-4 text-sm">
-                <div className="min-w-0"><div className="truncate font-bold text-white">{profile.full_name || profile.email || 'User'}</div><div className="truncate text-slate-500">{profile.email}</div><div className="mt-1 text-xs text-slate-600">Joined {dateText(profile.created_at)}</div></div>
-                <div className="min-w-0"><div className="truncate text-slate-200">{org?.name || profile.organization_name || '—'}</div><div className="mt-1 text-xs text-slate-500">{org?.account_type || profile.account_type || '—'}</div></div>
+              <div key={String(profile.id)} className="grid grid-cols-[1.3fr_1fr_0.8fr_0.9fr_1fr] gap-4 px-5 py-4 text-sm">
+                <div className="min-w-0"><div className="truncate font-bold text-white">{rowString(profile.full_name) || rowString(profile.email) || 'User'}</div><div className="truncate text-slate-500">{rowString(profile.email)}</div><div className="mt-1 text-xs text-slate-600">Joined {dateText(profile.created_at)}</div></div>
+                <div className="min-w-0"><div className="truncate text-slate-200">{rowString(org?.name) || rowString(profile.organization_name) || '—'}</div><div className="mt-1 text-xs text-slate-500">{rowString(org?.account_type) || rowString(profile.account_type) || '—'}</div></div>
                 <div>{badge(String(member?.role || 'no org'))}</div>
                 <div>{badge(access.label, access.tone)}</div>
                 <div>
                   {activeOverride ? (
-                    <form action={revokeUserAccessOverrideAction} className="space-y-2"><input type="hidden" name="override_id" value={activeOverride.id} /><div className="text-xs text-blue-100">Active override{activeOverride.expires_at ? ` until ${dateText(activeOverride.expires_at)}` : ''}</div><button className="rounded-lg border border-red-400/25 px-3 py-2 text-xs font-bold text-red-100 hover:bg-red-400/10">Revoke</button></form>
+                    <form action={revokeUserAccessOverrideAction} className="space-y-2"><input type="hidden" name="override_id" value={String(activeOverride.id)} /><div className="text-xs text-blue-100">Active override{activeOverride.expires_at ? ` until ${dateText(activeOverride.expires_at)}` : ''}</div><button className="rounded-lg border border-red-400/25 px-3 py-2 text-xs font-bold text-red-100 hover:bg-red-400/10">Revoke</button></form>
                   ) : (
-                    <form action={grantUserFullAccessOverrideAction} className="space-y-2"><input type="hidden" name="user_id" value={profile.id} /><input type="hidden" name="organization_id" value={org?.id || ''} /><input name="reason" placeholder="Reason" className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs" /><button className="rounded-lg border border-blue-400/25 px-3 py-2 text-xs font-bold text-blue-100 hover:bg-blue-400/10">Grant full access</button></form>
+                    <form action={grantUserFullAccessOverrideAction} className="space-y-2"><input type="hidden" name="user_id" value={String(profile.id)} /><input type="hidden" name="organization_id" value={String(org?.id || '')} /><input name="reason" placeholder="Reason" className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs" /><button className="rounded-lg border border-blue-400/25 px-3 py-2 text-xs font-bold text-blue-100 hover:bg-blue-400/10">Grant full access</button></form>
                   )}
                 </div>
               </div>

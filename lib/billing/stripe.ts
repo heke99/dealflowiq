@@ -227,7 +227,7 @@ export async function createStripePortalSession(params: { stripeCustomerId: stri
 }
 
 export async function retrieveStripeSubscription(subscriptionId: string) {
-  return stripeRequest<Record<string, any>>(`/subscriptions/${subscriptionId}`, { 'expand[0]': 'items.data.price' }, 'GET')
+  return stripeRequest<Record<string, unknown>>(`/subscriptions/${subscriptionId}`, { 'expand[0]': 'items.data.price' }, 'GET')
 }
 
 export function verifyStripeWebhookSignature(payload: string, signatureHeader: string | null, secret?: string) {

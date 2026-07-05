@@ -2,8 +2,8 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { firstRow, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
 type Search = Record<string, string | string[] | undefined>
 
 function one(value: string | string[] | undefined, fallback = '') {
@@ -11,19 +11,19 @@ function one(value: string | string[] | undefined, fallback = '') {
   return value || fallback
 }
 
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
-function money(value: number | string | null | undefined) {
+function money(value: unknown) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: 'compact' }).format(parsed)
 }
 
 function listingFrom(conversation: Row) {
-  return (Array.isArray(conversation.market_listings) ? conversation.market_listings[0] : conversation.market_listings) || {}
+  return firstRow(conversation.market_listings) || {}
 }
 
 export default async function MessagesPage({ searchParams }: { searchParams?: Promise<Search> }) {
@@ -98,19 +98,19 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
           {conversations.map((conversation) => {
             const listing = listingFrom(conversation)
             const unread = unreadByConversation.get(String(conversation.id)) || 0
-            const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || listing.address || 'Location pending'
+            const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || rowString(listing.address) || 'Location pending'
             return (
-              <Link key={conversation.id} href={`/messages/${conversation.id}`} className="block rounded-3xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
+              <Link key={String(conversation.id)} href={`/messages/${conversation.id}`} className="block rounded-3xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex min-w-0 gap-4">
                     {listing.primary_image_url ? <div className="h-20 w-24 shrink-0 rounded-2xl bg-cover bg-center" style={{ backgroundImage: `url(${listing.primary_image_url})` }} /> : <div className="flex h-20 w-24 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-900 text-xs text-slate-500">No image</div>}
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="line-clamp-1 text-lg font-bold text-white">{listing.title || listing.address || 'Listing conversation'}</h2>
+                        <h2 className="line-clamp-1 text-lg font-bold text-white">{rowString(listing.title) || rowString(listing.address) || 'Listing conversation'}</h2>
                         {unread ? <span className="rounded-full bg-sky-300 px-2 py-0.5 text-[11px] font-black text-slate-950">{unread} unread</span> : null}
                       </div>
                       <p className="mt-1 text-sm text-slate-400">{location} · {money(listing.list_price || listing.asking_price)}</p>
-                      <p className="mt-2 line-clamp-1 text-sm text-slate-500">{conversation.last_message_preview || 'Open the conversation'}</p>
+                      <p className="mt-2 line-clamp-1 text-sm text-slate-500">{rowString(conversation.last_message_preview) || 'Open the conversation'}</p>
                     </div>
                   </div>
                   <div className="shrink-0 text-left md:text-right">

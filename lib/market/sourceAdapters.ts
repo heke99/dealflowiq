@@ -143,7 +143,7 @@ const adapters: Record<string, MarketSourceAdapter> = {
     brokerKeys: ['broker_name', 'contact_name'],
   },
   generic: {
-    type: 'generic' as any,
+    type: 'generic',
     label: 'Generic authorized URL',
     category: 'manual',
     userAgent: defaultUserAgent,

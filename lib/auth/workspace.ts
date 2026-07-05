@@ -58,13 +58,13 @@ export async function getCurrentWorkspace(): Promise<CurrentWorkspace> {
     .order('created_at', { ascending: true })
 
   const memberships = (data || [])
-    .map((row: any) => ({
+    .map((row) => ({
       id: row.id,
       role: row.role,
       status: row.status,
-      organization: Array.isArray(row.organizations) ? row.organizations[0] : row.organizations,
+      organization: (Array.isArray(row.organizations) ? row.organizations[0] : row.organizations) as WorkspaceOrganization | null,
     }))
-    .filter((row) => Boolean(row.organization)) as WorkspaceMembership[]
+    .filter((row): row is WorkspaceMembership & { organization: WorkspaceOrganization } => Boolean(row.organization))
 
   const membership = memberships[0] || null
   const organization = membership?.organization || null

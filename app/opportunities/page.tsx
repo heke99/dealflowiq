@@ -3,47 +3,46 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
-import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import type { Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function money(value: number | string | null | undefined, compact = false) {
+function money(value: unknown, compact = false) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
-function numeric(value: number | string | null | undefined) {
+function numeric(value: unknown) {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) && parsed !== 0 ? parsed : null
 }
 
-function percentText(value: number | string | null | undefined) {
+function percentText(value: unknown) {
   const parsed = numeric(value)
   if (parsed === null) return '—'
   const display = Math.abs(parsed) <= 1 ? parsed * 100 : parsed
   return `${display.toFixed(display >= 10 ? 1 : 2)}%`
 }
 
-function ratioText(value: number | string | null | undefined) {
+function ratioText(value: unknown) {
   const parsed = numeric(value)
   return parsed === null ? '—' : parsed.toFixed(2)
 }
 
-function clampPercent(value: number | string | null | undefined) {
+function clampPercent(value: unknown) {
   const parsed = Number(value || 0)
   if (!Number.isFinite(parsed)) return 0
   return Math.max(0, Math.min(100, parsed))
 }
 
-function positiveTone(value: number | string | null | undefined) {
+function positiveTone(value: unknown) {
   const parsed = Number(value || 0)
   if (parsed > 0) return 'text-emerald-300'
   if (parsed < 0) return 'text-red-300'
   return 'text-slate-100'
 }
 
-function dscrTone(value: number | string | null | undefined) {
+function dscrTone(value: unknown) {
   const parsed = Number(value || 0)
   if (parsed >= 1.25) return 'text-emerald-300'
   if (parsed >= 1.05) return 'text-amber-200'
@@ -51,7 +50,7 @@ function dscrTone(value: number | string | null | undefined) {
   return 'text-slate-100'
 }
 
-function imageStyle(url?: string | null) {
+function imageStyle(url: unknown) {
   return url ? { backgroundImage: `url(${url})` } : undefined
 }
 
@@ -109,11 +108,11 @@ function OpportunityCard({ score }: { score: Row }) {
       </Link>
       <div className="mt-4 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-xl font-bold text-white hover:underline">{listing.title || listing.address || 'Market listing'}</Link>
+          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-xl font-bold text-white hover:underline">{String(listing.title || listing.address || 'Market listing')}</Link>
           <p className="mt-1 text-sm text-slate-400">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{String(listing.property_type || 'Type pending')}</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{String(listing.units || 1)} unit(s)</span>
             {missing.length ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-amber-100">{missing.length} missing</span> : null}
           </div>
         </div>
@@ -150,8 +149,8 @@ function OpportunityCard({ score }: { score: Row }) {
       <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/50 p-4">
         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
           <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-emerald-100">{confidence(score)}</span>
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{score.strategy_fit || 'Strategy pending'}</span>
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Risk: {score.risk_level || 'medium'}</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{String(score.strategy_fit || 'Strategy pending')}</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Risk: {String(score.risk_level || 'medium')}</span>
         </div>
         <div className="mt-3 grid gap-4 md:grid-cols-2">
           <div>
@@ -165,9 +164,9 @@ function OpportunityCard({ score }: { score: Row }) {
         </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-4">
-        <form action={saveOpportunityAction}><input type="hidden" name="listing_id" value={listing.id} /><input type="hidden" name="status" value="saved" /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Save</button></form>
-        <form action={convertListingToDealAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-100">Analyze</button></form>
-        <form action={rescoreMarketListingAction}><input type="hidden" name="listing_id" value={listing.id} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Rescore</button></form>
+        <form action={saveOpportunityAction}><input type="hidden" name="listing_id" value={String(listing.id)} /><input type="hidden" name="status" value="saved" /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Save</button></form>
+        <form action={convertListingToDealAction}><input type="hidden" name="listing_id" value={String(listing.id)} /><button className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-100">Analyze</button></form>
+        <form action={rescoreMarketListingAction}><input type="hidden" name="listing_id" value={String(listing.id)} /><button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-100">Rescore</button></form>
         <Link href={`/market/${listing.id}`} className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-slate-100">View</Link>
       </div>
     </article>
@@ -213,7 +212,7 @@ export default async function OpportunitiesPage() {
   }
 
   const scores = ((listingsData || []) as Row[]).map((listing) => {
-    const score = scoreByListing.get(String(listing.id)) || {}
+    const score: Row = scoreByListing.get(String(listing.id)) || {}
     return {
       ...score,
       id: score.id || `listing-${listing.id}`,
@@ -245,7 +244,7 @@ export default async function OpportunitiesPage() {
             </div>
           </div>
         </section>
-        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={score.id} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
+        {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={String(score.id)} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
       </div>
     </AppShell>
   )

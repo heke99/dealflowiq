@@ -1,8 +1,8 @@
 import type { MarketSourceType } from '@/lib/market/sourceConnectors'
 import { classifyOpportunity } from '@/lib/market/opportunityRules'
 
-type ScoreLike = Record<string, any>
-type ListingLike = Record<string, any>
+type ScoreLike = Record<string, unknown>
+type ListingLike = Record<string, unknown>
 
 export type DealReviewStatus = 'ready' | 'needs_review' | 'missing_data' | 'low_confidence' | 'archived'
 

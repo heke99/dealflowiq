@@ -5,6 +5,7 @@ import { updateDealAction } from '@/app/deals/actions'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { getOrganizationUnderwritingDefaults } from '@/lib/underwriting/defaults'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { firstRow, type Row } from '@/lib/types/rows'
 
 export default async function EditDealPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params
@@ -13,7 +14,7 @@ export default async function EditDealPage({ params, searchParams }: { params: P
   const supabase = await createSupabaseServerClient()
   const assumptionDefaults = await getOrganizationUnderwritingDefaults(workspace.organization?.id)
 
-  const { data: deal } = workspace.organization?.id
+  const { data: dealData } = workspace.organization?.id
     ? await supabase
         .from('deals')
         .select('*, properties(*)')
@@ -22,8 +23,9 @@ export default async function EditDealPage({ params, searchParams }: { params: P
         .maybeSingle()
     : { data: null }
 
-  if (!deal) notFound()
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
+  if (!dealData) notFound()
+  const deal = dealData as Row
+  const property = firstRow(deal.properties)
 
   return (
     <AppShell
@@ -39,10 +41,10 @@ export default async function EditDealPage({ params, searchParams }: { params: P
       <div className="space-y-6">
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8">
           <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Edit Deal</div>
-          <h1 className="mt-2 text-3xl font-bold">{(deal as any).title}</h1>
+          <h1 className="mt-2 text-3xl font-bold">{String(deal.title)}</h1>
           <p className="mt-3 max-w-3xl text-slate-300">Update property, rent, price and expense assumptions.</p>
         </section>
-        <DealForm action={updateDealAction} submitLabel="Save Changes" deal={deal as any} property={property as any} error={query?.error ? String(query.error) : null} assumptionDefaults={assumptionDefaults} />
+        <DealForm action={updateDealAction} submitLabel="Save Changes" deal={deal} property={property} error={query?.error ? String(query.error) : null} assumptionDefaults={assumptionDefaults} />
       </div>
     </AppShell>
   )

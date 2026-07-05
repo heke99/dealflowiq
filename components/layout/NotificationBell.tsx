@@ -3,12 +3,11 @@ import { Bell } from 'lucide-react'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { markNotificationReadAction } from '@/app/notifications/actions'
+import { rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return ''
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
 export async function NotificationBell() {
@@ -63,11 +62,11 @@ export async function NotificationBell() {
         </div>
         <div className="max-h-96 overflow-y-auto p-2">
           {notifications.length ? notifications.map((item) => (
-            <div key={item.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <div key={String(item.id)} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="line-clamp-1 text-sm font-semibold text-white">{item.title}</div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{item.message}</p>
+                  <div className="line-clamp-1 text-sm font-semibold text-white">{rowString(item.title)}</div>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{rowString(item.message)}</p>
                   <div className="mt-2 text-[11px] text-slate-600">{dateText(item.created_at)}</div>
                 </div>
                 {!item.read_at ? <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-400" /> : null}
@@ -76,7 +75,7 @@ export async function NotificationBell() {
                 {item.action_href ? <Link href={String(item.action_href)} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10">Open</Link> : null}
                 {!item.read_at ? (
                   <form action={markNotificationReadAction}>
-                    <input type="hidden" name="notification_id" value={item.id} />
+                    <input type="hidden" name="notification_id" value={String(item.id)} />
                     <input type="hidden" name="return_to" value="/dashboard" />
                     <button className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:bg-white/10 hover:text-white">Read</button>
                   </form>

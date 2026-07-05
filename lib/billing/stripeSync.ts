@@ -1,8 +1,9 @@
 import type { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import { asRow } from '@/lib/types/rows'
 
 type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>
 
-type SubscriptionLike = Record<string, any>
+type SubscriptionLike = Record<string, unknown>
 
 function unixToIso(value: unknown) {
   const numberValue = Number(value || 0)
@@ -23,7 +24,8 @@ function normalizeStripeStatus(status: string) {
 }
 
 function firstSubscriptionItem(subscription: SubscriptionLike) {
-  return Array.isArray(subscription?.items?.data) ? subscription.items.data[0] : null
+  const items = asRow(subscription?.items)
+  return Array.isArray(items?.data) ? asRow(items.data[0]) : null
 }
 
 function stringOrNull(value: unknown) {
@@ -37,10 +39,10 @@ export async function syncStripeSubscriptionToDatabase(params: {
 }) {
   const subscription = params.subscription
   const item = firstSubscriptionItem(subscription)
-  const price = item?.price || null
+  const price = asRow(item?.price)
   const stripePriceId = stringOrNull(price?.id)
-  const stripeCustomerId = typeof subscription.customer === 'string' ? subscription.customer : stringOrNull(subscription.customer?.id)
-  const metadata = subscription.metadata && typeof subscription.metadata === 'object' ? subscription.metadata : {}
+  const stripeCustomerId = typeof subscription.customer === 'string' ? subscription.customer : stringOrNull(asRow(subscription.customer)?.id)
+  const metadata = asRow(subscription.metadata) || {}
 
   let organizationId = stringOrNull(metadata.organization_id)
   let planId = stringOrNull(metadata.plan_id)
@@ -51,16 +53,16 @@ export async function syncStripeSubscriptionToDatabase(params: {
       .select('id')
       .or(`stripe_monthly_price_id.eq.${stripePriceId},stripe_annual_price_id.eq.${stripePriceId}`)
       .maybeSingle()
-    planId = stringOrNull((planByPrice as any)?.id)
+    planId = stringOrNull(asRow(planByPrice)?.id)
   }
 
   if (!organizationId && stringOrNull(subscription.id)) {
     const { data: bySubscription } = await params.supabase
       .from('organization_subscriptions')
       .select('organization_id')
-      .eq('stripe_subscription_id', subscription.id)
+      .eq('stripe_subscription_id', String(subscription.id))
       .maybeSingle()
-    organizationId = stringOrNull((bySubscription as any)?.organization_id)
+    organizationId = stringOrNull(asRow(bySubscription)?.organization_id)
   }
 
   if (!organizationId && stripeCustomerId) {
@@ -71,7 +73,7 @@ export async function syncStripeSubscriptionToDatabase(params: {
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    organizationId = stringOrNull((byCustomer as any)?.organization_id)
+    organizationId = stringOrNull(asRow(byCustomer)?.organization_id)
   }
 
   if (!organizationId) {
@@ -85,7 +87,7 @@ export async function syncStripeSubscriptionToDatabase(params: {
   const trialStart = unixToIso(subscription.trial_start)
   const trialEnd = unixToIso(subscription.trial_end)
 
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     organization_id: organizationId,
     plan_id: planId,
     status,
@@ -98,7 +100,7 @@ export async function syncStripeSubscriptionToDatabase(params: {
     stripe_subscription_id: stringOrNull(subscription.id),
     stripe_subscription_item_id: stringOrNull(item?.id),
     stripe_price_id: stripePriceId,
-    stripe_interval: stringOrNull(price?.recurring?.interval),
+    stripe_interval: stringOrNull(asRow(price?.recurring)?.interval),
     stripe_status_raw: String(subscription.status || ''),
     stripe_cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
     stripe_canceled_at: unixToIso(subscription.canceled_at),
@@ -119,18 +121,19 @@ export async function syncStripeSubscriptionToDatabase(params: {
 
 export async function syncCheckoutSessionToDatabase(params: {
   supabase: SupabaseAdmin
-  session: Record<string, any>
+  session: Record<string, unknown>
   subscription: SubscriptionLike
   sourceEventId?: string | null
 }) {
-  const sessionMetadata = params.session.metadata && typeof params.session.metadata === 'object' ? params.session.metadata : {}
+  const sessionMetadata = asRow(params.session.metadata) || {}
+  const subscriptionMetadata = asRow(params.subscription.metadata) || {}
   params.subscription.metadata = {
-    ...(params.subscription.metadata || {}),
-    organization_id: params.subscription.metadata?.organization_id || sessionMetadata.organization_id,
-    user_id: params.subscription.metadata?.user_id || sessionMetadata.user_id,
-    plan_id: params.subscription.metadata?.plan_id || sessionMetadata.plan_id,
-    plan_code: params.subscription.metadata?.plan_code || sessionMetadata.plan_code,
-    billing_interval: params.subscription.metadata?.billing_interval || sessionMetadata.billing_interval,
+    ...subscriptionMetadata,
+    organization_id: subscriptionMetadata.organization_id || sessionMetadata.organization_id,
+    user_id: subscriptionMetadata.user_id || sessionMetadata.user_id,
+    plan_id: subscriptionMetadata.plan_id || sessionMetadata.plan_id,
+    plan_code: subscriptionMetadata.plan_code || sessionMetadata.plan_code,
+    billing_interval: subscriptionMetadata.billing_interval || sessionMetadata.billing_interval,
   }
   return syncStripeSubscriptionToDatabase({ supabase: params.supabase, subscription: params.subscription, sourceEventId: params.sourceEventId })
 }

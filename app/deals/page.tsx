@@ -2,14 +2,15 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { asRows, firstRow } from '@/lib/types/rows'
 
-function money(value: number | string | null | undefined) {
+function money(value: unknown) {
   const numberValue = Number(value || 0)
   if (!numberValue) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(numberValue)
 }
 
-function statusLabel(value: string | null | undefined) {
+function statusLabel(value: unknown) {
   return String(value || 'draft').replaceAll('_', ' ')
 }
 
@@ -62,19 +63,19 @@ export default async function DealsPage({ searchParams }: { searchParams?: Promi
               <div className="hidden md:block">Rent Gap</div>
               <div className="hidden md:block">Status</div>
             </div>
-            {deals.map((deal: any) => {
-              const property = Array.isArray(deal.properties) ? deal.properties[0] : deal.properties
+            {asRows(deals).map((deal) => {
+              const property = firstRow(deal.properties)
               const rentGap = Number(deal.market_rent || 0) - Number(deal.current_rent || 0)
               return (
-                <Link key={deal.id} href={`/deals/${deal.id}`} className="grid gap-3 border-b border-white/10 px-5 py-4 transition last:border-b-0 hover:bg-white/[0.04] md:grid-cols-[1.4fr_0.9fr_0.8fr_0.8fr_0.8fr] md:items-center">
+                <Link key={String(deal.id)} href={`/deals/${deal.id}`} className="grid gap-3 border-b border-white/10 px-5 py-4 transition last:border-b-0 hover:bg-white/[0.04] md:grid-cols-[1.4fr_0.9fr_0.8fr_0.8fr_0.8fr] md:items-center">
                   <div className="flex items-center gap-3">
                     {deal.primary_image_url ? <div className="h-12 w-16 shrink-0 rounded-xl bg-cover bg-center" style={{ backgroundImage: `url(${deal.primary_image_url})` }} /> : <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-xs text-slate-500">IMG</div>}
                     <div>
-                    <div className="font-semibold">{deal.title}</div>
-                    <div className="mt-1 text-sm text-slate-500">{deal.property_type || 'Property type pending'} · {property?.number_of_units || 1} unit(s)</div>
+                    <div className="font-semibold">{String(deal.title)}</div>
+                    <div className="mt-1 text-sm text-slate-500">{String(deal.property_type || 'Property type pending')} · {Number(property?.number_of_units || 1)} unit(s)</div>
                     </div>
                   </div>
-                  <div className="text-sm text-slate-300">{[property?.city, property?.state, property?.zip_code].filter(Boolean).join(', ') || property?.address || 'Location pending'}</div>
+                  <div className="text-sm text-slate-300">{String([property?.city, property?.state, property?.zip_code].filter(Boolean).join(', ') || property?.address || 'Location pending')}</div>
                   <div className="text-sm text-slate-300">{money(deal.purchase_price)}</div>
                   <div className={rentGap > 0 ? 'text-sm text-emerald-300' : 'text-sm text-slate-400'}>{rentGap ? money(rentGap) + '/mo' : '—'}</div>
                   <div className="text-sm capitalize text-slate-300">{statusLabel(deal.status)}</div>

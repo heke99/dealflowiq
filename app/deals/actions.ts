@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { buildCalculationSnapshotPayload, calculateDealUnderwriting } from '@/lib/calculations/underwriting'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
+import { firstRow, type Row } from '@/lib/types/rows'
 
 const VALID_STATUSES = new Set([
   'draft',
@@ -435,8 +436,9 @@ export async function createCalculationSnapshotAction(formData: FormData) {
     redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
   }
 
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
-  const summary = calculateDealUnderwriting(deal as any, property as any)
+  const dealRow = deal as Row
+  const property = firstRow(dealRow.properties)
+  const summary = calculateDealUnderwriting(dealRow, property)
   const snapshot = buildCalculationSnapshotPayload(summary)
 
   const { error: snapshotError } = await supabase.from('deal_calculation_snapshots').insert({
@@ -499,7 +501,7 @@ export async function deleteDealAction(formData: FormData) {
     event_type: 'deal.deleted',
     entity_type: 'deal',
     entity_id: dealId,
-    metadata: { title: (deal as any).title },
+    metadata: { title: (deal as Row).title },
   })
 
   revalidatePath('/deals')

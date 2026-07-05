@@ -1,7 +1,7 @@
 import { detectSourceType, isSearchResultsUrl, type MarketSourceType } from '@/lib/market/sourceConnectors'
 import { inferImportMode } from '@/lib/market/review'
 
-type JsonRecord = Record<string, any>
+type JsonRecord = Record<string, unknown>
 
 export type MarketUrlAnalysis = {
   inputUrl: string

@@ -13,10 +13,6 @@ function toMessage(value: string) {
   return encodeURIComponent(value)
 }
 
-function normalizeCode(value: FormDataEntryValue | null) {
-  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-}
-
 function getBaseUrl() {
   const explicit = process.env.NEXT_PUBLIC_APP_URL
   if (explicit) return explicit.replace(/\/$/, '')
@@ -81,7 +77,7 @@ export async function createCommunityInviteAction(formData: FormData) {
 
   const { data: team } = teamId
     ? await supabase.from('community_teams').select('id,name').eq('organization_id', workspace.organization!.id).eq('id', teamId).maybeSingle()
-    : { data: null as any }
+    : { data: null }
 
   const inviteUrl = `${getBaseUrl()}/signup?invite=${encodeURIComponent(inviteCode)}`
 

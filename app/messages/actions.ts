@@ -5,10 +5,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createInAppNotification } from '@/lib/notifications'
-import { hasFullOpportunityAccess } from '@/lib/billing/freemium'
+import { FREE_MESSAGE_COOLDOWN_HOURS, hasFullOpportunityAccess } from '@/lib/billing/freemium'
 import { firstRow, type Row } from '@/lib/types/rows'
-
-const FREE_MESSAGE_COOLDOWN_HOURS = 48
 
 function cleanText(value: FormDataEntryValue | null, max = 4000) {
   return String(value || '').trim().slice(0, max)

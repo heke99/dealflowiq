@@ -83,6 +83,17 @@ export function canManageListings(workspace: CurrentWorkspace): boolean {
 }
 
 /**
+ * Redirects when the workspace is in a payment-required state (past_due,
+ * unpaid, incomplete). Reads stay available; content-creating actions call
+ * this to enforce read-only access until billing is fixed.
+ */
+export function assertNotPaymentRequired(workspace: CurrentWorkspace, redirectTo = '/settings/billing'): void {
+  if (workspace.access.isPlatformAdmin) return
+  if (!workspace.access.isPaymentRequired) return
+  redirect(`${redirectTo}?error=${encodeURIComponent(workspace.access.restrictionReason || 'Update billing to continue using workspace features.')}`)
+}
+
+/**
  * Redirects when the workspace does not have the feature enabled.
  * Platform admins always pass (they receive ALL_FEATURES).
  */

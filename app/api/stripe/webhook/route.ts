@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { retrieveStripeSubscription, verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { syncCheckoutSessionToDatabase, syncStripeSubscriptionToDatabase } from '@/lib/billing/stripeSync'
+import { decideWebhookRetry } from '@/lib/billing/webhookIdempotency'
 import { asRow, rowString } from '@/lib/types/rows'
 
 export const runtime = 'nodejs'
@@ -22,6 +23,7 @@ async function markEvent(params: { id: string; type: string; status: string; pay
     payload: params.payload,
     error_message: params.error || null,
     processed_at: params.status === 'processed' ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
   }, { onConflict: 'stripe_event_id' })
 }
 
@@ -32,6 +34,9 @@ export async function POST(request: Request) {
   try {
     verifyStripeWebhookSignature(payload, signature)
   } catch (error) {
+    // Signature failures never reach the events table (no trusted event id),
+    // so log them for operators watching for misconfiguration or abuse.
+    console.warn('[stripe-webhook] signature verification failed:', error instanceof Error ? error.message : error)
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid Stripe signature' }, { status: 400 })
   }
 
@@ -47,17 +52,41 @@ export async function POST(request: Request) {
   }
 
   const supabase = createSupabaseAdminClient()
-  const { data: existing } = await supabase
-    .from('stripe_webhook_events')
-    .select('id,status')
-    .eq('stripe_event_id', event.id)
-    .maybeSingle()
 
-  if (asRow(existing)?.status === 'processed') {
-    return NextResponse.json({ received: true, duplicate: true })
+  // Insert-first idempotency: the unique constraint on stripe_event_id is the
+  // arbiter, so two concurrent deliveries cannot both claim the event.
+  const { error: claimError } = await supabase.from('stripe_webhook_events').insert({
+    stripe_event_id: event.id,
+    event_type: event.type,
+    status: 'processing',
+    payload: event,
+  })
+
+  if (claimError) {
+    const isDuplicate = claimError.code === '23505'
+    if (!isDuplicate) {
+      console.warn('[stripe-webhook] could not record event:', claimError.message)
+      return NextResponse.json({ error: 'Could not record webhook event' }, { status: 500 })
+    }
+    const { data: existing } = await supabase
+      .from('stripe_webhook_events')
+      .select('id,status,updated_at')
+      .eq('stripe_event_id', event.id)
+      .maybeSingle()
+    const existingRow = asRow(existing)
+    const decision = decideWebhookRetry({
+      existingStatus: rowString(existingRow?.status),
+      updatedAt: rowString(existingRow?.updated_at),
+    })
+    if (decision === 'skip_duplicate') {
+      return NextResponse.json({ received: true, duplicate: true })
+    }
+    if (decision === 'skip_in_progress') {
+      return NextResponse.json({ received: true, inProgress: true })
+    }
+    // Failed or stale: take the event over and process it again.
+    await markEvent({ id: event.id, type: event.type, status: 'processing', payload: event })
   }
-
-  await markEvent({ id: event.id, type: event.type, status: 'processing', payload: event })
 
   try {
     const object = event.data?.object || {}

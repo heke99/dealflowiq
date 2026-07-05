@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { assertNotPaymentRequired } from '@/lib/auth/access'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { analyzeMarketUrl } from '@/lib/market/urlAnalyzer'
@@ -318,6 +319,7 @@ async function createPreviewForBatch(params: { supabase: SupabaseServer; workspa
 export async function analyzeImportUrlAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  assertNotPaymentRequired(workspace, '/imports')
   if (!canUseFeature(workspace.access.features, 'market_source_imports') && !workspace.access.isPlatformAdmin) {
     redirect(`/imports?error=${encodeURIComponent('URL imports are included with Source Imports. Upgrade to import and score listings.')}`)
   }

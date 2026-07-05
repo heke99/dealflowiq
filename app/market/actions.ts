@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { assertNotPaymentRequired } from '@/lib/auth/access'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { scoreMarketListing, normalizePropertyType } from '@/lib/market/scoring'
@@ -366,6 +367,7 @@ export async function createMarketSourceAction(formData: FormData) {
 export async function importMarketUrlAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  assertNotPaymentRequired(workspace)
   requireSourceImports(workspace)
 
   const inputUrl = text(formData, 'input_url')
@@ -492,6 +494,7 @@ export async function importMarketUrlAction(formData: FormData) {
 export async function importMarketCsvAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  assertNotPaymentRequired(workspace)
   requireSourceImports(workspace)
 
   const rawCsv = String(formData.get('csv_text') || '').trim()
@@ -562,6 +565,7 @@ export async function importMarketCsvAction(formData: FormData) {
 export async function createMarketListingAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  assertNotPaymentRequired(workspace)
 
   const sourceUrl = text(formData, 'source_url')
   const title = text(formData, 'title') || text(formData, 'address') || 'Untitled opportunity'
@@ -670,6 +674,31 @@ export async function saveOpportunityAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   const supabase = await createSupabaseServerClient()
+
+  // Plan limit: max_saved_deals caps new watchlist entries (updates to
+  // already-saved listings are always allowed).
+  const savedDealsLimit = workspace.access.limits.max_saved_deals
+  if (savedDealsLimit !== null && savedDealsLimit !== undefined && !workspace.access.isPlatformAdmin) {
+    const [{ data: existingEntry }, { count: savedCount }] = await Promise.all([
+      supabase
+        .from('market_watchlist')
+        .select('id')
+        .eq('organization_id', workspace.organization.id)
+        .eq('user_id', workspace.user.id)
+        .eq('listing_id', listingId)
+        .maybeSingle(),
+      supabase
+        .from('market_watchlist')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', workspace.organization.id)
+        .eq('user_id', workspace.user.id)
+        .not('status', 'in', '(ignored,passed)'),
+    ])
+    if (!existingEntry && Number(savedCount || 0) >= Number(savedDealsLimit)) {
+      redirect(`/saved-deals?error=${encodeURIComponent(`Your plan allows ${savedDealsLimit} saved deals. Upgrade to save more.`)}`)
+    }
+  }
+
   const { error } = await supabase.from('market_watchlist').upsert({
     organization_id: workspace.organization.id,
     user_id: workspace.user.id,
@@ -833,6 +862,7 @@ export async function publishDealToMarketAction(formData: FormData) {
   if (visibility === 'private') redirect(`/deals/${dealId}?error=${encodeURIComponent('Choose Team, Community, or Public to publish a deal.')}`)
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  assertNotPaymentRequired(workspace)
   if ((visibility === 'community' || visibility === 'public') && !canUseFeature(workspace.access.features, 'public_community_deals')) {
     redirect(`/deals/${dealId}?error=${encodeURIComponent('Public/community deal posting is a premium feature.')}`)
   }

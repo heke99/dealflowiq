@@ -4,6 +4,8 @@ import { asRow, rowString } from '@/lib/types/rows'
 
 export const FREE_OPPORTUNITY_LIST_LIMIT = 2
 export const FREE_OPPORTUNITY_DETAIL_COOLDOWN_HOURS = 48
+/** One outbound listing message per this window for free users. */
+export const FREE_MESSAGE_COOLDOWN_HOURS = 48
 
 export function hasFullOpportunityAccess(access: WorkspaceAccess) {
   return ['platform_admin', 'user_override', 'subscription', 'trial'].includes(access.accessSource)

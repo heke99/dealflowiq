@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { assertNotPaymentRequired } from '@/lib/auth/access'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { buildCalculationSnapshotPayload, calculateDealUnderwriting } from '@/lib/calculations/underwriting'
@@ -235,6 +236,7 @@ function buildPropertyPayload(formData: FormData) {
 export async function createDealAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+  assertNotPaymentRequired(workspace)
 
   const supabase = await createSupabaseServerClient()
   const dealPayload = buildDealPayload(formData)

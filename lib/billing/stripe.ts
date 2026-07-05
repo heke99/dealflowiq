@@ -193,9 +193,12 @@ export async function createStripeCheckoutSession(params: {
   plan: StripePlanRow
   interval: StripeBillingInterval
   stripeCustomerId?: string | null
+  trialPeriodDays?: number | null
 }) {
   const priceId = params.interval === 'year' ? params.plan.stripe_annual_price_id : params.plan.stripe_monthly_price_id
   if (!priceId) throw new Error(`Missing Stripe ${params.interval} price for ${params.plan.name}. Sync the plan with Stripe first.`)
+
+  const trialDays = Number(params.trialPeriodDays || 0)
 
   return stripeRequest<{ id: string; url: string }>('/checkout/sessions', {
     mode: 'subscription',
@@ -206,6 +209,7 @@ export async function createStripeCheckoutSession(params: {
     'line_items[0][price]': priceId,
     'line_items[0][quantity]': 1,
     allow_promotion_codes: true,
+    ...(trialDays > 0 ? { 'subscription_data[trial_period_days]': trialDays } : {}),
     'metadata[organization_id]': params.organizationId,
     'metadata[user_id]': params.userId,
     'metadata[plan_id]': params.plan.id,

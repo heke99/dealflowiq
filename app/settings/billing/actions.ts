@@ -7,6 +7,7 @@ import { canManageBilling } from '@/lib/auth/access'
 import { recordAuditEvent } from '@/lib/audit'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createStripeCheckoutSession, createStripePortalSession, syncPlanWithStripe, type StripeBillingInterval, type StripePlanRow } from '@/lib/billing/stripe'
+import { validateCheckoutPlan, type CheckoutPlanCandidate, type CurrentSubscriptionState } from '@/lib/billing/checkoutValidation'
 import { asRow, rowString } from '@/lib/types/rows'
 
 function intervalValue(value: FormDataEntryValue | null): StripeBillingInterval {
@@ -32,15 +33,21 @@ export async function startCheckoutAction(formData: FormData) {
       .maybeSingle(),
     supabase
       .from('organization_subscriptions')
-      .select('stripe_customer_id')
+      .select('stripe_customer_id, stripe_subscription_id, plan_id, status, trial_start_at')
       .eq('organization_id', workspace.organization.id)
       .maybeSingle(),
   ])
 
   if (planError || !plan) redirect(`/settings/billing?error=${encodeURIComponent(planError?.message || 'Plan not found')}`)
 
-  const priceCents = interval === 'year' ? Number(asRow(plan)?.annual_price_cents || 0) : Number(asRow(plan)?.monthly_price_cents || 0)
-  if (priceCents <= 0) {
+  const validation = validateCheckoutPlan({
+    plan: asRow(plan) as CheckoutPlanCandidate | null,
+    interval,
+    current: asRow(subscription) as CurrentSubscriptionState | null,
+  })
+  if (!validation.ok) redirect(`/settings/billing?error=${encodeURIComponent(validation.reason)}`)
+
+  if (validation.isFree) {
     const { error } = await supabase.from('organization_subscriptions').upsert({
       organization_id: workspace.organization.id,
       plan_id: planId,
@@ -86,6 +93,7 @@ export async function startCheckoutAction(formData: FormData) {
     plan: stripeReadyPlan,
     interval,
     stripeCustomerId: rowString(asRow(subscription)?.stripe_customer_id) || null,
+    trialPeriodDays: validation.trialDays,
   }).catch((error) => {
     redirect(`/settings/billing?error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not create Stripe Checkout session')}`)
   })

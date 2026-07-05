@@ -136,7 +136,6 @@ export async function getWorkspaceAccess(params: {
 }): Promise<WorkspaceAccess> {
   const accountType = normalizeAccountType(params.accountType)
   const isPlatformAdmin = await isCurrentUserPlatformAdmin()
-  const defaultFeatures = mergeFeatures(CORE_FEATURES, accountTypeDefaultFeatures[accountType])
   const fullLimits = { unlimited: null, ...TRIAL_LIMITS }
 
   if (!params.organizationId) {
@@ -227,13 +226,74 @@ export async function getWorkspaceAccess(params: {
       }
     : null
 
+  const resolution = resolveAccessState({
+    isPlatformAdmin,
+    accountType,
+    plan,
+    subscription,
+    userOverride,
+    memberOverride,
+  })
+
+  return {
+    accountType,
+    isPlatformAdmin,
+    subscription,
+    plan,
+    userOverride: resolution.activeOverride || userOverride,
+    accessSource: resolution.accessSource,
+    status: resolution.status,
+    trialEndsAt: resolution.trialEndsAt,
+    isTrialActive: resolution.isTrialActive,
+    isFreeAccess: resolution.accessSource === 'free',
+    isPaymentRequired: resolution.isPaymentRequired,
+    requiresPayment: resolution.isPaymentRequired,
+    restrictionReason: getRestrictionReason(resolution.accessSource, resolution.status, true),
+    features: resolution.features,
+    limits: resolution.limits,
+  }
+}
+
+export type AccessResolutionInput = {
+  isPlatformAdmin: boolean
+  accountType: AccountType
+  plan: BillingPlan | null
+  subscription: OrganizationSubscription | null
+  userOverride: UserAccessOverride | null
+  memberOverride: UserAccessOverride | null
+  /** Injectable clock for tests; defaults to Date.now(). */
+  now?: number
+}
+
+export type AccessResolution = {
+  accessSource: AccessSource
+  status: string
+  trialEndsAt: string | null
+  isTrialActive: boolean
+  isPaymentRequired: boolean
+  features: FeatureMap
+  limits: LimitMap
+  activeOverride: UserAccessOverride | null
+}
+
+/**
+ * Pure access resolution — the single source of truth for which access
+ * source wins and which features/limits apply. Order of precedence:
+ * platform admin > active override (user, then member) > paid subscription >
+ * active trial > payment-required statuses > free tier.
+ */
+export function resolveAccessState(input: AccessResolutionInput): AccessResolution {
+  const now = input.now ?? Date.now()
+  const { plan, subscription, userOverride, memberOverride } = input
+  const defaultFeatures = mergeFeatures(CORE_FEATURES, accountTypeDefaultFeatures[input.accountType])
+  const fullLimits: LimitMap = { unlimited: null, ...TRIAL_LIMITS }
+
   const status = subscription?.status || 'trialing'
   const trialEndsAt = subscription?.trial_end_at || null
-  const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
-  const isUserOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
-  const isMemberOverrideActive = Boolean(memberOverride && (!memberOverride.expires_at || new Date(memberOverride.expires_at).getTime() > Date.now()))
+  const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > now)
+  const isUserOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > now))
+  const isMemberOverrideActive = Boolean(memberOverride && (!memberOverride.expires_at || new Date(memberOverride.expires_at).getTime() > now))
   const activeOverride = isUserOverrideActive ? userOverride : isMemberOverrideActive ? memberOverride : null
-  const isOverrideActive = Boolean(activeOverride)
   const isFreePlan = Boolean(plan && (plan.code === 'free' || (Number(plan.monthly_price_cents || 0) <= 0 && Number(plan.annual_price_cents || 0) <= 0 && status === 'active')))
   // Valid DB statuses per organization_subscriptions CHECK constraint (033).
   const isSubscriptionActive = ['active', 'comped', 'manually_granted'].includes(status) && !isFreePlan
@@ -242,14 +302,14 @@ export async function getWorkspaceAccess(params: {
   let features: FeatureMap = isFreePlan ? mergeFeatures(FREE_FEATURES, plan?.features, subscription?.features_override) : FREE_FEATURES
   let limits: LimitMap = isFreePlan ? mergeLimits(FREE_LIMITS, plan?.limits, subscription?.limits_override) : FREE_LIMITS
 
-  if (isPlatformAdmin) {
+  if (input.isPlatformAdmin) {
     accessSource = 'platform_admin'
     features = ALL_FEATURES
     limits = fullLimits
-  } else if (isOverrideActive) {
+  } else if (activeOverride) {
     accessSource = 'user_override'
-    features = mergeFeatures(defaultFeatures, plan?.features, activeOverride?.features_override)
-    limits = mergeLimits(fullLimits, plan?.limits, activeOverride?.limits_override)
+    features = mergeFeatures(defaultFeatures, plan?.features, activeOverride.features_override)
+    limits = mergeLimits(fullLimits, plan?.limits, activeOverride.limits_override)
   } else if (isSubscriptionActive) {
     accessSource = 'subscription'
     features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
@@ -262,24 +322,14 @@ export async function getWorkspaceAccess(params: {
     accessSource = 'payment_required'
   }
 
-  const isPaymentRequired = accessSource === 'payment_required'
-  const restrictionReason = getRestrictionReason(accessSource, status, true)
-
   return {
-    accountType,
-    isPlatformAdmin,
-    subscription,
-    plan,
-    userOverride: activeOverride || userOverride,
     accessSource,
     status,
     trialEndsAt,
     isTrialActive,
-    isFreeAccess: accessSource === 'free',
-    isPaymentRequired,
-    requiresPayment: isPaymentRequired,
-    restrictionReason,
+    isPaymentRequired: accessSource === 'payment_required',
     features,
     limits,
+    activeOverride,
   }
 }

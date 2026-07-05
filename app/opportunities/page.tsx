@@ -4,6 +4,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
 import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import { lockedPremiumText, opportunityListLimit } from '@/lib/billing/freemium'
 import type { Row } from '@/lib/types/rows'
 
 function money(value: unknown, compact = false) {
@@ -211,7 +212,13 @@ export default async function OpportunitiesPage() {
     if (!existing || Number(score.deal_score || 0) > Number(existing.deal_score || 0)) scoreByListing.set(listingId, score)
   }
 
-  const scores = ((listingsData || []) as Row[]).map((listing) => {
+  // Plan limit: free users see a limited slice of the qualified list.
+  const listLimit = opportunityListLimit(workspace.access)
+  const allListings = (listingsData || []) as Row[]
+  const visibleListings = listLimit === null ? allListings : allListings.slice(0, Math.max(0, listLimit))
+  const hiddenCount = allListings.length - visibleListings.length
+
+  const scores = visibleListings.map((listing) => {
     const score: Row = scoreByListing.get(String(listing.id)) || {}
     return {
       ...score,
@@ -245,6 +252,13 @@ export default async function OpportunitiesPage() {
           </div>
         </section>
         {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={String(score.id)} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
+        {hiddenCount > 0 ? (
+          <div className="rounded-3xl border border-amber-400/25 bg-amber-400/[0.06] p-8 text-center">
+            <h2 className="text-xl font-bold text-amber-100">{hiddenCount} more qualified {hiddenCount === 1 ? 'opportunity is' : 'opportunities are'} hidden on the free plan</h2>
+            <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-400">{lockedPremiumText()}</p>
+            <Link href="/settings/billing" className="mt-5 inline-flex rounded-xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 hover:bg-amber-200">Upgrade to unlock</Link>
+          </div>
+        ) : null}
       </div>
     </AppShell>
   )

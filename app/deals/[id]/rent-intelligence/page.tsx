@@ -88,6 +88,35 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
   const marketRent = isReasonableMonthlyRent(rawMarketRent) ? rawMarketRent : 0
   const hudRent = Number(deal.section8_rent || 0)
 
+  // Rent transparency: where each rent value likely came from and how fresh
+  // the underlying source data is.
+  const dateLabel = (value: unknown) => (value ? new Date(String(value)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null)
+  const hudFetchedAt = dateLabel(hudCache?.fetched_at || hudCache?.updated_at)
+  const latestCompAt = dateLabel(compRows[0]?.created_at)
+  const rentSources: Array<{ label: string; value: number; source: string; freshness: string | null; confidence: string | null }> = [
+    {
+      label: 'Market rent',
+      value: marketRent,
+      source: summary.validCount ? `Estimated from ${summary.validCount} verified comp(s) (median ${money(summary.medianRent || 0)})` : marketRent ? 'Manual entry (no saved comps back this number)' : 'Not set',
+      freshness: summary.validCount ? (latestCompAt ? `Newest comp ${latestCompAt}` : null) : null,
+      confidence: summary.validCount ? `${summary.confidenceScore}/100 comp confidence` : null,
+    },
+    {
+      label: 'HUD / Section 8 rent',
+      value: hudRent,
+      source: hudCache ? `HUD FMR ${String(hudCache.hud_year || '')} for ZIP ${String(hudCache.zip_code || property?.zip_code || '')}` : hudRent ? 'Manual entry (no HUD lookup cached for this ZIP)' : 'Not set',
+      freshness: hudFetchedAt ? `Fetched ${hudFetchedAt}` : null,
+      confidence: hudCache ? 'Official HUD published benchmark' : null,
+    },
+    {
+      label: 'Current rent',
+      value: currentRent,
+      source: currentRent ? 'Manual entry (lease/actuals)' : 'Not set',
+      freshness: null,
+      confidence: null,
+    },
+  ]
+
   return (
     <AppShell
       organizationName={workspace.organization?.name}
@@ -139,6 +168,22 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
             The saved market rent looks unrealistic and is being ignored by the analyzer: {money(rawMarketRent)}. Add verified rent comps or edit the deal and enter a realistic monthly market rent.
           </div>
         ) : null}
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <h2 className="text-xl font-bold">Rent sources & freshness</h2>
+          <p className="mt-1 text-sm text-slate-500">Every rent number shows where it came from, so estimates are never mistaken for verified data.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {rentSources.map((entry) => (
+              <div key={entry.label} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{entry.label}</div>
+                <div className="mt-1 text-2xl font-black text-slate-100">{entry.value ? money(entry.value) : '—'}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">{entry.source}</div>
+                {entry.freshness ? <div className="mt-1 text-xs text-sky-300">{entry.freshness}</div> : null}
+                {entry.confidence ? <div className="mt-1 text-xs text-emerald-300">{entry.confidence}</div> : null}
+              </div>
+            ))}
+          </div>
+        </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Stat label="Current Rent" value={money(currentRent)} />

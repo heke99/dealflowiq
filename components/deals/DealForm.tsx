@@ -186,6 +186,7 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
         <Field label="Closing costs" name="closing_costs" type="number" defaultValue={value(deal, 'closing_costs')} />
         <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || String(defaults?.selling_costs_percent ?? 8)} help="Used in flip profit preview." />
         <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly') || String(defaults?.holding_costs_monthly ?? '')} help="Used in flip profit preview." />
+        <Field label="Flip holding months" name="flip_holding_months" type="number" defaultValue={value(deal, 'flip_holding_months')} help="How many months of holding costs the flip preview assumes (default 6)." />
         <Field label="MAO %" name="mao_percentage" type="number" defaultValue={value(deal, 'mao_percentage') || String(defaults?.mao_percentage ?? 70)} help="Editable wholesale rule. 70% is only a common default, not a law." />
         <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || String(defaults?.desired_wholesale_fee ?? 10000)} />
         <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || String(defaults?.refinance_ltv_percent ?? 75)} help="Used in BRRRR refi loan preview." />

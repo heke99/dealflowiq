@@ -206,6 +206,7 @@ function buildDealPayload(formData: FormData) {
     closing_costs: numberValue(formData, 'closing_costs'),
     selling_costs_percent: numberValue(formData, 'selling_costs_percent'),
     holding_costs_monthly: numberValue(formData, 'holding_costs_monthly'),
+    flip_holding_months: integerValue(formData, 'flip_holding_months'),
     mao_percentage: numberValue(formData, 'mao_percentage'),
     desired_wholesale_fee: numberValue(formData, 'desired_wholesale_fee'),
     refinance_ltv_percent: numberValue(formData, 'refinance_ltv_percent'),
@@ -373,6 +374,7 @@ export async function quickUpdateDealAssumptionsAction(formData: FormData) {
     'closing_costs',
     'selling_costs_percent',
     'holding_costs_monthly',
+    'flip_holding_months',
     'mao_percentage',
     'desired_wholesale_fee',
     'refinance_ltv_percent',
@@ -470,6 +472,102 @@ export async function createCalculationSnapshotAction(formData: FormData) {
   revalidatePath(`/deals/${dealId}`)
   revalidatePath(`/deals/${dealId}/analyzer`)
   redirect(redirectTo.startsWith('/deals/') ? `${redirectTo}?snapshot=saved` : `/deals/${dealId}/analyzer?snapshot=saved`)
+}
+
+/**
+ * Restores the inputs captured in a calculation snapshot back onto the deal.
+ * Snapshots stay immutable — this copies their stored assumptions/results
+ * into the live deal fields and lets the engine recalculate from there.
+ */
+export async function restoreCalculationSnapshotAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  const snapshotId = String(formData.get('snapshot_id') || '').trim()
+  if (!dealId || !snapshotId) redirect('/deals?error=Missing deal or snapshot id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const supabase = await createSupabaseServerClient()
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from('deal_calculation_snapshots')
+    .select('id, snapshot_name, assumptions, results')
+    .eq('id', snapshotId)
+    .eq('deal_id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+  if (snapshotError || !snapshot) {
+    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(snapshotError?.message || 'Snapshot not found')}`)
+  }
+
+  const snapshotRow = snapshot as Row
+  const assumptions = firstRow(snapshotRow.assumptions) || {}
+  const results = firstRow(snapshotRow.results) || {}
+  const scenarios = firstRow(results.scenarios) || {}
+  const mortgage = firstRow(assumptions.mortgage) || {}
+  const operating = firstRow(assumptions.operating) || {}
+  const capRate = firstRow(assumptions.capRate) || {}
+  const dscr = firstRow(assumptions.dscr) || {}
+  const wholesale = firstRow(assumptions.wholesale) || {}
+  const flip = firstRow(assumptions.flip) || {}
+  const brrrr = firstRow(assumptions.brrrr) || {}
+  const projection = firstRow(assumptions.projection) || {}
+
+  const numberOrNull = (value: unknown) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+  const scenarioRent = (key: string) => numberOrNull(firstRow((scenarios as Row)[key])?.monthlyRent)
+
+  const update: Record<string, unknown> = {
+    purchase_price: numberOrNull(results.purchasePrice),
+    arv: numberOrNull(results.arv),
+    rehab_estimate: numberOrNull(results.rehabEstimate),
+    current_rent: scenarioRent('current'),
+    market_rent: scenarioRent('market'),
+    section8_rent: scenarioRent('section8'),
+    target_rent: scenarioRent('target'),
+    vacancy_percent: numberOrNull(operating.vacancyPercent),
+    management_percent: numberOrNull(operating.managementPercent),
+    interest_rate_percent: numberOrNull(mortgage.annualInterestRatePercent),
+    loan_term_months: numberOrNull(mortgage.monthlyPayments),
+    dscr_min_threshold: numberOrNull(dscr.minimumThreshold),
+    cap_rate_basis: ['purchase_price', 'arv', 'custom_value'].includes(String(capRate.basis)) ? capRate.basis : 'purchase_price',
+    mao_percentage: numberOrNull(wholesale.maoPercentage),
+    desired_wholesale_fee: numberOrNull(wholesale.desiredWholesaleFee),
+    selling_costs_percent: numberOrNull(flip.sellingCostsPercent),
+    holding_costs_monthly: numberOrNull(flip.holdingCostsMonthly),
+    flip_holding_months: numberOrNull(flip.holdingMonths),
+    refinance_ltv_percent: numberOrNull(brrrr.refinanceLtvPercent),
+    rent_growth_percent: numberOrNull(projection.rentGrowthPercent),
+    expense_growth_percent: numberOrNull(projection.expenseGrowthPercent),
+    exit_cap_rate_percent: numberOrNull(projection.exitCapRatePercent),
+  }
+  // Never wipe fields the snapshot has no value for.
+  for (const key of Object.keys(update)) {
+    if (update[key] === null || update[key] === undefined) delete update[key]
+  }
+
+  const { error: updateError } = await supabase
+    .from('deals')
+    .update(update)
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+  if (updateError) {
+    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(updateError.message)}`)
+  }
+
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization.id,
+    actor_id: workspace.user.id,
+    event_type: 'deal.calculation_snapshot.restored',
+    entity_type: 'deal',
+    entity_id: dealId,
+    metadata: { snapshot_id: snapshotId, snapshot_name: snapshotRow.snapshot_name, restored_fields: Object.keys(update) },
+  })
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/deals/${dealId}/analyzer`)
+  redirect(`/deals/${dealId}/analyzer?notice=${encodeURIComponent(`Snapshot "${snapshotRow.snapshot_name || 'Underwriting snapshot'}" restored onto the deal.`)}`)
 }
 
 export async function deleteDealAction(formData: FormData) {

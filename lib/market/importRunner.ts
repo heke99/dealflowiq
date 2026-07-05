@@ -5,8 +5,13 @@ import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
 import { classifyOpportunity, OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { applyAutomatedRentIntelligence } from '@/lib/market/rentAutomation'
+import { buildConfidenceBreakdown, buildDataQualityChecklist } from '@/lib/market/rentIntelligenceEngine'
+import { recordImportAuditEvent } from '@/lib/market/importAudit'
+import { countRecentProviderImports, importPolicyForSource } from '@/lib/market/importGuards'
+import type { ProviderPolicy } from '@/lib/market/providerPolicies'
 import {
   buildNormalizedListingKey,
+  buildUrlOnlyMarketListing,
   detectSourceType,
   fetchAndNormalizeMarketUrl,
   type NormalizedMarketListing,
@@ -142,6 +147,9 @@ function listingInsertPayload(params: {
       },
     },
     source_data_expires_at: listing.source_data_expires_at || null,
+    // Retention cleanup (cleanup_expired_market_source_data) keys on
+    // provider_data_expires_at, so direct imports must set it too.
+    provider_data_expires_at: listing.provider_data_expires_at || listing.source_data_expires_at || null,
     source_terms_metadata: listing.source_terms_metadata || {},
     last_seen_at: new Date().toISOString(),
   }
@@ -202,6 +210,8 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
         latest_opportunity_rank: rank.rank,
         latest_opportunity_rank_label: rank.label,
         latest_opportunity_rank_reason: rank.reason,
+        data_quality_checklist: buildDataQualityChecklist(listing, score),
+        confidence_breakdown: buildConfidenceBreakdown(listing, score),
       })
       .eq('id', listing.id)
       .eq('organization_id', organizationId)
@@ -508,14 +518,52 @@ function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string
   }
 }
 
-export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?: number }) {
+/** Recovers queue items and jobs left behind by crashed or timed-out import workers. */
+export async function recoverStuckImports(supabase: SupabaseAny) {
+  const staleItemCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+  const { data: requeuedRows } = await supabase
+    .from('market_source_queue_items')
+    .update({ status: 'queued' })
+    .eq('status', 'running')
+    .lt('last_attempt_at', staleItemCutoff)
+    .select('id')
+
+  const staleJobCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+  const { data: failedJobRows } = await supabase
+    .from('market_import_jobs')
+    .update({ status: 'failed', error_message: 'Import worker timed out; job recovered by scheduler sweep.' })
+    .eq('status', 'running')
+    .lt('started_at', staleJobCutoff)
+    .select('id')
+
+  return {
+    requeuedItems: asRows(requeuedRows).length,
+    failedJobs: asRows(failedJobRows).length,
+  }
+}
+
+export type MarketSourceRunResult = {
+  sourceId: unknown
+  found: number
+  created: number
+  updated: number
+  failed: number
+  topScore: number
+  message?: string
+  skipped?: boolean
+  opportunities?: number
+  listingIds?: string[]
+  errors?: string[]
+}
+
+export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?: number }): Promise<MarketSourceRunResult> {
   const supabase = createSupabaseAdminClient()
   const settings = (source.settings && typeof source.settings === 'object' ? source.settings : {}) as Record<string, unknown>
   const maxUrls = options?.maxUrls || Number(settings.max_urls_per_run || 5) || 5
   const configuredUrls = asArrayOfUrls(settings)
   await seedSourceQueueFromSettings(supabase, source, configuredUrls)
   const queuedItems = await loadQueuedUrls(supabase, source, maxUrls)
-  const urls = queuedItems.length ? queuedItems.map((item) => String(item.input_url)) : configuredUrls.slice(0, maxUrls)
+  const candidateUrls = queuedItems.length ? queuedItems.map((item) => String(item.input_url)) : configuredUrls.slice(0, maxUrls)
   const queueItemByUrl = new Map<string, Row>()
   for (const item of queuedItems) queueItemByUrl.set(String(item.input_url), item)
   const threshold = Number(source.opportunity_score_threshold ?? settings.opportunity_score_threshold ?? OPPORTUNITY_SCORE_THRESHOLD)
@@ -523,7 +571,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     ? await supabase.from('market_buy_boxes').select('*').eq('id', source.buy_box_id).maybeSingle()
     : { data: null }
 
-  if (!urls.length) {
+  if (!candidateUrls.length) {
     const message = 'No source URLs configured. Add source_url or source_urls in this source settings.'
     await supabase.from('market_sources').update({
       status: 'needs_auth',
@@ -533,6 +581,54 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       next_run_at: nextRunFor(source.schedule_frequency),
     }).eq('id', source.id)
     return { sourceId: source.id, found: 0, created: 0, updated: 0, failed: 1, topScore: 0, message }
+  }
+
+  // Provider policy + hourly rate-limit gate. Policies are loaded once per
+  // detected source type and the run is capped to each provider's remaining
+  // rolling-hour budget, matching the interactive import actions.
+  const organizationId = String(source.organization_id)
+  const policyByType = new Map<string, ProviderPolicy>()
+  const remainingByType = new Map<string, number>()
+  const policyBlockMessages: string[] = []
+  let rateLimitedType: string | null = null
+  const urls: string[] = []
+
+  for (const inputUrl of candidateUrls) {
+    const detected = String(source.source_type || detectSourceType(inputUrl))
+    let policy = policyByType.get(detected)
+    if (!policy) {
+      policy = await importPolicyForSource(supabase, organizationId, detected)
+      policyByType.set(detected, policy)
+      if (policy.active && policy.listingImportAllowed) {
+        const recent = await countRecentProviderImports(supabase, organizationId, detected)
+        remainingByType.set(detected, Math.max(0, policy.maxListingsPerHour - recent))
+      }
+    }
+    if (!policy.active || !policy.listingImportAllowed) {
+      const blockMessage = !policy.active
+        ? `${policy.label} import is not active. Configure provider policy before scheduled imports can run.`
+        : `${policy.label} listing import is not allowed by current provider policy.`
+      if (!policyBlockMessages.includes(blockMessage)) policyBlockMessages.push(blockMessage)
+      continue
+    }
+    const remaining = remainingByType.get(detected) ?? 0
+    if (remaining <= 0) {
+      rateLimitedType = policy.label
+      continue
+    }
+    remainingByType.set(detected, remaining - 1)
+    urls.push(inputUrl)
+  }
+
+  if (!urls.length) {
+    const message = policyBlockMessages[0]
+      || `${rateLimitedType || 'Provider'} hourly rate limit reached. Imports resume after the rolling hour window.`
+    await supabase.from('market_sources').update({
+      last_error: message,
+      last_run_at: new Date().toISOString(),
+      next_run_at: nextRunFor(source.schedule_frequency),
+    }).eq('id', source.id)
+    return { sourceId: source.id, found: 0, created: 0, updated: 0, failed: 0, topScore: 0, skipped: true, message }
   }
 
   let created = 0
@@ -572,7 +668,19 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     }
 
     try {
-      const normalized = await fetchAndNormalizeMarketUrl(inputUrl, String(detectedSource))
+      let normalized: NormalizedMarketListing
+      let fallbackErrorMessage: string | null = null
+      try {
+        normalized = await fetchAndNormalizeMarketUrl(inputUrl, String(detectedSource))
+      } catch (fetchError) {
+        // On the final retry attempt (or when there is no queue item to retry),
+        // import a URL-only review listing instead of failing the job outright.
+        const attempts = queueItem?.id ? Number(queueItem.attempts || 0) + 1 : null
+        const isFinalAttempt = attempts === null || attempts >= 5
+        if (!isFinalAttempt) throw fetchError
+        fallbackErrorMessage = fetchError instanceof Error ? fetchError.message : 'Scheduled import fetch failed'
+        normalized = buildUrlOnlyMarketListing(inputUrl, String(detectedSource), fallbackErrorMessage)
+      }
       const result = await upsertMarketListingFromNormalized({
         supabase,
         listing: normalized,
@@ -586,6 +694,15 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
       else updated += 1
       topScore = Math.max(topScore, result.score.dealScore)
       listingIds.push(result.listing.id)
+
+      await recordImportAuditEvent(supabase, {
+        organizationId: String(source.organization_id),
+        userId: rowString(source.created_by) || null,
+        listingId: String(result.listing.id),
+        eventType: 'listing_imported',
+        message: result.created ? 'Listing imported by scheduled source run.' : 'Listing updated by scheduled source run.',
+        metadata: { sourceType: String(detectedSource), sourceUrl: inputUrl, jobId: job.id },
+      })
 
       const criteriaMatch = evaluateBuyBoxCriteria((buyBox as SourceRow | null) || null, result.listing, result.score, threshold)
       if (criteriaMatch.matchedStatus === 'opportunity') {
@@ -625,13 +742,14 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
           matchScore: criteriaMatch.matchScore,
           rentConfidenceScore: result.score.rentConfidenceScore,
           sourceType: detectedSource,
+          ...(fallbackErrorMessage ? { fallbackReviewRequired: true, fallbackReason: fallbackErrorMessage } : {}),
         },
       }).eq('id', job.id)
       if (queueItem?.id) {
         await supabase.from('market_source_queue_items').update({
           status: 'completed',
           listing_id: result.listing.id,
-          last_error: null,
+          last_error: fallbackErrorMessage,
           completed_at: new Date().toISOString(),
         }).eq('id', queueItem.id)
       }

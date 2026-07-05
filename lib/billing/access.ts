@@ -204,7 +204,8 @@ export async function getWorkspaceAccess(params: {
   const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
   const isOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
   const isFreePlan = Boolean(plan && (plan.code === 'free' || (Number(plan.monthly_price_cents || 0) <= 0 && Number(plan.annual_price_cents || 0) <= 0 && status === 'active')))
-  const isSubscriptionActive = ['active', 'paid', 'comped', 'manually_granted'].includes(status) && !isFreePlan
+  // Valid DB statuses per organization_subscriptions CHECK constraint (033).
+  const isSubscriptionActive = ['active', 'comped', 'manually_granted'].includes(status) && !isFreePlan
 
   let accessSource: AccessSource = 'free'
   let features: FeatureMap = isFreePlan ? mergeFeatures(FREE_FEATURES, plan?.features, subscription?.features_override) : FREE_FEATURES

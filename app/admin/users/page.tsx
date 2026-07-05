@@ -35,7 +35,7 @@ function accessFor(row: Row, activeOverride: Row | null) {
   const trialEnds = subscription?.trial_end_at ? new Date(String(subscription.trial_end_at)).getTime() : 0
   if (activeOverride) return { label: 'override', tone: 'blue' }
   if (status === 'trialing' && trialEnds > Date.now()) return { label: 'trial', tone: 'amber' }
-  if (['active', 'paid', 'comped'].includes(status)) return { label: 'paid', tone: 'green' }
+  if (['active', 'comped', 'manually_granted'].includes(status)) return { label: 'paid', tone: 'green' }
   if (['past_due', 'unpaid', 'incomplete'].includes(status)) return { label: 'payment required', tone: 'red' }
   return { label: 'free', tone: 'default' }
 }
@@ -65,7 +65,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
     supabase.from('community_teams').select('id,name,organization_id,organizations(name)').order('name', { ascending: true }).limit(500),
     supabase.from('organizations').select('id', { count: 'exact', head: true }),
     supabase.from('community_teams').select('id', { count: 'exact', head: true }),
-    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).in('status', ['active', 'paid', 'trialing', 'comped']),
+    supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).in('status', ['active', 'trialing', 'comped', 'manually_granted']),
   ])
 
   const profiles = (profilesResult.data || []) as Row[]

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { lookupHudFmrByZip } from '@/lib/integrations/hud/fmrClient'
 import { importZillowRentalByUrl } from '@/lib/integrations/zillow/zillowClient'
 import { MAX_REASONABLE_MONTHLY_RENT, MIN_REASONABLE_MONTHLY_RENT, isReasonableMonthlyRent, summarizeMarketRentComps, type MarketRentComp } from '@/lib/underwriting/rentIntelligence'
@@ -97,7 +98,10 @@ async function applyHudLookupToDeal(params: {
   const result = await lookupHudFmrByZip({ zipCode: params.zipCode, bedrooms: params.bedrooms, hudYear: params.hudYear })
   const rent = result.selectedBedroomRent || result.rents[2] || result.rents[1] || result.rents[3] || result.rents[4] || result.rents[0]
 
-  await supabase.from('hud_fmr_cache').upsert({
+  // The HUD FMR cache is global shared data; RLS restricts writes to the
+  // service role (migration 034), so the upsert uses the admin client.
+  const adminClient = createSupabaseAdminClient()
+  await adminClient.from('hud_fmr_cache').upsert({
     zip_code: result.zipCode,
     state: result.state,
     county: result.county,

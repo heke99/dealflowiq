@@ -86,3 +86,65 @@ export function inferImportMode(sourceType: MarketSourceType | string, isSearchU
   if (sourceType === 'partner_api' || sourceType === 'mls_feed') return 'feed'
   return 'listing_url'
 }
+
+export type SuggestedNextAction = {
+  key: 'complete_provider_data' | 'fill_missing_inputs' | 'verify_rent' | 'analyze_deal' | 'review_and_rescore'
+  label: string
+  description: string
+}
+
+/**
+ * Derives the single most useful next step for a listing so the detail page
+ * always tells the user what to do instead of dead-ending.
+ */
+export function suggestedNextAction(listing: ListingLike, score?: ScoreLike | null): SuggestedNextAction {
+  const rawPayload = listing.raw_payload && typeof listing.raw_payload === 'object' ? (listing.raw_payload as Record<string, unknown>) : {}
+  const reviewRequired = Boolean(rawPayload.reviewRequired)
+  const dealStatus = String(listing.deal_status || '')
+  const missingFields = Array.isArray(score?.missing_fields)
+    ? (score?.missing_fields as unknown[])
+    : Array.isArray(score?.missingFields)
+      ? (score?.missingFields as unknown[])
+      : []
+
+  if (reviewRequired) {
+    return {
+      key: 'complete_provider_data',
+      label: 'Enter listing data manually',
+      description: 'The provider page could not be fetched, so only the URL was imported. Open the source listing and fill in price, rent and property facts to unlock scoring.',
+    }
+  }
+
+  if (dealStatus === 'missing_data' || missingFields.length >= 3) {
+    const fields = missingFields.slice(0, 3).map((field) => String(field)).join(', ')
+    return {
+      key: 'fill_missing_inputs',
+      label: 'Fill the missing analysis inputs',
+      description: fields
+        ? `Add ${fields} in the analysis inputs below — the score recalculates immediately after saving.`
+        : 'Add the missing underwriting inputs below — the score recalculates immediately after saving.',
+    }
+  }
+
+  if (dealStatus === 'low_confidence') {
+    return {
+      key: 'verify_rent',
+      label: 'Verify the rent assumptions',
+      description: 'The score looks interesting but rent confidence is below the Opportunity gate. Run HUD/market rent intelligence or set a verified rent manually.',
+    }
+  }
+
+  if (dealStatus === 'ready') {
+    return {
+      key: 'analyze_deal',
+      label: 'Convert to a deal and underwrite it',
+      description: 'This listing passes the Opportunity rules. Convert it to a deal to run the full analyzer, attach files and prepare an offer.',
+    }
+  }
+
+  return {
+    key: 'review_and_rescore',
+    label: 'Review the data and rescore',
+    description: 'Confirm price, rent and expenses look right, then rescore. Better inputs raise both the score and the confidence.',
+  }
+}

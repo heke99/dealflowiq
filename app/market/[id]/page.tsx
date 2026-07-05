@@ -6,7 +6,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { addListingManualOverrideAction, addMarketListingNoteAction, convertListingToDealAction, ignoreMarketListingAction, rescoreMarketListingAction, runListingFullIntelligenceAction, runListingHudLookupAction, runListingMarketRentAction, saveOpportunityAction, updateMarketListingAnalysisInputsAction, updateMarketListingReviewStatusAction, updateMarketListingStageAction } from '@/app/market/actions'
 import { canUseFeature } from '@/lib/billing/features'
 import { getNextFreeOpportunityDetailUnlock, hasFullOpportunityAccess, lockedPremiumText, recordOpportunityDetailView } from '@/lib/billing/freemium'
-import { dealStatusLabel } from '@/lib/market/review'
+import { dealStatusLabel, suggestedNextAction } from '@/lib/market/review'
 import { startListingConversationAction, updateListingContactSettingsAction } from '@/app/messages/actions'
 import { asRow, rowString, type Row } from '@/lib/types/rows'
 
@@ -130,6 +130,24 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
   const confidenceNegatives = Array.isArray(confidenceBreakdown.negatives) ? confidenceBreakdown.negatives : []
   const contact = (contactSettings || {}) as Row
   const fullContactAccess = hasFullOpportunityAccess(workspace.access)
+  const nextAction = suggestedNextAction(row, score)
+
+  // Possible duplicate: another listing in the same org sharing the same
+  // normalized address + ZIP (source URL / external id duplicates are merged
+  // at import time, so address collisions are the remaining signal).
+  let possibleDuplicate: Row | null = null
+  if (workspace.organization?.id && row.address && row.zip_code) {
+    const { data: duplicateRows } = await supabase
+      .from('market_listings')
+      .select('id, title, address, city, state, zip_code, source_type, created_at')
+      .eq('organization_id', workspace.organization.id)
+      .eq('zip_code', row.zip_code)
+      .ilike('address', String(row.address))
+      .neq('id', id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+    possibleDuplicate = ((duplicateRows || []) as Row[])[0] || null
+  }
   const canManageContact = Boolean(workspace.access.isPlatformAdmin || row.created_by === workspace.user.id || ['owner', 'admin'].includes(String(workspace.membership?.role || '').toLowerCase()))
   const emailVisibility = String(contact.email_visibility || 'hidden')
   const phoneVisibility = String(contact.phone_visibility || 'hidden')
@@ -206,6 +224,17 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
               </div>
               {row.why_this_deal ? <div className="mt-5 rounded-2xl border border-sky-400/20 bg-sky-400/10 p-4 text-sm leading-6 text-sky-50">{String(row.why_this_deal)}</div> : null}
               {row.review_reason ? <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm leading-6 text-slate-300">Review note: {String(row.review_reason)}</div> : null}
+              <div className="mt-3 rounded-2xl border border-emerald-400/25 bg-emerald-400/[0.08] p-4">
+                <div className="text-xs font-black uppercase tracking-wide text-emerald-300">Suggested next action</div>
+                <div className="mt-1 text-sm font-bold text-emerald-50">{nextAction.label}</div>
+                <p className="mt-1 text-sm leading-6 text-emerald-50/75">{nextAction.description}</p>
+              </div>
+              {possibleDuplicate ? (
+                <div className="mt-3 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm leading-6 text-amber-100">
+                  Possible duplicate: another listing with the same address exists in your workspace.{' '}
+                  <Link href={`/market/${possibleDuplicate.id}`} className="font-bold underline hover:text-white">Open the original listing</Link> and archive one of them if they match.
+                </div>
+              ) : null}
               <div className="mt-6 grid gap-5 md:grid-cols-3">
                 <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
                   <div className="text-sm font-bold text-emerald-100">Positive signals</div>

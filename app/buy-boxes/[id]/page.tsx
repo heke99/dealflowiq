@@ -102,7 +102,36 @@ export default async function BuyBoxDetailPage({ params }: { params: Promise<{ i
               <h2 className="text-xl font-bold">Matched Listings</h2>
               <div className="mt-5 space-y-3">{matches.map((match) => {
                 const listing = match.market_listings as Row
-                return <Link key={String(match.id)} href={`/market/${listing.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/40 p-4 hover:bg-white/5"><div className="flex items-center justify-between gap-4"><div><div className="font-semibold">{rowString(listing.title) || rowString(listing.address)}</div><div className="mt-1 text-xs text-slate-500">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ')} · {money(listing.list_price || listing.asking_price)}</div></div><div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-center text-emerald-100"><div className="text-[10px] uppercase">Score</div><div className="text-xl font-bold">{Math.round(Number(match.deal_score || 0))}</div></div></div></Link>
+                const matchScore = Math.round(Number(match.match_score ?? match.deal_score ?? 0))
+                const matchedStatus = String(match.matched_status || 'matched')
+                const reasons = Array.isArray(match.reasons) ? (match.reasons as unknown[]).map(String) : []
+                const risks = Array.isArray(match.risks) ? (match.risks as unknown[]).map(String) : []
+                const statusTone = matchedStatus === 'opportunity'
+                  ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
+                  : matchedStatus === 'needs_review'
+                    ? 'border-amber-400/30 bg-amber-400/10 text-amber-100'
+                    : 'border-white/10 bg-white/5 text-slate-300'
+                return (
+                  <Link key={String(match.id)} href={`/market/${listing.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/40 p-4 hover:bg-white/5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${statusTone}`}>{matchedStatus.replaceAll('_', ' ')}</span>
+                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-slate-400">Match {matchScore}/100</span>
+                        </div>
+                        <div className="mt-2 font-semibold">{rowString(listing.title) || rowString(listing.address)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ')} · {money(listing.list_price || listing.asking_price)}</div>
+                      </div>
+                      <div className="shrink-0 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-center text-emerald-100"><div className="text-[10px] uppercase">Score</div><div className="text-xl font-bold">{Math.round(Number(match.deal_score || 0))}</div></div>
+                    </div>
+                    {reasons.length || risks.length ? (
+                      <div className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
+                        {reasons.length ? <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.06] p-2 text-emerald-100/80">{reasons.slice(0, 2).map((reason, index) => <div key={index}>• {reason}</div>)}</div> : null}
+                        {risks.length ? <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.06] p-2 text-amber-100/80">{risks.slice(0, 2).map((risk, index) => <div key={index}>• {risk}</div>)}</div> : null}
+                      </div>
+                    ) : null}
+                  </Link>
+                )
               })}{!matches.length ? <p className="rounded-2xl border border-dashed border-white/15 p-6 text-sm text-slate-500">No matched listings yet. Click Run now after adding URLs or wait for the schedule.</p> : null}</div>
             </div>
 

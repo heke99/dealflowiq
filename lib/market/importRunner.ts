@@ -16,7 +16,7 @@ import {
   fetchAndNormalizeMarketUrl,
   type NormalizedMarketListing,
 } from '@/lib/market/sourceConnectors'
-import { asRow, asRows, rowString, type Row } from '@/lib/types/rows'
+import { asRow, asRows, rowNumber, rowString, type Row } from '@/lib/types/rows'
 import type { createSupabaseServerClient } from '@/lib/supabase/server'
 
 type SupabaseAny = ReturnType<typeof createSupabaseAdminClient> | Awaited<ReturnType<typeof createSupabaseServerClient>>
@@ -216,14 +216,18 @@ export async function insertMarketListingScore(supabase: SupabaseAny, listing: R
       .eq('id', listing.id)
       .eq('organization_id', organizationId)
 
+    // The listing row was loaded before this update, so latest_deal_score
+    // still holds the previous value — log the delta for score history.
+    const previousDealScore = rowNumber(listing.latest_deal_score)
+    const scoreDelta = previousDealScore !== null ? Math.round(score.dealScore - previousDealScore) : null
     await recordMarketListingActivity(supabase, {
       organizationId,
       listingId: String(listing.id),
       actorId: rowString(listing.created_by) || null,
       eventType: 'score_calculated',
-      title: 'Score calculated by import worker',
-      description: `${Math.round(score.dealScore)}/100 score · rent confidence ${Math.round(score.rentConfidenceScore)}/100`,
-      metadata: { dealScore: score.dealScore, rentConfidenceScore: score.rentConfidenceScore, dealStatus: review.dealStatus },
+      title: scoreDelta ? `Score ${scoreDelta > 0 ? 'increased' : 'decreased'} to ${Math.round(score.dealScore)}/100` : 'Score calculated by import worker',
+      description: `${Math.round(score.dealScore)}/100 score · rent confidence ${Math.round(score.rentConfidenceScore)}/100${scoreDelta ? ` · ${scoreDelta > 0 ? '+' : ''}${scoreDelta} vs previous` : ''}`,
+      metadata: { dealScore: score.dealScore, previousDealScore, scoreDelta, rentConfidenceScore: score.rentConfidenceScore, dealStatus: review.dealStatus },
     })
 
     if (review.dealStatus === 'ready') {

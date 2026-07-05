@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { analyzeImportUrlAction, generateImportPreviewAction, importPreviewItemsAction, runProviderCleanupAction, skipPreviewItemsAction, updateImportBatchStatusAction } from '@/app/imports/actions'
+import { analyzeImportUrlAction, createImportBatchAction, generateImportPreviewAction, importPreviewItemsAction, runProviderCleanupAction, skipPreviewItemsAction, updateImportBatchStatusAction } from '@/app/imports/actions'
 import { SubmitButton } from '@/components/forms/SubmitButton'
 import { asRow, asRows, rowNumber, rowString, type Row } from '@/lib/types/rows'
 
@@ -184,6 +184,33 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                   Import and open listing
                   <span className="ml-2 rounded-full bg-slate-950/10 px-2 py-0.5 text-xs">~40 sec</span>
                 </SubmitButton>
+              </form>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Analyze search/listing URL into a preview batch</h2>
+              <p className="mt-2 text-sm text-slate-400">Prefer to review before importing? Paste a provider search or listing URL to create an import batch with a preview. Nothing is imported until you select preview rows.</p>
+              <form action={createImportBatchAction} className="mt-5 space-y-4">
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-300">Provider search or listing URL</span>
+                  <textarea name="input_url" rows={3} placeholder="https://www.zillow.com/columbus-oh/... or https://www.zillow.com/homedetails/..." className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                </label>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">Source name</span>
+                    <input name="source_name" placeholder="Columbus OH ≤ $375k" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-slate-300">Default visibility</span>
+                    <select name="visibility" defaultValue="private" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                      <option value="private">Private</option>
+                      <option value="team">Team</option>
+                      <option value="community">Community</option>
+                      <option value="public">Public</option>
+                    </select>
+                  </label>
+                </div>
+                <SubmitButton pendingText="Analyzing URL into a batch..." pendingHint="Analyzing the URL, creating the batch and generating the preview." className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-4 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/20">Analyze into preview batch</SubmitButton>
               </form>
             </div>
 

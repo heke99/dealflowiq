@@ -707,6 +707,13 @@ export async function convertListingToDealAction(formData: FormData) {
   if (listingError || !listing) redirect(`/market?error=${encodeURIComponent(listingError?.message || 'Listing not found')}`)
 
   const row = listing as Row
+  // Explicit tenancy check on top of RLS: convert is allowed for listings in
+  // the caller's own organization or listings explicitly shared cross-org.
+  const belongsToOrg = row.organization_id === workspace.organization.id
+  const isSharedListing = ['public', 'community'].includes(String(row.visibility || ''))
+  if (!belongsToOrg && !isSharedListing && !workspace.access.isPlatformAdmin) {
+    redirect('/market?error=You do not have access to convert this listing')
+  }
   const { data: deal, error: dealError } = await supabase.from('deals').insert({
     organization_id: workspace.organization.id,
     created_by: workspace.user.id,

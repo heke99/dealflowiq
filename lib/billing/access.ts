@@ -160,7 +160,7 @@ export async function getWorkspaceAccess(params: {
   }
 
   const supabase = await createSupabaseServerClient()
-  const [{ data }, overrideResult] = await Promise.all([
+  const [{ data }, overrideResult, memberOverrideResult] = await Promise.all([
     supabase
       .from('organization_subscriptions')
       .select('id, organization_id, plan_id, status, trial_start_at, trial_end_at, current_period_start, current_period_end, trial_source, stripe_customer_id, stripe_subscription_id, stripe_price_id, stripe_interval, stripe_cancel_at_period_end, notes, features_override, limits_override, billing_plans(id, code, name, description, monthly_price_cents, annual_price_cents, currency, trial_days, is_public, is_active, features, limits)')
@@ -176,6 +176,17 @@ export async function getWorkspaceAccess(params: {
           .eq('status', 'active')
           .or(`organization_id.eq.${params.organizationId},organization_id.is.null`)
           .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    params.userId
+      ? supabase
+          .from('member_access_overrides')
+          .select('id, user_id, organization_id, status, expires_at, features_override, limits_override')
+          .eq('user_id', params.userId)
+          .eq('organization_id', params.organizationId)
+          .eq('status', 'full_access')
+          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -199,10 +210,30 @@ export async function getWorkspaceAccess(params: {
       }
     : null
 
+  // Per-organization-member full-access override granted from /admin/access.
+  // Complements user_access_overrides (per-user, optionally global) with the
+  // same effect: full features/limits while active and unexpired.
+  const memberOverrideRow = asRow(memberOverrideResult.data)
+  const memberOverride: UserAccessOverride | null = memberOverrideRow
+    ? {
+        id: String(memberOverrideRow.id),
+        user_id: String(memberOverrideRow.user_id),
+        organization_id: rowString(memberOverrideRow.organization_id),
+        status: rowString(memberOverrideRow.status) || 'full_access',
+        reason: 'Member access override granted by platform admin.',
+        expires_at: rowString(memberOverrideRow.expires_at),
+        features_override: parseObject<FeatureMap>(memberOverrideRow.features_override, {}),
+        limits_override: parseObject<Partial<LimitMap>>(memberOverrideRow.limits_override, {}),
+      }
+    : null
+
   const status = subscription?.status || 'trialing'
   const trialEndsAt = subscription?.trial_end_at || null
   const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
-  const isOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
+  const isUserOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
+  const isMemberOverrideActive = Boolean(memberOverride && (!memberOverride.expires_at || new Date(memberOverride.expires_at).getTime() > Date.now()))
+  const activeOverride = isUserOverrideActive ? userOverride : isMemberOverrideActive ? memberOverride : null
+  const isOverrideActive = Boolean(activeOverride)
   const isFreePlan = Boolean(plan && (plan.code === 'free' || (Number(plan.monthly_price_cents || 0) <= 0 && Number(plan.annual_price_cents || 0) <= 0 && status === 'active')))
   // Valid DB statuses per organization_subscriptions CHECK constraint (033).
   const isSubscriptionActive = ['active', 'comped', 'manually_granted'].includes(status) && !isFreePlan
@@ -217,8 +248,8 @@ export async function getWorkspaceAccess(params: {
     limits = fullLimits
   } else if (isOverrideActive) {
     accessSource = 'user_override'
-    features = mergeFeatures(defaultFeatures, plan?.features, userOverride?.features_override)
-    limits = mergeLimits(fullLimits, plan?.limits, userOverride?.limits_override)
+    features = mergeFeatures(defaultFeatures, plan?.features, activeOverride?.features_override)
+    limits = mergeLimits(fullLimits, plan?.limits, activeOverride?.limits_override)
   } else if (isSubscriptionActive) {
     accessSource = 'subscription'
     features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
@@ -239,7 +270,7 @@ export async function getWorkspaceAccess(params: {
     isPlatformAdmin,
     subscription,
     plan,
-    userOverride,
+    userOverride: activeOverride || userOverride,
     accessSource,
     status,
     trialEndsAt,

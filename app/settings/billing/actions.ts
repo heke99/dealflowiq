@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { canManageBilling } from '@/lib/auth/access'
+import { recordAuditEvent } from '@/lib/audit'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createStripeCheckoutSession, createStripePortalSession, syncPlanWithStripe, type StripeBillingInterval, type StripePlanRow } from '@/lib/billing/stripe'
 import { asRow, rowString } from '@/lib/types/rows'
@@ -14,6 +16,7 @@ function intervalValue(value: FormDataEntryValue | null): StripeBillingInterval 
 export async function startCheckoutAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  if (!canManageBilling(workspace)) redirect('/settings/billing?error=Only workspace owners and admins can manage billing')
 
   const planId = String(formData.get('plan_id') || '').trim()
   const interval = intervalValue(formData.get('interval'))
@@ -51,6 +54,13 @@ export async function startCheckoutAction(formData: FormData) {
       updated_at: new Date().toISOString(),
     }, { onConflict: 'organization_id' })
     if (error) redirect(`/settings/billing?error=${encodeURIComponent(error.message)}`)
+    await recordAuditEvent({
+      organizationId: workspace.organization.id,
+      actorId: workspace.user.id,
+      eventType: 'subscription.free_plan_selected',
+      entityType: 'organization_subscription',
+      metadata: { plan_id: planId },
+    })
     revalidatePath('/settings/billing')
     redirect('/settings/billing?checkout=free')
   }
@@ -87,6 +97,7 @@ export async function startCheckoutAction(formData: FormData) {
 export async function openBillingPortalAction() {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  if (!canManageBilling(workspace)) redirect('/settings/billing?error=Only workspace owners and admins can manage billing')
   const supabase = await createSupabaseServerClient()
   const { data: subscription, error } = await supabase
     .from('organization_subscriptions')

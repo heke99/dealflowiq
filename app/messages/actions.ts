@@ -264,6 +264,23 @@ export async function reportConversationAction(formData: FormData) {
   if (!conversationId || !reason) redirect(conversationId ? `/messages/${conversationId}` : '/messages')
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
+
+  // Only conversation participants (or platform admins) may report a thread;
+  // arbitrary conversation ids must not be reportable.
+  const { data: conversation } = await supabase
+    .from('listing_conversations')
+    .select('id, buyer_user_id, owner_user_id')
+    .eq('id', conversationId)
+    .maybeSingle()
+  const conversationRow = conversation as Row | null
+  const isParticipant = Boolean(
+    conversationRow &&
+      (conversationRow.buyer_user_id === workspace.user.id || conversationRow.owner_user_id === workspace.user.id)
+  )
+  if (!conversationRow || (!isParticipant && !workspace.access.isPlatformAdmin)) {
+    redirect('/messages?error=You can only report conversations you participate in')
+  }
+
   await supabase.from('conversation_reports').insert({ conversation_id: conversationId, reported_by_user_id: workspace.user.id, reason })
   revalidatePath(`/messages/${conversationId}`)
   redirect(`/messages/${conversationId}?reported=1`)

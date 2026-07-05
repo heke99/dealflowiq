@@ -7,6 +7,7 @@ import { requirePlatformAdmin } from '@/lib/auth/admin'
 import { FEATURE_KEYS, type FeatureMap } from '@/lib/billing/features'
 import { ACCOUNT_TYPES } from '@/lib/product/accountTypes'
 import { syncPlanWithStripe, type StripePlanRow } from '@/lib/billing/stripe'
+import { recordAuditEvent } from '@/lib/audit'
 import { asRow, type Row } from '@/lib/types/rows'
 
 const SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'past_due', 'canceled', 'expired', 'comped', 'manually_granted', 'incomplete', 'unpaid'])
@@ -148,6 +149,14 @@ export async function savePlanAction(formData: FormData) {
     redirect(`/admin/plans?error=${encodeURIComponent(response.error?.message || 'Could not save plan')}`)
   }
 
+  await recordAuditEvent({
+    actorId,
+    eventType: id ? 'billing_plan.updated' : 'billing_plan.created',
+    entityType: 'billing_plan',
+    entityId: String((response.data as Row).id),
+    metadata: { code, monthly_price_cents: monthlyPriceCents, annual_price_cents: annualPriceCents, is_public: isPublic, is_active: isActive },
+  })
+
   try {
     await persistStripeSync(supabase, response.data, { forceMonthlyPrice, forceAnnualPrice })
   } catch (error) {
@@ -227,6 +236,14 @@ export async function deletePlanAction(formData: FormData) {
   const { error } = await supabase.from('billing_plans').delete().eq('id', planId)
   if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
 
+  await recordAuditEvent({
+    actorId: await getActorId(),
+    eventType: 'billing_plan.deleted',
+    entityType: 'billing_plan',
+    entityId: planId,
+    metadata: { replacement_plan_id: replacementPlanId },
+  })
+
   refreshAdminPaths()
   redirect('/admin/plans?saved=deleted')
 }
@@ -265,6 +282,14 @@ export async function syncOrganizationSubscriptionAction(formData: FormData) {
 
   if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
 
+  await recordAuditEvent({
+    organizationId,
+    actorId,
+    eventType: 'subscription.admin_synced',
+    entityType: 'organization_subscription',
+    metadata: { plan_id: planId, status, period_days: periodDays },
+  })
+
   refreshAdminPaths()
   redirect('/admin/plans?saved=1#subscriptions')
 }
@@ -289,6 +314,13 @@ export async function cancelOrganizationSubscriptionAction(formData: FormData) {
 
   if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
 
+  await recordAuditEvent({
+    actorId: await getActorId(),
+    eventType: 'subscription.admin_canceled',
+    entityType: 'organization_subscription',
+    entityId: id,
+  })
+
   refreshAdminPaths()
   redirect('/admin/plans?saved=1#subscriptions')
 }
@@ -302,6 +334,13 @@ export async function deleteOrganizationSubscriptionAction(formData: FormData) {
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase.from('organization_subscriptions').delete().eq('id', id)
   if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+
+  await recordAuditEvent({
+    actorId: await getActorId(),
+    eventType: 'subscription.admin_deleted',
+    entityType: 'organization_subscription',
+    entityId: id,
+  })
 
   refreshAdminPaths()
   redirect('/admin/plans?saved=1#subscriptions')

@@ -273,6 +273,7 @@ export async function archiveBuyBoxAction(formData: FormData) {
   if (!buyBoxId) redirect('/buy-boxes?error=Missing buy box id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireBuyBoxAccess(workspace)
   const supabase = await createSupabaseServerClient()
   await supabase.from('market_buy_boxes').update({ status: 'archived' }).eq('id', buyBoxId).eq('organization_id', workspace.organization.id)
   await supabase.from('market_sources').update({ status: 'archived', auto_import_enabled: false }).eq('buy_box_id', buyBoxId).eq('organization_id', workspace.organization.id)

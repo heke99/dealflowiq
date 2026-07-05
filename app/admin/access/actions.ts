@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requirePlatformAdmin } from '@/lib/auth/admin'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { recordAuditEvent } from '@/lib/audit'
 import { ACCOUNT_TYPES, type AccountType } from '@/lib/product/accountTypes'
 import { FEATURE_KEYS, type FeatureMap } from '@/lib/billing/features'
 
@@ -78,6 +79,13 @@ export async function createAdminAccessInviteAction(formData: FormData) {
 
   if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
 
+  await recordAuditEvent({
+    actorId: createdBy,
+    eventType: 'admin_access_invite.created',
+    entityType: 'admin_access_invite',
+    metadata: { email, account_type: accountType, role, plan_id: planId, trial_days: trialDays },
+  })
+
   revalidatePath('/admin/access')
   redirect('/admin/access?saved=1')
 }
@@ -88,8 +96,16 @@ export async function revokeAdminAccessInviteAction(formData: FormData) {
   if (!id) redirect('/admin/access?error=Invite ID is required')
 
   const supabase = await createSupabaseServerClient()
+  const { data: userData } = await supabase.auth.getUser()
   const { error } = await supabase.from('admin_access_invites').update({ status: 'revoked' }).eq('id', id)
   if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+
+  await recordAuditEvent({
+    actorId: userData.user?.id || null,
+    eventType: 'admin_access_invite.revoked',
+    entityType: 'admin_access_invite',
+    entityId: id,
+  })
 
   revalidatePath('/admin/access')
   redirect('/admin/access?saved=1')
@@ -128,6 +144,15 @@ export async function grantMemberFullAccessOverrideAction(formData: FormData) {
 
   if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
 
+  await recordAuditEvent({
+    organizationId,
+    actorId: grantedBy,
+    eventType: 'member_access_override.granted',
+    entityType: 'member_access_override',
+    entityId: userId,
+    metadata: { target_user_id: userId, expires_at: expiresAt },
+  })
+
   revalidatePath('/admin/access')
   revalidatePath('/admin')
   revalidatePath('/dashboard')
@@ -141,12 +166,20 @@ export async function revokeMemberAccessOverrideAction(formData: FormData) {
   if (!id) redirect('/admin/access?error=Override ID is required')
 
   const supabase = await createSupabaseServerClient()
+  const { data: userData } = await supabase.auth.getUser()
   const { error } = await supabase
     .from('member_access_overrides')
     .update({ status: 'revoked', updated_at: new Date().toISOString() })
     .eq('id', id)
 
   if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+
+  await recordAuditEvent({
+    actorId: userData.user?.id || null,
+    eventType: 'member_access_override.revoked',
+    entityType: 'member_access_override',
+    entityId: id,
+  })
 
   revalidatePath('/admin/access')
   revalidatePath('/admin')

@@ -46,7 +46,7 @@ export default async function AdminDashboardPage() {
   }
 
   const orgId = workspace.organization?.id
-  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult] = await Promise.all([
+  const [plansResult, invitesResult, activeInvitesResult, jobsResult, failedJobsResult, listingsResult, , openReportsResult] = await Promise.all([
     supabase.from('billing_plans').select('id', { count: 'exact', head: true }),
     supabase.from('admin_access_invites').select('id,email,organization_name,account_type,role,status,expires_at,created_at,billing_plans(name)').order('created_at', { ascending: false }).limit(8),
     supabase.from('admin_access_invites').select('id', { count: 'exact', head: true }).eq('status', 'active'),
@@ -54,6 +54,7 @@ export default async function AdminDashboardPage() {
     orgId ? supabase.from('market_import_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('status', 'failed') : Promise.resolve({ count: 0 }),
     orgId ? supabase.from('market_listings').select('id', { count: 'exact', head: true }).eq('organization_id', orgId) : Promise.resolve({ count: 0 }),
     orgId ? supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).is('read_at', null).is('archived_at', null) : Promise.resolve({ count: 0 }),
+    supabase.from('conversation_reports').select('id', { count: 'exact', head: true }).eq('status', 'open'),
   ])
 
   const jobs = asRows(jobsResult.data)
@@ -81,6 +82,7 @@ export default async function AdminDashboardPage() {
           <Stat label="Active invites" value={numberText(activeInvitesResult.count || 0)} hint="Outstanding access grants." href="/admin/access" tone="green" />
           <Stat label="Workspace listings" value={numberText(listingsResult.count || 0)} hint="Listings in this admin workspace." href="/market" />
           <Stat label="Failed imports" value={numberText(failedJobsResult.count || 0)} hint="Import issues needing operator review." href="/imports" tone={(failedJobsResult.count || 0) > 0 ? 'red' : 'green'} />
+          <Stat label="Open reports" value={numberText(openReportsResult.count || 0)} hint="Reported conversations awaiting moderation." href="/admin/moderation" tone={(openReportsResult.count || 0) > 0 ? 'amber' : 'green'} />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">

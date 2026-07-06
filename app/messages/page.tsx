@@ -39,7 +39,9 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(80)
 
-  if (status !== 'all') query = query.eq('status', status)
+  // Archived threads stay out of the default inbox; the 'archived' filter shows them.
+  if (status === 'all') query = query.neq('status', 'archived')
+  else query = query.eq('status', status)
   const { data } = await query
   const conversations = (data || []) as Row[]
   const ids = conversations.map((item) => String(item.id))
@@ -98,6 +100,7 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
           {conversations.map((conversation) => {
             const listing = listingFrom(conversation)
             const unread = unreadByConversation.get(String(conversation.id)) || 0
+            const isExternal = Boolean(conversation.organization_id) && String(conversation.organization_id) !== String(workspace.organization?.id || '')
             const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || rowString(listing.address) || 'Location pending'
             return (
               <Link key={String(conversation.id)} href={`/messages/${conversation.id}`} className="block rounded-3xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
@@ -108,6 +111,7 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="line-clamp-1 text-lg font-bold text-white">{rowString(listing.title) || rowString(listing.address) || 'Listing conversation'}</h2>
                         {unread ? <span className="rounded-full bg-sky-300 px-2 py-0.5 text-[11px] font-black text-slate-950">{unread} unread</span> : null}
+                        {isExternal ? <span title="This conversation belongs to a listing outside your organization." className="rounded-full border border-indigo-400/30 bg-indigo-400/10 px-2 py-0.5 text-[11px] font-black text-indigo-100">External</span> : null}
                       </div>
                       <p className="mt-1 text-sm text-slate-400">{location} · {money(listing.list_price || listing.asking_price)}</p>
                       <p className="mt-2 line-clamp-1 text-sm text-slate-500">{rowString(conversation.last_message_preview) || 'Open the conversation'}</p>

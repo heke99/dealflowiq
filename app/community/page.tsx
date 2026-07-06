@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createCommunityInviteAction, createCommunityTeamAction, revokeCommunityInviteAction } from '@/app/community/actions'
+import { inviteDisplayStatus, type InviteRuleInput } from '@/lib/community/inviteRules'
 import { firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
 
 type CommunityPageProps = {
@@ -19,8 +20,23 @@ function inviteLink(code: string) {
 }
 
 function StatusPill({ value }: { value: string }) {
-  const tone = value === 'active' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : value === 'accepted' ? 'border-blue-400/30 bg-blue-400/10 text-blue-100' : 'border-slate-400/20 bg-slate-400/10 text-slate-200'
+  const tone = value === 'active'
+    ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
+    : value === 'accepted'
+      ? 'border-blue-400/30 bg-blue-400/10 text-blue-100'
+      : value === 'expired'
+        ? 'border-amber-400/30 bg-amber-400/10 text-amber-100'
+        : 'border-slate-400/20 bg-slate-400/10 text-slate-200'
   return <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${tone}`}>{value.replaceAll('_', ' ')}</span>
+}
+
+function inviteRuleInput(invite: Row): InviteRuleInput {
+  return {
+    status: String(invite.status || ''),
+    expires_at: rowString(invite.expires_at),
+    accepted_count: rowNumber(invite.accepted_count) ?? 0,
+    max_uses: rowNumber(invite.max_uses) ?? 1,
+  }
 }
 
 export default async function CommunityPage({ searchParams }: CommunityPageProps) {
@@ -63,7 +79,7 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
     }
   }
   const topPoster = [...memberStats.entries()].sort((a, b) => b[1].posted - a[1].posted)[0]?.[1]?.posted || 0
-  const activeInvites = invites.filter((invite) => invite.status === 'active').length
+  const activeInvites = invites.filter((invite) => inviteDisplayStatus(inviteRuleInput(invite)) === 'active').length
   const acceptedInvites = invites.filter((invite) => invite.status === 'accepted').length
 
   return (
@@ -146,6 +162,7 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
                 {invites.map((invite) => {
                   const code = String(invite.invite_code || '')
                   const team = firstRow(invite.community_teams)
+                  const displayStatus = inviteDisplayStatus(inviteRuleInput(invite))
                   return (
                     <div key={String(invite.id)} className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -153,7 +170,7 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
                           <div className="font-mono text-lg font-bold tracking-wider text-white">{code}</div>
                           <div className="mt-1 text-sm text-slate-400">{rowString(invite.email) || 'Reusable code'}{team?.name ? ` · ${team.name}` : ''}</div>
                         </div>
-                        <StatusPill value={String(invite.status)} />
+                        <StatusPill value={displayStatus} />
                       </div>
                       <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-4">
                         <div>Role <span className="block text-slate-200">{String(invite.role).replaceAll('_', ' ')}</span></div>

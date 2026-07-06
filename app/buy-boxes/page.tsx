@@ -2,8 +2,23 @@ import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { canUseFeature } from '@/lib/billing/features'
 import { createBuyBoxAction, runBuyBoxNowAction, archiveBuyBoxAction } from '@/app/buy-boxes/actions'
 import { rowNumber, rowString, type Row } from '@/lib/types/rows'
+
+type Search = Record<string, string | string[] | undefined>
+
+function one(value: string | string[] | undefined, fallback = '') {
+  if (Array.isArray(value)) return value[0] || fallback
+  return value || fallback
+}
+
+const savedMessages: Record<string, string> = {
+  archived: 'Buy Box archived.',
+  created: 'Buy Box created.',
+  updated: 'Buy Box updated.',
+  run: 'Buy Box run completed.',
+}
 
 function dateText(value: unknown) {
   if (!value) return 'Not scheduled'
@@ -41,9 +56,12 @@ function BuyBoxCard({ buyBox }: { buyBox: Row }) {
   )
 }
 
-export default async function BuyBoxesPage() {
+export default async function BuyBoxesPage({ searchParams }: { searchParams?: Promise<Search> }) {
+  const params = await searchParams
+  const savedMessage = savedMessages[one(params?.saved)] || (params?.saved ? 'Saved successfully.' : '')
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
+  const buyBoxesEnabled = canUseFeature(workspace.access.features, 'scheduled_market_imports') || workspace.access.isPlatformAdmin
   const [{ data: buyBoxes }, { count: opportunityCount }, { count: sourceCount }] = workspace.organization?.id
     ? await Promise.all([
         supabase.from('market_buy_boxes').select('*').eq('organization_id', workspace.organization.id).neq('status', 'archived').order('created_at', { ascending: false }),
@@ -68,6 +86,9 @@ export default async function BuyBoxesPage() {
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"><div className="text-xs text-slate-500">70+ deals</div><div className="text-2xl font-black text-emerald-300">{opportunityCount || 0}</div></div>
             </div>
           </div>
+          {savedMessage ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{savedMessage}</div> : null}
+          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{one(params.error)}</div> : null}
+          {!buyBoxesEnabled ? <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">Buy Boxes and scheduled market discovery are locked on this workspace. Enable Scheduled Market Imports in the plan/admin settings to create and run Buy Boxes.</div> : null}
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
@@ -87,7 +108,7 @@ export default async function BuyBoxesPage() {
               </div>
               <label className="block"><span className="text-sm font-medium text-slate-300">Authorized listing/feed URLs</span><textarea name="source_urls" rows={5} placeholder="One URL per line" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" /></label>
               <div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="text-sm font-medium text-slate-300">Main source type</span><select name="source_type" defaultValue="zillow" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100"><option value="zillow">Zillow</option><option value="investorlift">InvestorLift</option><option value="crexi">Crexi</option><option value="loopnet">LoopNet</option><option value="redfin">Redfin</option><option value="realtor">Realtor</option><option value="apartments">Apartments.com</option><option value="manual_url">Manual URL</option><option value="other">Other</option></select></label><Field label="Max URLs per run" name="max_urls_per_run" type="number" defaultValue="10" /></div>
-              <button className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Create Buy Box</button>
+              <button disabled={!buyBoxesEnabled} className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50">Create Buy Box</button>
             </form>
           </div>
 

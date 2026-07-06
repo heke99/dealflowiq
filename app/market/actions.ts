@@ -12,7 +12,10 @@ import { countRecentProviderImports, ensurePlanImportQuota, importPolicyForSourc
 import { recordImportAuditEvent } from '@/lib/market/importAudit'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
-import { firstRow, type Row } from '@/lib/types/rows'
+import { recordAuditEvent } from '@/lib/audit'
+import { listingToDealPayload } from '@/lib/deals/convertListing'
+import { dealToMarketListingPayload } from '@/lib/deals/publishDeal'
+import { type Row } from '@/lib/types/rows'
 import { runListingRentIntelligence, applyMarketRentEstimateToListing, applyHudFmrToListing, rescoreListingAfterIntelligence, buildDataQualityChecklist, buildConfidenceBreakdown } from '@/lib/market/rentIntelligenceEngine'
 import {
   buildUrlOnlyMarketListing,
@@ -601,31 +604,9 @@ export async function convertListingToDealAction(formData: FormData) {
   if (!belongsToOrg && !isSharedListing && !workspace.access.isPlatformAdmin) {
     redirect('/market?error=You do not have access to convert this listing')
   }
-  const { data: deal, error: dealError } = await supabase.from('deals').insert({
-    organization_id: workspace.organization.id,
-    created_by: workspace.user.id,
-    assigned_user_id: workspace.user.id,
-    title: row.title || row.address || 'Market opportunity',
-    status: 'imported',
-    source_url: row.source_url,
-    source_platform: row.source_type,
-    primary_image_url: row.primary_image_url,
-    image_urls: row.image_urls || [],
-    visibility: 'private',
-    property_type: row.property_type,
-    asking_price: row.asking_price || row.list_price,
-    purchase_price: row.list_price || row.asking_price,
-    arv: row.arv,
-    rehab_estimate: row.rehab_estimate,
-    current_rent: row.current_rent || row.estimated_rent,
-    market_rent: row.market_rent,
-    section8_rent: row.hud_rent,
-    taxes_annual: row.taxes_annual,
-    insurance_annual: row.insurance_annual,
-    hoa_monthly: row.hoa_monthly,
-    utilities_monthly: row.utilities_monthly,
-    notes: row.description,
-  }).select('id').single()
+  const { data: deal, error: dealError } = await supabase.from('deals').insert(
+    listingToDealPayload(row, { organizationId: workspace.organization.id, userId: workspace.user.id })
+  ).select('id').single()
   if (dealError || !deal) redirect(`/market?error=${encodeURIComponent(dealError?.message || 'Could not convert listing')}`)
 
   const { error: propertyError } = await supabase.from('properties').insert({
@@ -733,7 +714,6 @@ export async function publishDealToMarketAction(formData: FormData) {
     .maybeSingle()
   if (dealError || !deal) redirect(`/deals/${dealId}?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
   const dealRow = deal as Row
-  const property = firstRow(dealRow.properties)
 
   const publishedAt = new Date().toISOString()
   const { error: updateError } = await supabase.from('deals').update({
@@ -774,41 +754,15 @@ export async function publishDealToMarketAction(formData: FormData) {
     : await supabase.from('public_deal_posts').insert(postPayload)
   if (postError) redirect(`/deals/${dealId}?error=${encodeURIComponent(postError.message)}`)
 
-  const listingPayload = {
-    source_type: visibility === 'community' ? 'community_deal' : 'public_deal',
-    external_listing_id: dealId,
-    source_url: dealRow.source_url,
-    title,
-    address: property?.address,
-    city: property?.city,
-    state: property?.state,
-    zip_code: property?.zip_code,
-    county: property?.county,
-    property_type: dealRow.property_type,
-    units: property?.number_of_units || 1,
-    bedrooms: property?.bedrooms,
-    bathrooms: property?.bathrooms,
-    sqft: property?.square_feet,
-    lot_size: property?.lot_size,
-    year_built: property?.year_built,
-    list_price: dealRow.asking_price || dealRow.purchase_price,
-    asking_price: dealRow.asking_price || dealRow.purchase_price,
-    arv: dealRow.arv,
-    rehab_estimate: dealRow.rehab_estimate,
-    current_rent: dealRow.current_rent,
-    market_rent: dealRow.market_rent,
-    hud_rent: dealRow.section8_rent,
-    taxes_annual: dealRow.taxes_annual,
-    insurance_annual: dealRow.insurance_annual,
-    hoa_monthly: dealRow.hoa_monthly,
-    utilities_monthly: dealRow.utilities_monthly,
-    description: text(formData, 'summary') || dealRow.notes,
-    primary_image_url: dealRow.primary_image_url,
-    image_urls: dealRow.image_urls || [],
+  const listingPayload = dealToMarketListingPayload(dealRow, {
     visibility,
-    status: 'active',
-    raw_payload: { source: 'published_deal', dealId, createdAt: publishedAt },
-  }
+    dealId,
+    publishedAt,
+    title,
+    summary: text(formData, 'summary'),
+    askingPrice: numberValue(formData, 'asking_price'),
+    contactEmail: text(formData, 'contact_email'),
+  })
 
   try {
     await upsertMarketListingFromNormalized({
@@ -826,6 +780,71 @@ export async function publishDealToMarketAction(formData: FormData) {
   revalidatePath('/market')
   revalidatePath(`/deals/${dealId}`)
   redirect(`/market?tab=${visibility === 'public' ? 'public' : visibility === 'community' ? 'community' : 'all'}&saved=published`)
+}
+
+export async function unpublishDealAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  if (!dealId) redirect('/deals?error=Missing deal id')
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  const supabase = await createSupabaseServerClient()
+
+  const { data: deal, error: dealError } = await supabase
+    .from('deals')
+    .select('id, title, visibility, published_at')
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+  if (dealError || !deal) redirect(`/deals/${dealId}?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
+  const dealRow = deal as Row
+
+  const { error: updateError } = await supabase
+    .from('deals')
+    .update({ visibility: 'private', published_at: null })
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+  if (updateError) redirect(`/deals/${dealId}?error=${encodeURIComponent(updateError.message)}`)
+
+  const { error: postError } = await supabase
+    .from('public_deal_posts')
+    .update({ status: 'archived' })
+    .eq('deal_id', dealId)
+    .eq('organization_id', workspace.organization.id)
+  if (postError) redirect(`/deals/${dealId}?error=${encodeURIComponent(postError.message)}`)
+
+  // Archive the Market listing(s) publishDealToMarketAction created. That
+  // action stores the deal id in both raw_payload.dealId and
+  // external_listing_id (for community_deal/public_deal source types), so
+  // match on either linkage.
+  const archivePatch = { status: 'archived', archived_at: new Date().toISOString(), archived_by: workspace.user.id }
+  const { error: rawPayloadArchiveError } = await supabase
+    .from('market_listings')
+    .update(archivePatch)
+    .eq('organization_id', workspace.organization.id)
+    .eq('raw_payload->>dealId', dealId)
+  if (rawPayloadArchiveError) redirect(`/deals/${dealId}?error=${encodeURIComponent(rawPayloadArchiveError.message)}`)
+
+  const { error: sourceLinkArchiveError } = await supabase
+    .from('market_listings')
+    .update(archivePatch)
+    .eq('organization_id', workspace.organization.id)
+    .eq('external_listing_id', dealId)
+    .in('source_type', ['community_deal', 'public_deal'])
+  if (sourceLinkArchiveError) redirect(`/deals/${dealId}?error=${encodeURIComponent(sourceLinkArchiveError.message)}`)
+
+  await recordAuditEvent({
+    organizationId: workspace.organization.id,
+    actorId: workspace.user.id,
+    eventType: 'deal.unpublished',
+    entityType: 'deal',
+    entityId: dealId,
+    metadata: { title: dealRow.title, previous_visibility: dealRow.visibility },
+  })
+
+  revalidatePath('/market')
+  revalidatePath('/deals')
+  revalidatePath(`/deals/${dealId}`)
+  redirect(`/deals/${dealId}?saved=unpublished`)
 }
 
 export async function archiveMarketListingAction(formData: FormData) {

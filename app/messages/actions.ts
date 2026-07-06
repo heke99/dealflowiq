@@ -62,6 +62,33 @@ async function enforceFreeMessageLimit(params: {
   }
 }
 
+const MESSAGE_FLOOD_LIMIT_PER_HOUR = 20
+
+/**
+ * Flood cap for every sender regardless of plan: at most 20 messages per
+ * conversation per rolling hour. The free-tier 48h cooldown still applies
+ * separately via enforceFreeMessageLimit.
+ */
+async function enforceMessageFloodCap(params: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
+  conversationId: string
+  userId: string
+  returnTo: string
+}) {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count } = await params.supabase
+    .from('listing_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', params.conversationId)
+    .eq('sender_user_id', params.userId)
+    .gte('created_at', oneHourAgo)
+
+  if ((count || 0) >= MESSAGE_FLOOD_LIMIT_PER_HOUR) {
+    const message = `You reached the limit of ${MESSAGE_FLOOD_LIMIT_PER_HOUR} messages per conversation per hour. Please wait before sending more.`
+    redirect(`${params.returnTo}${params.returnTo.includes('?') ? '&' : '?'}error=${encodeURIComponent(message)}`)
+  }
+}
+
 async function ensureConversation(params: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
   listing: Row
@@ -174,6 +201,7 @@ export async function startListingConversationAction(formData: FormData) {
   await enforceFreeMessageLimit({ supabase, userId: workspace.user.id, hasFullMessagingAccess: hasFullOpportunityAccess(workspace.access), returnTo })
 
   const conversation = await ensureConversation({ supabase, listing: listing as Row, buyerUserId: workspace.user.id, ownerUserId })
+  await enforceMessageFloodCap({ supabase, conversationId: String(conversation.id), userId: workspace.user.id, returnTo })
   await sendMessage({ conversation, listing: listing as Row, senderUserId: workspace.user.id, recipientUserId: ownerUserId, body, supabase })
 
   revalidatePath('/messages')
@@ -202,6 +230,7 @@ export async function replyListingConversationAction(formData: FormData) {
   }
 
   await enforceFreeMessageLimit({ supabase, userId: workspace.user.id, hasFullMessagingAccess: hasFullOpportunityAccess(workspace.access), returnTo })
+  await enforceMessageFloodCap({ supabase, conversationId, userId: workspace.user.id, returnTo })
 
   const listing = firstRow(row.market_listings) || { id: row.listing_id, organization_id: row.organization_id, title: 'Listing' }
   const recipientUserId = String(workspace.user.id === row.buyer_user_id ? row.owner_user_id : row.buyer_user_id)
@@ -278,6 +307,16 @@ export async function reportConversationAction(formData: FormData) {
   if (!conversationRow || (!isParticipant && !workspace.access.isPlatformAdmin)) {
     redirect('/messages?error=You can only report conversations you participate in')
   }
+
+  // One report per user per conversation; repeats just surface a notice.
+  const { data: existingReport } = await supabase
+    .from('conversation_reports')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('reported_by_user_id', workspace.user.id)
+    .limit(1)
+    .maybeSingle()
+  if (existingReport) redirect(`/messages/${conversationId}?reported=already`)
 
   await supabase.from('conversation_reports').insert({ conversation_id: conversationId, reported_by_user_id: workspace.user.id, reason })
   revalidatePath(`/messages/${conversationId}`)

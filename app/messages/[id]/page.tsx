@@ -26,7 +26,7 @@ export default async function MessageConversationPage({ params, searchParams }: 
   const { id } = await params
   const qs = await searchParams
   const error = typeof qs?.error === 'string' ? qs.error : ''
-  const reported = qs?.reported === '1'
+  const reported = typeof qs?.reported === 'string' ? qs.reported : ''
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
 
@@ -56,6 +56,9 @@ export default async function MessageConversationPage({ params, searchParams }: 
   const messages = (messagesData || []) as Row[]
   const listing = listingFrom(row)
   const isFullMessaging = hasFullOpportunityAccess(workspace.access)
+  const isParticipant = [row.buyer_user_id, row.owner_user_id].includes(workspace.user.id)
+  const isExternal = Boolean(row.organization_id) && String(row.organization_id) !== String(workspace.organization?.id || '')
+  const isArchived = String(row.status) === 'archived'
   const location = [listing.address, listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'
 
   return (
@@ -81,6 +84,7 @@ export default async function MessageConversationPage({ params, searchParams }: 
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
                   <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{money(listing.list_price || listing.asking_price)}</span>
                   <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">Status: {String(row.status || 'new').replaceAll('_', ' ')}</span>
+                  {isExternal ? <span title="This conversation belongs to a listing outside your organization." className="rounded-full border border-indigo-400/30 bg-indigo-400/10 px-3 py-1 text-indigo-100">External</span> : null}
                   {listing.latest_deal_score ? <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-emerald-100">Score {Math.round(Number(listing.latest_deal_score))}</span> : null}
                 </div>
               </div>
@@ -88,12 +92,20 @@ export default async function MessageConversationPage({ params, searchParams }: 
             <div className="flex flex-wrap gap-2">
               <Link href={`/market/${listing.id}`} className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-950 hover:bg-slate-200">View listing</Link>
               {listing.source_url ? <a href={String(listing.source_url)} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/10">Source</a> : null}
+              {isParticipant && !isArchived ? (
+                <form action={updateConversationStatusAction}>
+                  <input type="hidden" name="conversation_id" value={id} />
+                  <input type="hidden" name="status" value="archived" />
+                  <button className="rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-slate-200 hover:bg-white/10">Archive</button>
+                </form>
+              ) : null}
             </div>
           </div>
         </section>
 
         {error ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">{error}</div> : null}
-        {reported ? <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4 text-sm text-emerald-100">Conversation reported. Super admin can review it from moderation.</div> : null}
+        {reported === '1' ? <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4 text-sm text-emerald-100">Conversation reported. Super admin can review it from moderation.</div> : null}
+        {reported === 'already' ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">You already reported this conversation. It is queued for moderation review.</div> : null}
         {!isFullMessaging ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">Free plan messaging: you can send 1 message every 48 hours. Upgrade to Pro for full listing conversations.</div> : null}
 
         <section className="grid gap-6 lg:grid-cols-[1fr_320px]">

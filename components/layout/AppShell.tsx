@@ -54,6 +54,7 @@ export function AppShell({
   const rawNav: NavItem[] = [
     { href: '/dashboard', label: 'Dashboard', visible: true, core: true },
     { href: '/community', label: 'Community', visible: true, core: true },
+    { href: '/messages', label: 'Messages', visible: true, core: true },
     { href: '/market', label: 'Market', visible: true, feature: 'market_opportunities', core: true },
     { href: '/opportunities', label: 'Opportunities', visible: true, feature: 'market_opportunities', core: true },
     { href: '/buy-boxes', label: 'Buy Boxes', visible: true, feature: 'scheduled_market_imports' },
@@ -70,6 +71,7 @@ export function AppShell({
     { href: '/admin/users', label: 'Admin Users', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
+    { href: '/admin/moderation', label: 'Admin Moderation', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
   ]
   const nav = rawNav.filter((item) => item.visible)
 

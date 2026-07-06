@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
-import { archiveBuyerAction, createBuyerAction, createBuyerInteractionAction, runBuyerMatchingAction } from '@/app/buyers/actions'
+import { archiveBuyerAction, createBuyerAction, createBuyerInteractionAction, runBuyerMatchingAction, updateBuyerAction } from '@/app/buyers/actions'
 import { firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
 
 type Search = Record<string, string | string[] | undefined>
@@ -25,6 +25,31 @@ const statuses = [
   ['hot', 'Hot'],
   ['paused', 'Paused'],
   ['archived', 'Archived'],
+]
+
+const relationshipStages = [
+  ['new', 'New'],
+  ['qualified', 'Qualified'],
+  ['sent_deals', 'Sent deals'],
+  ['offer_made', 'Offer made'],
+  ['closed', 'Closed'],
+  ['nurture', 'Nurture'],
+]
+
+const proofOfFundsStatuses = [
+  ['unknown', 'Unknown'],
+  ['requested', 'Requested'],
+  ['received', 'Received'],
+  ['verified', 'Verified'],
+  ['expired', 'Expired'],
+]
+
+const interactionTypes = [
+  ['note', 'Note'],
+  ['call', 'Call'],
+  ['email', 'Email'],
+  ['meeting', 'Meeting'],
+  ['offer', 'Offer'],
 ]
 
 function one(value: string | string[] | undefined, fallback = '') {
@@ -53,6 +78,10 @@ function listText(value: unknown) {
   return Array.isArray(value) && value.length ? value.join(', ') : 'Any'
 }
 
+function listInput(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item)).join(', ') : ''
+}
+
 function countByBuyer(matches: Row[] | null | undefined) {
   const map = new Map<string, number>()
   for (const match of matches || []) {
@@ -62,11 +91,11 @@ function countByBuyer(matches: Row[] | null | undefined) {
   return map
 }
 
-function Field({ label, name, type = 'text', placeholder, defaultValue, required }: { label: string; name: string; type?: string; placeholder?: string; defaultValue?: string | number | null; required?: boolean }) {
+function Field({ label, name, type = 'text', placeholder, defaultValue, required, step }: { label: string; name: string; type?: string; placeholder?: string; defaultValue?: string | number | null; required?: boolean; step?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-300">{label}</span>
-      <input name={name} type={type} required={required} defaultValue={defaultValue ?? ''} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+      <input name={name} type={type} required={required} step={step} defaultValue={defaultValue ?? ''} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
     </label>
   )
 }
@@ -133,11 +162,78 @@ function BuyerCard({ buyer, matchCount }: { buyer: Row; matchCount: number }) {
         </form>
       </div>
 
+      <details className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-100">Edit buyer</summary>
+        <form action={updateBuyerAction} className="mt-4 space-y-4">
+          <input type="hidden" name="buyer_id" value={String(buyer.id)} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Buyer name" name="name" required defaultValue={rowString(buyer.name)} />
+            <Field label="Company" name="company_name" defaultValue={rowString(buyer.company_name)} />
+            <Field label="Email" name="email" type="email" defaultValue={rowString(buyer.email)} />
+            <Field label="Phone" name="phone" defaultValue={rowString(buyer.phone)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <SelectField label="Type" name="buyer_type" defaultValue={rowString(buyer.buyer_type) || 'investor'}>{buyerTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField>
+            <SelectField label="Status" name="status" defaultValue={rowString(buyer.status) || 'active'}>{statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField>
+            <SelectField label="Stage" name="relationship_stage" defaultValue={rowString(buyer.relationship_stage) || 'new'}>{relationshipStages.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Source" name="source" placeholder="Referral, PPC, event..." defaultValue={rowString(buyer.source)} />
+            <Field label="Financing type" name="financing_type" placeholder="Cash, hard money, DSCR loan..." defaultValue={rowString(buyer.financing_type)} />
+            <SelectField label="Proof of funds" name="proof_of_funds_status" defaultValue={rowString(buyer.proof_of_funds_status) || 'unknown'}>{proofOfFundsStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectField>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Min budget" name="min_budget" type="number" defaultValue={rowNumber(buyer.min_budget)} />
+            <Field label="Max budget" name="max_budget" type="number" defaultValue={rowNumber(buyer.max_budget)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="States" name="preferred_states" defaultValue={listInput(buyer.preferred_states)} />
+            <Field label="Cities" name="preferred_cities" defaultValue={listInput(buyer.preferred_cities)} />
+            <Field label="ZIP codes" name="preferred_zip_codes" defaultValue={listInput(buyer.preferred_zip_codes)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Property types" name="property_types" defaultValue={listInput(buyer.property_types)} />
+            <Field label="Strategies" name="strategies" defaultValue={listInput(buyer.strategies)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Min units" name="min_units" type="number" defaultValue={rowNumber(buyer.min_units)} />
+            <Field label="Max units" name="max_units" type="number" defaultValue={rowNumber(buyer.max_units)} />
+            <Field label="Min sqft" name="min_sqft" type="number" defaultValue={rowNumber(buyer.min_sqft)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Min bedrooms" name="min_bedrooms" type="number" step="any" defaultValue={rowNumber(buyer.min_bedrooms)} />
+            <Field label="Min bathrooms" name="min_bathrooms" type="number" step="any" defaultValue={rowNumber(buyer.min_bathrooms)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Min cashflow" name="min_cashflow" type="number" defaultValue={rowNumber(buyer.min_cashflow)} />
+            <Field label="Min DSCR" name="min_dscr" type="number" step="any" defaultValue={rowNumber(buyer.min_dscr)} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Min cap rate" name="min_cap_rate" type="number" step="any" placeholder="0.07 or 7" defaultValue={rowNumber(buyer.min_cap_rate)} />
+            <Field label="Min ARV spread" name="min_arv_spread" type="number" defaultValue={rowNumber(buyer.min_arv_spread)} />
+          </div>
+          <Field label="Tags" name="tags" placeholder="cash buyer, 1031, repeat" defaultValue={listInput(buyer.tags)} />
+          <textarea name="notes" rows={3} defaultValue={rowString(buyer.notes) ?? ''} placeholder="Notes, lending preferences, no-go rules..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+          <button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Save buyer changes</button>
+        </form>
+      </details>
+
       <form action={createBuyerInteractionAction} className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
         <input type="hidden" name="buyer_id" value={String(buyer.id)} />
-        <input type="hidden" name="interaction_type" value="note" />
         <input type="hidden" name="direction" value="internal" />
         <textarea name="summary" rows={2} placeholder="Add quick note / follow-up..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-medium text-slate-500">Type</span>
+            <select name="interaction_type" defaultValue="note" className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
+              {interactionTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-500">Follow-up date</span>
+            <input name="next_follow_up_at" type="date" className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30" />
+          </label>
+        </div>
         <button className="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Save note</button>
       </form>
     </article>
@@ -190,7 +286,7 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
     .limit(80)
   if (activeStatus !== 'all') buyersQuery = buyersQuery.eq('status', activeStatus)
 
-  const [buyersResult, matchesResult, interactionsResult] = await Promise.all([
+  const [buyersResult, matchesResult, interactionsResult, followUpsResult] = await Promise.all([
     workspace.organization?.id ? buyersQuery : Promise.resolve({ data: [] as Row[], error: null }),
     workspace.organization?.id
       ? supabase.from('buyer_deal_matches').select('*, buyers(*), market_listings(*)').eq('organization_id', workspace.organization.id).order('match_score', { ascending: false }).limit(30)
@@ -198,14 +294,18 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
     workspace.organization?.id
       ? supabase.from('buyer_interactions').select('*, buyers(name)').eq('organization_id', workspace.organization.id).order('created_at', { ascending: false }).limit(10)
       : Promise.resolve({ data: [] as Row[], error: null }),
+    workspace.organization?.id
+      ? supabase.from('buyer_interactions').select('id, next_follow_up_at, interaction_type, summary, buyers(name)').eq('organization_id', workspace.organization.id).gte('next_follow_up_at', new Date().toISOString()).order('next_follow_up_at', { ascending: true }).limit(8)
+      : Promise.resolve({ data: [] as Row[], error: null }),
   ])
 
   const buyers = (buyersResult.data || []) as Row[]
   const matches = (matchesResult.data || []) as Row[]
+  const upcomingFollowUps = (followUpsResult.data || []) as Row[]
   const matchCountMap = countByBuyer(matches)
   const activeBuyers = buyers.filter((buyer) => buyer.status !== 'archived').length
   const hotBuyers = buyers.filter((buyer) => buyer.status === 'hot').length
-  const followUps = (interactionsResult.data || []).filter((item: Row) => item.next_follow_up_at).length
+  const followUps = upcomingFollowUps.length
 
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={workspace.access.accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
@@ -270,8 +370,27 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
                 <Field label="Min units" name="min_units" type="number" />
                 <Field label="Max units" name="max_units" type="number" />
                 <Field label="Min cashflow" name="min_cashflow" type="number" />
-                <Field label="Min DSCR" name="min_dscr" type="number" />
+                <Field label="Min DSCR" name="min_dscr" type="number" step="any" />
               </div>
+              <details className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-100">More criteria</summary>
+                <div className="mt-4 space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <Field label="Min bedrooms" name="min_bedrooms" type="number" step="any" />
+                    <Field label="Min bathrooms" name="min_bathrooms" type="number" step="any" />
+                    <Field label="Min sqft" name="min_sqft" type="number" />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Min cap rate" name="min_cap_rate" type="number" step="any" placeholder="0.07 or 7" />
+                    <Field label="Min ARV spread" name="min_arv_spread" type="number" placeholder="30000" />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <Field label="Financing type" name="financing_type" placeholder="Cash, hard money..." />
+                    <Field label="Tags" name="tags" placeholder="cash buyer, 1031" />
+                    <Field label="Source" name="source" placeholder="Referral, PPC..." />
+                  </div>
+                </div>
+              </details>
               <textarea name="notes" rows={3} placeholder="Notes, lending preferences, no-go rules..." className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
               <button disabled={!buyersEnabled} className="w-full rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50">Save buyer</button>
             </form>
@@ -312,7 +431,21 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
           </div>
 
           <aside className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-            <h2 className="text-xl font-bold">Recent notes</h2>
+            <h2 className="text-xl font-bold">Upcoming follow-ups</h2>
+            <div className="mt-5 space-y-3">
+              {upcomingFollowUps.map((item) => (
+                <div key={String(item.id)} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">{rowString(firstRow(item.buyers)?.name) || 'Buyer'}</div>
+                    <div className="mt-1 text-xs text-slate-500">{String(item.interaction_type || 'note').replaceAll('_', ' ')}</div>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-indigo-400/30 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-100">{dateText(item.next_follow_up_at)}</span>
+                </div>
+              ))}
+              {!upcomingFollowUps.length ? <p className="text-sm text-slate-500">No upcoming follow-ups. Set a follow-up date when logging a buyer note.</p> : null}
+            </div>
+
+            <h2 className="mt-8 text-xl font-bold">Recent notes</h2>
             <div className="mt-5 space-y-3">
               {(interactionsResult.data || []).map((item: Row) => (
                 <div key={String(item.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">

@@ -4,8 +4,8 @@ import { AppShell } from '@/components/layout/AppShell'
 import { FinancialSnapshot } from '@/components/deals/FinancialSnapshot'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { deleteDealAction, quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
-import { publishDealToMarketAction } from '@/app/market/actions'
+import { archiveDealAction, deleteDealAction, deleteDealFileAction, duplicateDealAction, quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
+import { publishDealToMarketAction, unpublishDealAction } from '@/app/market/actions'
 import { asRows, firstRow, type Row } from '@/lib/types/rows'
 
 function money(value: unknown) {
@@ -65,7 +65,23 @@ async function signDealFiles(supabase: Awaited<ReturnType<typeof createSupabaseS
   return signed
 }
 
-function DealFilesSection({ files }: { files: SignedDealFile[] }) {
+function DeleteDealFileButton({ dealId, fileId }: { dealId: string; fileId: string }) {
+  return (
+    <form action={deleteDealFileAction}>
+      <input type="hidden" name="deal_id" value={dealId} />
+      <input type="hidden" name="file_id" value={fileId} />
+      <input type="hidden" name="redirect_to" value={`/deals/${dealId}`} />
+      <button
+        className="rounded-lg border border-red-400/30 bg-red-500/10 px-2.5 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-500/25"
+        title="Permanently deletes this file from storage"
+      >
+        Delete
+      </button>
+    </form>
+  )
+}
+
+function DealFilesSection({ dealId, files }: { dealId: string; files: SignedDealFile[] }) {
   if (!files.length) return null
   const images = files.filter((file): file is Row & { signedUrl: string } => file.file_kind === 'image' && Boolean(file.signedUrl))
   const documents = files.filter((file): file is Row & { signedUrl: string } => file.file_kind === 'pdf' && Boolean(file.signedUrl))
@@ -81,20 +97,28 @@ function DealFilesSection({ files }: { files: SignedDealFile[] }) {
       {images.length ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {images.map((file) => (
-            <a key={String(file.id)} href={file.signedUrl} target="_blank" rel="noreferrer" className="group overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50">
-              <div className="h-44 bg-cover bg-center transition group-hover:scale-[1.02]" style={{ backgroundImage: `url(${file.signedUrl})` }} />
-              <div className="truncate px-3 py-2 text-xs text-slate-400">{String(file.file_name)}</div>
-            </a>
+            <div key={String(file.id)} className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/50">
+              <a href={file.signedUrl} target="_blank" rel="noreferrer" className="group block">
+                <div className="h-44 bg-cover bg-center transition group-hover:scale-[1.02]" style={{ backgroundImage: `url(${file.signedUrl})` }} />
+              </a>
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <span className="truncate text-xs text-slate-400">{String(file.file_name)}</span>
+                <DeleteDealFileButton dealId={dealId} fileId={String(file.id)} />
+              </div>
+            </div>
           ))}
         </div>
       ) : null}
       {documents.length ? (
         <div className="mt-5 grid gap-2">
           {documents.map((file) => (
-            <a key={String(file.id)} href={file.signedUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm hover:bg-white/5">
-              <span className="truncate font-semibold text-slate-100">{String(file.file_name)}</span>
-              <span className="shrink-0 text-xs text-slate-500">Open PDF</span>
-            </a>
+            <div key={String(file.id)} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm">
+              <a href={file.signedUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center justify-between gap-3 hover:opacity-80">
+                <span className="truncate font-semibold text-slate-100">{String(file.file_name)}</span>
+                <span className="shrink-0 text-xs text-slate-500">Open PDF</span>
+              </a>
+              <DeleteDealFileButton dealId={dealId} fileId={String(file.id)} />
+            </div>
           ))}
         </div>
       ) : null}
@@ -169,6 +193,10 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <Link href={`/deals/${id}/analyzer`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">Analyze</Link>
             <Link href={`/deals/${id}/rent-intelligence`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Rent Intelligence</Link>
             <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Edit Deal</Link>
+            <form action={duplicateDealAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <button className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10" title="Creates a private draft copy of this deal">Duplicate</button>
+            </form>
             <Link href="/market" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Market</Link>
             <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 transition hover:bg-white/10">Back</Link>
           </div>
@@ -189,10 +217,24 @@ export default async function DealDetailPage({ params, searchParams }: { params:
             <textarea name="summary" rows={3} placeholder="Short public/community summary. Leave blank to use deal notes." className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
             <button className="mt-3 w-full rounded-xl bg-emerald-300 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200">Publish / update Market post</button>
           </form>
+          {savedVisibility && savedVisibility !== 'private' ? (
+            <form action={unpublishDealAction} className="mt-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+              <input type="hidden" name="deal_id" value={id} />
+              <div className="text-sm font-semibold text-slate-100">Currently published: {String(savedVisibility)}</div>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Unpublishing makes the deal private again and archives its Market listing and community/public posts.</p>
+              <button className="mt-3 w-full rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Unpublish from Market</button>
+            </form>
+          ) : null}
+          <form action={archiveDealAction} className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+            <input type="hidden" name="deal_id" value={id} />
+            <div className="text-sm font-semibold text-amber-100">Archive this deal</div>
+            <p className="mt-1 text-xs leading-5 text-amber-100/80">Marks the deal as dead but keeps all history, files and snapshots. Use this instead of Delete when you want the record for later reference.</p>
+            <button className="mt-3 w-full rounded-xl border border-amber-300/30 px-4 py-3 text-sm font-semibold text-amber-100 hover:bg-amber-500/20">Archive Deal</button>
+          </form>
           <form action={deleteDealAction} className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
             <input type="hidden" name="deal_id" value={id} />
             <div className="text-sm font-semibold text-red-100">Delete this deal</div>
-            <p className="mt-1 text-xs leading-5 text-red-100/80">Removes the deal and related property/calculation records. Market posts created from this deal should be archived separately if you want them hidden.</p>
+            <p className="mt-1 text-xs leading-5 text-red-100/80">Permanently removes the deal and related property/calculation records. Prefer Archive if you only want it out of the pipeline. Market posts created from this deal should be archived separately if you want them hidden.</p>
             <button className="mt-3 w-full rounded-xl border border-red-300/30 px-4 py-3 text-sm font-semibold text-red-100 hover:bg-red-500/20">Delete Deal</button>
           </form>
         </div>
@@ -202,7 +244,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
         {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
 
-        <DealFilesSection files={signedDealFiles} />
+        <DealFilesSection dealId={id} files={signedDealFiles} />
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">

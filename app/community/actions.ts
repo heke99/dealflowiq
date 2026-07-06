@@ -57,9 +57,21 @@ export async function createCommunityTeamAction(formData: FormData) {
   redirect('/community?message=Team created')
 }
 
+const INVITE_CREATION_LIMIT_PER_DAY = 20
+
 export async function createCommunityInviteAction(formData: FormData) {
   const workspace = await requireCommunityAdmin()
   const supabase = await createSupabaseServerClient()
+
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { count: recentInvites } = await supabase
+    .from('community_invites')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', workspace.organization!.id)
+    .gte('created_at', dayAgo)
+  if ((recentInvites || 0) >= INVITE_CREATION_LIMIT_PER_DAY) {
+    redirect(`/community?error=${toMessage(`Invite limit reached: your community can create at most ${INVITE_CREATION_LIMIT_PER_DAY} invites per 24 hours. Try again later.`)}`)
+  }
 
   const email = String(formData.get('email') || '').trim().toLowerCase()
   const fullName = String(formData.get('full_name') || '').trim()

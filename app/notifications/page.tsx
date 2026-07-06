@@ -7,15 +7,14 @@ import { rowString, type Row } from '@/lib/types/rows'
 
 type Search = Record<string, string | string[] | undefined>
 
+// Only filter on notification types the app actually emits.
 const filters = [
   ['all', 'All'],
   ['unread', 'Unread'],
-  ['buy_box_match', 'Buy Box Matches'],
   ['opportunity_found', 'Deals'],
-  ['community', 'Community'],
-  ['billing', 'Billing'],
+  ['buy_box_match', 'Buy box matches'],
+  ['buyer_match', 'Buyer matches'],
   ['message_received', 'Messages'],
-  ['system', 'System'],
 ]
 
 function one(value: string | string[] | undefined, fallback = '') {
@@ -32,11 +31,8 @@ function typeLabel(value?: unknown) {
   return String(value || 'system').replaceAll('_', ' ')
 }
 
-function filterQuery<T extends { is(column: string, value: null): T; in(column: string, values: string[]): T; eq(column: string, value: string): T }>(query: T, filter: string): T {
+function filterQuery<T extends { is(column: string, value: null): T; eq(column: string, value: string): T }>(query: T, filter: string): T {
   if (filter === 'unread') return query.is('read_at', null)
-  if (filter === 'community') return query.in('type', ['community_deal', 'community_activity'])
-  if (filter === 'billing') return query.in('type', ['trial_ending', 'payment_required', 'subscription_updated'])
-  if (filter === 'system') return query.in('type', ['system', 'system_alert', 'admin_alert'])
   if (filter !== 'all') return query.eq('type', filter)
   return query
 }
@@ -59,7 +55,16 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   query = filterQuery(query, activeFilter)
   const { data } = await query
   const notifications = (data || []) as Row[]
-  const unreadCount = notifications.filter((item) => !item.read_at).length
+
+  // True unread total across the whole scope, not just the 120 loaded rows.
+  const { count: unreadTotal } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', workspace.organization?.id || '00000000-0000-0000-0000-000000000000')
+    .or(`user_id.is.null,user_id.eq.${workspace.user.id}`)
+    .is('archived_at', null)
+    .is('read_at', null)
+  const unreadCount = unreadTotal || 0
 
   return (
     <AppShell

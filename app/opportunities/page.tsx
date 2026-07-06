@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { AppShell } from '@/components/layout/AppShell'
+import { AnalysisDisclaimer } from '@/components/layout/AnalysisDisclaimer'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { convertListingToDealAction, rescoreMarketListingAction, saveOpportunityAction } from '@/app/market/actions'
@@ -259,6 +260,7 @@ export default async function OpportunitiesPage() {
             <Link href="/settings/billing" className="mt-5 inline-flex rounded-xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 hover:bg-amber-200">Upgrade to unlock</Link>
           </div>
         ) : null}
+        <AnalysisDisclaimer />
       </div>
     </AppShell>
   )

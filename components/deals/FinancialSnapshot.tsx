@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { AnalysisDisclaimer } from '@/components/layout/AnalysisDisclaimer'
 import { createCalculationSnapshotAction } from '@/app/deals/actions'
 import { scoreMarketListing } from '@/lib/market/scoring'
 import { asRow, rowNumber, type Row } from '@/lib/types/rows'
@@ -288,6 +289,8 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
           </div>
         </div>
       </div>
+
+      <AnalysisDisclaimer />
     </section>
   )
 }

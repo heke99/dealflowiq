@@ -62,4 +62,4 @@ If the Supabase variables are missing, the auth proxy passes requests through wi
 
 | Variable | Description |
 |---|---|
-| `SENTRY_DSN` | When present, server errors reported by `lib/observability/log.ts` include a hint to forward to Sentry; the app never requires Sentry to build or run. |
+| `ERROR_WEBHOOK_URL` | When present, server errors logged through `lib/observability/log.ts` are forwarded (best-effort, 3s timeout) as JSON POSTs to this URL — point it at Slack, a Sentry ingest proxy, or any HTTP collector. The app never requires it to build or run. |

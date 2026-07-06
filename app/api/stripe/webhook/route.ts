@@ -3,6 +3,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { retrieveStripeSubscription, verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { syncCheckoutSessionToDatabase, syncStripeSubscriptionToDatabase } from '@/lib/billing/stripeSync'
 import { decideWebhookRetry } from '@/lib/billing/webhookIdempotency'
+import { logWarn } from '@/lib/observability/log'
 import { asRow, rowString } from '@/lib/types/rows'
 
 export const runtime = 'nodejs'
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
   } catch (error) {
     // Signature failures never reach the events table (no trusted event id),
     // so log them for operators watching for misconfiguration or abuse.
-    console.warn('[stripe-webhook] signature verification failed:', error instanceof Error ? error.message : error)
+    logWarn('stripe.webhook.signature_failed', { detail: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid Stripe signature' }, { status: 400 })
   }
 
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
   if (claimError) {
     const isDuplicate = claimError.code === '23505'
     if (!isDuplicate) {
-      console.warn('[stripe-webhook] could not record event:', claimError.message)
+      logWarn('stripe.webhook.claim_failed', { detail: claimError.message, eventId: event.id })
       return NextResponse.json({ error: 'Could not record webhook event' }, { status: 500 })
     }
     const { data: existing } = await supabase

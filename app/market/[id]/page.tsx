@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
+import { AnalysisDisclaimer } from '@/components/layout/AnalysisDisclaimer'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { addListingManualOverrideAction, addMarketListingNoteAction, convertListingToDealAction, ignoreMarketListingAction, rescoreMarketListingAction, runListingFullIntelligenceAction, runListingHudLookupAction, runListingMarketRentAction, saveOpportunityAction, updateMarketListingAnalysisInputsAction, updateMarketListingReviewStatusAction, updateMarketListingStageAction } from '@/app/market/actions'
@@ -187,10 +188,13 @@ export default async function MarketListingDetailPage({ params, searchParams }: 
                 {row.source_url ? <a href={String(row.source_url)} target="_blank" rel="noreferrer" className="rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-100 hover:bg-white/10">Open source listing</a> : null}
               </div>
             </div>
-            <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
-              <div className="text-xs font-semibold uppercase tracking-wide">{premiumAccess ? 'Deal Score' : 'Deal Score locked'}</div>
-              <div className="mt-1 text-5xl font-black">{premiumAccess ? dealScore || '—' : '🔒'}</div>
-              <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : dealStatusLabel(rowString(row.deal_status))}</div>
+            <div>
+              <div className={`rounded-3xl border px-6 py-5 text-center ${scoreTone(dealScore)}`}>
+                <div className="text-xs font-semibold uppercase tracking-wide">{premiumAccess ? 'Deal Score' : 'Deal Score locked'}</div>
+                <div className="mt-1 text-5xl font-black">{premiumAccess ? dealScore || '—' : '🔒'}</div>
+                <div className="mt-1 text-sm">{isQualifiedOpportunity ? 'Qualified opportunity' : dealStatusLabel(rowString(row.deal_status))}</div>
+              </div>
+              <AnalysisDisclaimer className="mt-2 max-w-[220px] text-center" />
             </div>
           </div>
         </section>

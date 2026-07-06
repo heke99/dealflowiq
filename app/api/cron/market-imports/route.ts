@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { recoverStuckImports, runScheduledMarketImports } from '@/lib/market/importRunner'
+import { runDataRetentionSweep } from '@/lib/retention'
+import { logError, logInfo } from '@/lib/observability/log'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { asRow, asRows } from '@/lib/types/rows'
 
@@ -53,25 +55,28 @@ export async function GET(request: NextRequest) {
       ? Number(asRow(cleanupData[0])?.cleaned_count || 0)
       : Number(cleanupData || 0)
 
+    const retention = await runDataRetentionSweep(supabase)
+
     const sweep = {
       requeuedItems: recovered.requeuedItems,
       failedJobs: recovered.failedJobs,
       stalePreviewItemsDeleted,
       expiredProviderDataCleaned,
+      retention,
     }
 
     const result = await runScheduledMarketImports({ limitSources: 10 })
 
-    console.log(JSON.stringify({
-      cron: 'market-imports',
+    logInfo('cron.market_imports.completed', {
       ranAt: result.ranAt,
       sourceCount: result.sourceCount,
       totals: result.totals,
       sweep,
-    }))
+    })
 
     return NextResponse.json({ ok: true, ...result, sweep })
   } catch (error) {
+    logError('cron.market_imports.failed', error)
     const message = error instanceof Error ? error.message : 'Scheduled market import failed'
     return NextResponse.json({ ok: false, error: message }, { status: 500 })
   }

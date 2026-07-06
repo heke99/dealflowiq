@@ -28,15 +28,25 @@ Status tracker for launch. Updated as hardening batches land.
 - Deal files live in a private bucket, path-scoped per organization, served via 1-hour signed URLs.
 - Platform-admin bootstrap is manual SQL only (no public endpoint).
 
-## Data retention
+## Observability
+
+- All server events use structured single-line JSON logging via `lib/observability/log.ts` (`logInfo`/`logWarn`/`logError`); search Vercel logs by the `event` field (e.g. `cron.market_imports.completed`, `stripe.webhook.signature_failed`).
+- `userSafeError()` sanitizes messages shown to users; internal details stay in server logs.
+- Optional `ERROR_WEBHOOK_URL` forwards error events to any HTTP collector (Slack, Sentry proxy). Never required for build or runtime.
+- Operational trails in the database: `audit_logs` (admin/billing/deal events), `stripe_webhook_events`, `market_import_audit_events`, `market_import_jobs`, `hud_lookup_events`, `conversation_reports`.
+
+## Data retention (automated)
+
+The hourly cron (`/api/cron/market-imports`) runs `runDataRetentionSweep` (`lib/retention.ts`) plus provider cleanup on every authorized run:
 
 | Data | Policy |
 |---|---|
-| Provider raw listing data | Expires per provider policy (`provider_data_expires_at`); cleared by `cleanup_expired_market_source_data()` during cron runs and manual cleanup. |
-| Stripe webhook events | Retained for audit; safe to prune rows older than 90 days once processed. |
-| Import audit events | Used for rate limiting (rolling windows); prune rows older than 90 days. |
-| Notifications | Users can delete; stale notifications can be pruned after 90 days. |
-| Failed import jobs / queue items | Swept back or terminally failed by the worker; prune terminal rows older than 30 days. |
+| Provider raw listing data | Expires per provider policy (`provider_data_expires_at`); cleared by `cleanup_expired_market_source_data()` each cron run. |
+| Stripe webhook events | Processed events pruned after 90 days (failed events kept for retries). |
+| Import audit events | Pruned after 90 days (rolling rate-limit windows are ≤30 days). |
+| Notifications | Read/archived notifications pruned after 90 days. |
+| Failed import jobs | Terminal failures pruned after 30 days; stuck running jobs/queue items swept back every run. |
+| Stale import preview items | Deleted after 14 days in non-imported statuses. |
 | User data deletion | Delete the auth user in Supabase; `profiles` and memberships cascade. Organization data is retained unless the org itself is deleted. |
 
 ## Backups and restore

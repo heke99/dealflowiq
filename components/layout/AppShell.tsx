@@ -119,6 +119,13 @@ export function AppShell({
               Sign out
             </button>
           </form>
+          <div className="mt-3 flex items-center justify-center gap-1 text-xs text-slate-500">
+            <Link href="/terms" className="hover:text-slate-300">Terms</Link>
+            <span>·</span>
+            <Link href="/privacy" className="hover:text-slate-300">Privacy</Link>
+            <span>·</span>
+            <Link href="/support" className="hover:text-slate-300">Support</Link>
+          </div>
         </div>
       </aside>
 

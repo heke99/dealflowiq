@@ -97,6 +97,11 @@ export async function POST(request: Request) {
       if (subscriptionId) {
         const subscription = await retrieveStripeSubscription(subscriptionId)
         await syncCheckoutSessionToDatabase({ supabase, session: object, subscription, sourceEventId: event.id })
+      } else if (String(object.mode || '') === 'subscription') {
+        // A subscription-mode checkout without a subscription id means the
+        // session payload is incomplete — fail the event so Stripe retries
+        // (processing is idempotent, so retries are safe).
+        throw new Error('checkout.session.completed (mode=subscription) arrived without a subscription id; will retry.')
       }
     }
 

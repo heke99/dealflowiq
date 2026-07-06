@@ -194,7 +194,7 @@ export default async function OpportunitiesPage() {
     query = query.eq('visibility', 'public')
   }
 
-  const { data: listingsData } = await query
+  const { data: listingsData, error: listingsError } = await query
   const listingIds = ((listingsData || []) as Row[]).map((listing) => String(listing.id))
   const { data: scoreRows } = listingIds.length
     ? await supabase
@@ -252,6 +252,7 @@ export default async function OpportunitiesPage() {
             </div>
           </div>
         </section>
+        {listingsError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Could not load opportunities: {listingsError.message}</div> : null}
         {scores.length ? <div className="grid gap-6 xl:grid-cols-2">{scores.map((score) => <OpportunityCard key={String(score.id)} score={score} />)}</div> : <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center"><h2 className="text-xl font-bold">No qualified opportunities yet</h2><p className="mt-2 text-slate-400">Create a Buy Box, run a source, or import authorized URLs. Listings need 70+ score and 50+ rent confidence to appear here automatically. Strong Opportunities need 85+ score and 65+ rent confidence.</p><Link href="/buy-boxes" className="mt-5 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950">Create Buy Box</Link></div>}
         {hiddenCount > 0 ? (
           <div className="rounded-3xl border border-amber-400/25 bg-amber-400/[0.06] p-8 text-center">

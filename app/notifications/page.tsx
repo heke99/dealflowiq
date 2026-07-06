@@ -53,7 +53,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
     .limit(120)
 
   query = filterQuery(query, activeFilter)
-  const { data } = await query
+  const { data, error: loadError } = await query
   const notifications = (data || []) as Row[]
 
   // True unread total across the whole scope, not just the 120 loaded rows.
@@ -78,6 +78,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       isPlatformAdmin={workspace.access.isPlatformAdmin}
     >
       <div className="space-y-6">
+        {loadError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Could not load notifications: {loadError.message}</div> : null}
         <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 sm:p-8">
           <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
             <div>

@@ -56,6 +56,26 @@ The hourly cron (`/api/cron/market-imports`) runs `runDataRetentionSweep` (`lib/
 - Verify restore quarterly by restoring to a scratch project and running the post-deploy checklist.
 - Migration rollback: migrations are forward-only; write a compensating migration rather than editing history.
 
+## Release checklist
+
+Complete before flipping production traffic:
+
+- [ ] `npm run build`, `npm run lint`, `npm run typecheck`, `npm run test` all pass on the release commit
+- [ ] All migrations `001`–`037` applied to the production Supabase project in filename order (validated end-to-end on Postgres 16)
+- [ ] `.env` complete per [env-vars.md](./env-vars.md); `CRON_SECRET` set (production cron is disabled without it)
+- [ ] Stripe live keys + webhook endpoint configured; a test event shows `processed` in `stripe_webhook_events`
+- [ ] First platform admin seeded in `platform_admins`
+- [ ] Billing plans created and synced (`/admin/plans` shows `synced` status)
+- [ ] Provider policies reviewed at the platform level (`market_provider_policies`) — only providers with documented authorization active
+- [ ] Post-deploy smoke: signup → onboarding → dashboard; URL import; deal create + analyzer; checkout (test mode first); `/terms` + `/support` load; cron route returns 401 without secret and 200 with it
+
+## Rollback plan
+
+- **Application**: redeploy the previous Vercel build (instant, stateless). All releases on this branch keep `npm run build` green per commit, so any prior commit is deployable.
+- **Database**: migrations are forward-only and additive (new tables/columns/policies/functions). Prefer a fix-forward migration. The only destructive statement in the hardening series is dropping the unused `ensure_organization_subscription(uuid,uuid,integer)` overload (034) — restorable from `025_freemium_admin_community_batch.sql` if ever needed.
+- **Stripe**: webhook processing is idempotent; events can be replayed from the Stripe dashboard after recovery. Do not delete `stripe_webhook_events` rows during an incident.
+- **Catastrophic data loss**: restore Supabase PITR/daily backup to a new project, repoint env vars, verify auth users and subscriptions, replay recent Stripe events.
+
 ## Known remaining issues
 
 Tracked here so they are explicit rather than silent:

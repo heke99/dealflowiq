@@ -811,7 +811,7 @@ export async function runMarketSourceNow(source: SourceRow, options?: { maxUrls?
     message: `${source.source_name || 'Source'} finished: ${created} created, ${updated} updated, ${opportunities} opportunities, ${failed} failed.`,
     relatedEntityType: 'market_source',
     relatedEntityId: String(source.id),
-    actionHref: '/market?tab=sources',
+    actionHref: '/imports',
     metadata: { created, updated, failed, opportunities, topScore, listingIds },
   })
 

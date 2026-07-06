@@ -144,6 +144,12 @@ describe('dealToMarketListingPayload', () => {
     expect(dealToMarketListingPayload(publishableDeal, { ...publishParams, visibility: 'team' }).source_type).toBe('public_deal')
   })
 
+  it('applies the asking price override to list and asking price', () => {
+    const payload = dealToMarketListingPayload(publishableDeal, { ...publishParams, visibility: 'public', askingPrice: 199000 })
+    expect(payload.list_price).toBe(199000)
+    expect(payload.asking_price).toBe(199000)
+  })
+
   it('retains the deal id in raw_payload and external_listing_id for unpublish matching', () => {
     const payload = dealToMarketListingPayload(publishableDeal, { ...publishParams, visibility: 'public' })
     expect(payload.external_listing_id).toBe('deal-1')

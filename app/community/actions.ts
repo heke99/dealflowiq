@@ -76,7 +76,11 @@ export async function createCommunityInviteAction(formData: FormData) {
   const email = String(formData.get('email') || '').trim().toLowerCase()
   const fullName = String(formData.get('full_name') || '').trim()
   const teamId = String(formData.get('team_id') || '').trim() || null
-  const roleValue = String(formData.get('role') || 'member') as InviteRole
+  const VALID_INVITE_ROLES: InviteRole[] = ['member', 'viewer', 'buyer', 'acquisition_manager', 'disposition_manager', 'admin']
+  const rawRole = String(formData.get('role') || 'member')
+  // Validate against the allowed set — 'owner' is a valid enum value but must
+  // never be grantable through an invite.
+  const roleValue: InviteRole = (VALID_INVITE_ROLES as string[]).includes(rawRole) ? (rawRole as InviteRole) : 'member'
   const maxUses = Math.max(1, Math.min(500, Number(formData.get('max_uses') || 1)))
   const sendEmail = String(formData.get('send_email') || '') === 'on'
   const expiresInDays = Math.max(1, Math.min(365, Number(formData.get('expires_in_days') || 14)))

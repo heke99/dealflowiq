@@ -101,7 +101,8 @@ export default async function BuyBoxDetailPage({ params }: { params: Promise<{ i
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
               <h2 className="text-xl font-bold">Matched Listings</h2>
               <div className="mt-5 space-y-3">{matches.map((match) => {
-                const listing = match.market_listings as Row
+                const listing = match.market_listings as Row | null
+                if (!listing?.id) return null
                 const matchScore = Math.round(Number(match.match_score ?? match.deal_score ?? 0))
                 const matchedStatus = String(match.matched_status || 'matched')
                 const reasons = Array.isArray(match.reasons) ? (match.reasons as unknown[]).map(String) : []

@@ -15,14 +15,13 @@ export type PublishDealListingParams = {
   /** Form override; falls back to the deal's stored title (unknown-typed Row field). */
   title?: unknown
   summary?: string | null
-  /**
-   * The publish form also collects asking price and contact email, but those
-   * overrides only apply to the public_deal_posts row — the Market listing
-   * intentionally keeps the deal's stored prices and no broker contact. They
-   * stay in the signature so tests can assert they never leak into the
-   * listing payload.
-   */
+  /** Form override; when set it becomes the listing's asking/list price. */
   askingPrice?: number | null
+  /**
+   * Contact email only applies to the public_deal_posts row — the Market
+   * listing intentionally exposes no broker contact. It stays in the
+   * signature so tests can assert it never leaks into the listing payload.
+   */
   contactEmail?: string | null
 }
 
@@ -45,8 +44,8 @@ export function dealToMarketListingPayload(deal: Row, params: PublishDealListing
     sqft: property?.square_feet,
     lot_size: property?.lot_size,
     year_built: property?.year_built,
-    list_price: deal.asking_price || deal.purchase_price,
-    asking_price: deal.asking_price || deal.purchase_price,
+    list_price: params.askingPrice || deal.asking_price || deal.purchase_price,
+    asking_price: params.askingPrice || deal.asking_price || deal.purchase_price,
     arv: deal.arv,
     rehab_estimate: deal.rehab_estimate,
     current_rent: deal.current_rent,

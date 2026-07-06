@@ -86,18 +86,25 @@ export async function startCheckoutAction(formData: FormData) {
     stripeReadyPlan = updatedPlan as StripePlanRow
   }
 
-  const session = await createStripeCheckoutSession({
-    organizationId: workspace.organization.id,
-    userId: workspace.user.id,
-    userEmail: workspace.user.email,
-    plan: stripeReadyPlan,
-    interval,
-    stripeCustomerId: rowString(asRow(subscription)?.stripe_customer_id) || null,
-    trialPeriodDays: validation.trialDays,
-  }).catch((error) => {
-    redirect(`/settings/billing?error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not create Stripe Checkout session')}`)
-  })
+  // Capture Stripe failures without calling redirect() inside a catch —
+  // redirect() throws NEXT_REDIRECT, which must not be swallowed/misrouted.
+  let session: { id: string; url: string } | null = null
+  let checkoutError: string | null = null
+  try {
+    session = await createStripeCheckoutSession({
+      organizationId: workspace.organization.id,
+      userId: workspace.user.id,
+      userEmail: workspace.user.email,
+      plan: stripeReadyPlan,
+      interval,
+      stripeCustomerId: rowString(asRow(subscription)?.stripe_customer_id) || null,
+      trialPeriodDays: validation.trialDays,
+    })
+  } catch (error) {
+    checkoutError = error instanceof Error ? error.message : 'Could not create Stripe Checkout session'
+  }
 
+  if (checkoutError) redirect(`/settings/billing?error=${encodeURIComponent(checkoutError)}`)
   if (!session?.url) redirect('/settings/billing?error=Stripe Checkout did not return a redirect URL')
   redirect(session.url)
 }
@@ -117,10 +124,15 @@ export async function openBillingPortalAction() {
   const customerId = rowString(asRow(subscription)?.stripe_customer_id)
   if (!customerId) redirect('/settings/billing?error=No Stripe customer is connected to this workspace yet')
 
-  const session = await createStripePortalSession({ stripeCustomerId: customerId }).catch((portalError) => {
-    redirect(`/settings/billing?error=${encodeURIComponent(portalError instanceof Error ? portalError.message : 'Could not open Stripe customer portal')}`)
-  })
+  let session: { id: string; url: string } | null = null
+  let portalError: string | null = null
+  try {
+    session = await createStripePortalSession({ stripeCustomerId: customerId })
+  } catch (error) {
+    portalError = error instanceof Error ? error.message : 'Could not open Stripe customer portal'
+  }
 
+  if (portalError) redirect(`/settings/billing?error=${encodeURIComponent(portalError)}`)
   if (!session?.url) redirect('/settings/billing?error=Stripe Customer Portal did not return a redirect URL')
   redirect(session.url)
 }

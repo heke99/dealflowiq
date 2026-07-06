@@ -167,19 +167,19 @@ export async function importMarketUrlAction(formData: FormData) {
   // Provider policy, rolling-hour rate limit and plan quota gates (mirrors
   // analyzeImportUrlAction in app/imports/actions.ts).
   const policy = await importPolicyForSource(supabase, workspace.organization.id, String(sourceType))
-  if (!policy.active) redirect(`/market?tab=sources&error=${encodeURIComponent(`${policy.label} import is not active. Configure provider policy before live import.`)}`)
-  if (searchImport && !policy.searchImportAllowed) redirect(`/market?tab=sources&error=${encodeURIComponent(`${policy.label} search import is not allowed by current provider policy.`)}`)
-  if (!searchImport && !policy.listingImportAllowed) redirect(`/market?tab=sources&error=${encodeURIComponent(`${policy.label} listing import is not allowed by current provider policy.`)}`)
+  if (!policy.active) redirect(`/imports?error=${encodeURIComponent(`${policy.label} import is not active. Configure provider policy before live import.`)}`)
+  if (searchImport && !policy.searchImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} search import is not allowed by current provider policy.`)}`)
+  if (!searchImport && !policy.listingImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} listing import is not allowed by current provider policy.`)}`)
 
   const recent = await countRecentProviderImports(supabase, workspace.organization.id, String(sourceType))
   const remaining = Math.max(0, policy.maxListingsPerHour - recent)
-  if (remaining <= 0) redirect(`/market?tab=sources&error=${encodeURIComponent(`${policy.label} rate limit reached. Try again after the rolling hour window.`)}`)
+  if (remaining <= 0) redirect(`/imports?error=${encodeURIComponent(`${policy.label} rate limit reached. Try again after the rolling hour window.`)}`)
   const maxUrlsThisRun = Math.min(remaining, 10)
 
   try {
     await ensurePlanImportQuota({ supabase, workspace, requested: searchImport ? maxUrlsThisRun : 1 })
   } catch (quotaError) {
-    redirect(`/market?tab=sources&error=${encodeURIComponent(quotaError instanceof Error ? quotaError.message : 'Import limit reached')}`)
+    redirect(`/imports?error=${encodeURIComponent(quotaError instanceof Error ? quotaError.message : 'Import limit reached')}`)
   }
 
   const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
@@ -299,8 +299,9 @@ export async function importMarketUrlAction(formData: FormData) {
       }
     }
 
-    const finalStatus = failed && (created + updated) ? 'partially_imported' : failed ? 'failed' : 'completed'
-    await supabase.from('market_import_jobs').update({
+    // 'partial' is the value allowed by the market_import_jobs status CHECK.
+    const finalStatus = failed && (created + updated) ? 'partial' : failed ? 'failed' : 'completed'
+    const { error: jobUpdateError } = await supabase.from('market_import_jobs').update({
       status: finalStatus,
       finished_at: new Date().toISOString(),
       items_found: found,
@@ -311,6 +312,7 @@ export async function importMarketUrlAction(formData: FormData) {
       source_summary: { previewRows, topScore, searchImport, sourceType, message: `${created} created · ${updated} updated · ${failed} failed.` },
       error_message: finalStatus === 'failed' ? 'All listing imports failed. Open job details for row errors.' : null,
     }).eq('id', job.id)
+    if (jobUpdateError) throw new Error(jobUpdateError.message)
 
     await supabase.from('audit_logs').insert({
       organization_id: workspace.organization.id,
@@ -633,7 +635,11 @@ export async function convertListingToDealAction(formData: FormData) {
     status: 'converted_to_deal',
     last_action_at: new Date().toISOString(),
   }, { onConflict: 'organization_id,user_id,listing_id' })
-  await supabase.from('market_listings').update({ status: 'converted_to_deal' }).eq('id', listingId)
+  // Only mutate the listing status for listings the caller's org owns —
+  // shared public/community listings from other orgs must stay untouched.
+  if (belongsToOrg) {
+    await supabase.from('market_listings').update({ status: 'converted_to_deal' }).eq('id', listingId).eq('organization_id', workspace.organization.id)
+  }
   await recordMarketListingActivity(supabase, {
     organizationId: workspace.organization.id,
     listingId,

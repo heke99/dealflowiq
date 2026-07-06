@@ -37,6 +37,7 @@ export type UnderwritingAssumptions = {
   flip: {
     sellingCostsPercent: number
     holdingCostsMonthly: number
+    holdingMonths: number
     source: string
   }
   brrrr: {
@@ -118,7 +119,7 @@ export type DealUnderwritingSummary = {
   warnings: string[]
 }
 
-const FORMULA_VERSION = 'dealflowiq-underwriting-v1.3'
+const FORMULA_VERSION = 'dealflowiq-underwriting-v1.4'
 
 const RENT_SCENARIOS: Array<{ key: RentScenarioKey; label: string; field: string }> = [
   { key: 'current', label: 'Current Rent', field: 'current_rent' },
@@ -180,9 +181,9 @@ export const FORMULA_EXPLANATIONS: FormulaExplanation[] = [
   {
     key: 'flip_profit',
     label: 'Flip profit preview',
-    formula: 'Flip profit = ARV - purchase price - rehab - closing costs - selling costs - holding costs',
-    source: 'Common fix-and-flip preview. This is a quick model, not a full construction budget.',
-    editableAssumptions: ['ARV', 'Purchase price', 'Rehab estimate', 'Closing costs', 'Selling costs %', 'Monthly holding costs'],
+    formula: 'Flip profit = ARV - purchase price - rehab - closing costs - selling costs - (monthly holding costs × holding months)',
+    source: 'Common fix-and-flip preview. Holding costs accrue per month over the editable holding period (default 6 months). This is a quick model, not a full construction budget.',
+    editableAssumptions: ['ARV', 'Purchase price', 'Rehab estimate', 'Closing costs', 'Selling costs %', 'Monthly holding costs', 'Holding months'],
   },
   {
     key: 'wholesale_mao',
@@ -365,7 +366,8 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
     flip: {
       sellingCostsPercent: positive(deal.selling_costs_percent, 8),
       holdingCostsMonthly: positive(deal.holding_costs_monthly),
-      source: 'Quick flip preview assumptions. Full project budget comes later.',
+      holdingMonths: Math.min(60, Math.max(0, Math.round(positive(deal.flip_holding_months, 6) || 6))),
+      source: 'Quick flip preview assumptions. Holding costs are monthly × holding months. Full project budget comes later.',
     },
     brrrr: {
       refinanceLtvPercent: positive(deal.refinance_ltv_percent, 75),
@@ -409,8 +411,10 @@ export function calculateDealUnderwriting(deal: DealLike, property?: PropertyLik
 
   const sellingCostsPercent = percent(deal.selling_costs_percent, 8)
   const holdingCostsMonthly = positive(deal.holding_costs_monthly)
+  const holdingMonths = assumptions.flip.holdingMonths
+  const totalHoldingCosts = holdingCostsMonthly * holdingMonths
   const sellingCosts = arv * sellingCostsPercent
-  const flipProfit = arv > 0 && purchasePrice > 0 ? arv - purchasePrice - rehabEstimate - closingCosts - sellingCosts - holdingCostsMonthly : null
+  const flipProfit = arv > 0 && purchasePrice > 0 ? arv - purchasePrice - rehabEstimate - closingCosts - sellingCosts - totalHoldingCosts : null
   const flipProfitMargin = flipProfit !== null && arv > 0 ? flipProfit / arv : null
 
   const desiredWholesaleFee = positive(deal.desired_wholesale_fee, 10000)

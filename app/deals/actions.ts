@@ -3,25 +3,16 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { assertNotPaymentRequired, hasOrganizationRole, MANAGEMENT_ROLES } from '@/lib/auth/access'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { buildCalculationSnapshotPayload, calculateDealUnderwriting } from '@/lib/calculations/underwriting'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
+import { recordAuditEvent } from '@/lib/audit'
+import { ARCHIVED_DEAL_STATUS, DEAL_STATUSES, duplicateDealPayload, duplicatePropertyPayload } from '@/lib/deals/lifecycle'
+import { firstRow, type Row } from '@/lib/types/rows'
 
-const VALID_STATUSES = new Set([
-  'draft',
-  'imported',
-  'needs_review',
-  'analyzed',
-  'approved',
-  'rejected',
-  'under_contract',
-  'sent_to_buyers',
-  'offers_received',
-  'assigned',
-  'closed',
-  'dead',
-])
+const VALID_STATUSES = new Set<string>(DEAL_STATUSES)
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -204,6 +195,7 @@ function buildDealPayload(formData: FormData) {
     closing_costs: numberValue(formData, 'closing_costs'),
     selling_costs_percent: numberValue(formData, 'selling_costs_percent'),
     holding_costs_monthly: numberValue(formData, 'holding_costs_monthly'),
+    flip_holding_months: integerValue(formData, 'flip_holding_months'),
     mao_percentage: numberValue(formData, 'mao_percentage'),
     desired_wholesale_fee: numberValue(formData, 'desired_wholesale_fee'),
     refinance_ltv_percent: numberValue(formData, 'refinance_ltv_percent'),
@@ -234,6 +226,7 @@ function buildPropertyPayload(formData: FormData) {
 export async function createDealAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+  assertNotPaymentRequired(workspace)
 
   const supabase = await createSupabaseServerClient()
   const dealPayload = buildDealPayload(formData)
@@ -370,6 +363,7 @@ export async function quickUpdateDealAssumptionsAction(formData: FormData) {
     'closing_costs',
     'selling_costs_percent',
     'holding_costs_monthly',
+    'flip_holding_months',
     'mao_percentage',
     'desired_wholesale_fee',
     'refinance_ltv_percent',
@@ -435,8 +429,9 @@ export async function createCalculationSnapshotAction(formData: FormData) {
     redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
   }
 
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
-  const summary = calculateDealUnderwriting(deal as any, property as any)
+  const dealRow = deal as Row
+  const property = firstRow(dealRow.properties)
+  const summary = calculateDealUnderwriting(dealRow, property)
   const snapshot = buildCalculationSnapshotPayload(summary)
 
   const { error: snapshotError } = await supabase.from('deal_calculation_snapshots').insert({
@@ -466,6 +461,255 @@ export async function createCalculationSnapshotAction(formData: FormData) {
   revalidatePath(`/deals/${dealId}`)
   revalidatePath(`/deals/${dealId}/analyzer`)
   redirect(redirectTo.startsWith('/deals/') ? `${redirectTo}?snapshot=saved` : `/deals/${dealId}/analyzer?snapshot=saved`)
+}
+
+/**
+ * Restores the inputs captured in a calculation snapshot back onto the deal.
+ * Snapshots stay immutable — this copies their stored assumptions/results
+ * into the live deal fields and lets the engine recalculate from there.
+ */
+export async function restoreCalculationSnapshotAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  const snapshotId = String(formData.get('snapshot_id') || '').trim()
+  if (!dealId || !snapshotId) redirect('/deals?error=Missing deal or snapshot id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const supabase = await createSupabaseServerClient()
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from('deal_calculation_snapshots')
+    .select('id, snapshot_name, assumptions, results')
+    .eq('id', snapshotId)
+    .eq('deal_id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+  if (snapshotError || !snapshot) {
+    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(snapshotError?.message || 'Snapshot not found')}`)
+  }
+
+  const snapshotRow = snapshot as Row
+  const assumptions = firstRow(snapshotRow.assumptions) || {}
+  const results = firstRow(snapshotRow.results) || {}
+  const scenarios = firstRow(results.scenarios) || {}
+  const mortgage = firstRow(assumptions.mortgage) || {}
+  const operating = firstRow(assumptions.operating) || {}
+  const capRate = firstRow(assumptions.capRate) || {}
+  const dscr = firstRow(assumptions.dscr) || {}
+  const wholesale = firstRow(assumptions.wholesale) || {}
+  const flip = firstRow(assumptions.flip) || {}
+  const brrrr = firstRow(assumptions.brrrr) || {}
+  const projection = firstRow(assumptions.projection) || {}
+
+  const numberOrNull = (value: unknown) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+  const scenarioRent = (key: string) => numberOrNull(firstRow((scenarios as Row)[key])?.monthlyRent)
+
+  const update: Record<string, unknown> = {
+    purchase_price: numberOrNull(results.purchasePrice),
+    arv: numberOrNull(results.arv),
+    rehab_estimate: numberOrNull(results.rehabEstimate),
+    current_rent: scenarioRent('current'),
+    market_rent: scenarioRent('market'),
+    section8_rent: scenarioRent('section8'),
+    target_rent: scenarioRent('target'),
+    vacancy_percent: numberOrNull(operating.vacancyPercent),
+    management_percent: numberOrNull(operating.managementPercent),
+    interest_rate_percent: numberOrNull(mortgage.annualInterestRatePercent),
+    loan_term_months: numberOrNull(mortgage.monthlyPayments),
+    dscr_min_threshold: numberOrNull(dscr.minimumThreshold),
+    cap_rate_basis: ['purchase_price', 'arv', 'custom_value'].includes(String(capRate.basis)) ? capRate.basis : 'purchase_price',
+    mao_percentage: numberOrNull(wholesale.maoPercentage),
+    desired_wholesale_fee: numberOrNull(wholesale.desiredWholesaleFee),
+    selling_costs_percent: numberOrNull(flip.sellingCostsPercent),
+    holding_costs_monthly: numberOrNull(flip.holdingCostsMonthly),
+    flip_holding_months: numberOrNull(flip.holdingMonths),
+    refinance_ltv_percent: numberOrNull(brrrr.refinanceLtvPercent),
+    rent_growth_percent: numberOrNull(projection.rentGrowthPercent),
+    expense_growth_percent: numberOrNull(projection.expenseGrowthPercent),
+    exit_cap_rate_percent: numberOrNull(projection.exitCapRatePercent),
+  }
+  // Never wipe fields the snapshot has no value for.
+  for (const key of Object.keys(update)) {
+    if (update[key] === null || update[key] === undefined) delete update[key]
+  }
+
+  const { error: updateError } = await supabase
+    .from('deals')
+    .update(update)
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+  if (updateError) {
+    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(updateError.message)}`)
+  }
+
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization.id,
+    actor_id: workspace.user.id,
+    event_type: 'deal.calculation_snapshot.restored',
+    entity_type: 'deal',
+    entity_id: dealId,
+    metadata: { snapshot_id: snapshotId, snapshot_name: snapshotRow.snapshot_name, restored_fields: Object.keys(update) },
+  })
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/deals/${dealId}/analyzer`)
+  redirect(`/deals/${dealId}/analyzer?notice=${encodeURIComponent(`Snapshot "${snapshotRow.snapshot_name || 'Underwriting snapshot'}" restored onto the deal.`)}`)
+}
+
+export async function duplicateDealAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+  assertNotPaymentRequired(workspace)
+
+  const supabase = await createSupabaseServerClient()
+  const { data: sourceDeal, error: readError } = await supabase
+    .from('deals')
+    .select('*, properties(*)')
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+
+  if (readError || !sourceDeal) {
+    redirect(`/deals?error=${encodeURIComponent(readError?.message || 'Deal not found')}`)
+  }
+
+  const sourceRow = sourceDeal as Row
+  const sourceProperty = firstRow(sourceRow.properties)
+
+  const { data: newDeal, error: insertError } = await supabase
+    .from('deals')
+    .insert(duplicateDealPayload(sourceRow, { organizationId: workspace.organization.id, userId: workspace.user.id }))
+    .select('id')
+    .single()
+
+  if (insertError || !newDeal) {
+    redirect(`/deals/${dealId}?error=${encodeURIComponent(insertError?.message || 'Could not duplicate deal')}`)
+  }
+
+  if (sourceProperty) {
+    const { error: propertyError } = await supabase
+      .from('properties')
+      .insert(duplicatePropertyPayload(sourceProperty, { organizationId: workspace.organization.id, dealId: newDeal.id }))
+    if (propertyError) {
+      redirect(`/deals/${newDeal.id}/edit?error=${encodeURIComponent(propertyError.message)}`)
+    }
+  }
+
+  await recordAuditEvent({
+    organizationId: workspace.organization.id,
+    actorId: workspace.user.id,
+    eventType: 'deal.duplicated',
+    entityType: 'deal',
+    entityId: newDeal.id,
+    metadata: { source_deal_id: dealId, title: sourceRow.title },
+  })
+
+  revalidatePath('/deals')
+  redirect(`/deals/${newDeal.id}?saved=duplicated`)
+}
+
+export async function archiveDealAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  if (!dealId) redirect('/deals?error=Missing deal id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const supabase = await createSupabaseServerClient()
+  const { data: deal, error: readError } = await supabase
+    .from('deals')
+    .select('id, title, status')
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+
+  if (readError || !deal) redirect(`/deals?error=${encodeURIComponent(readError?.message || 'Deal not found')}`)
+
+  const { error } = await supabase
+    .from('deals')
+    .update({ status: ARCHIVED_DEAL_STATUS })
+    .eq('id', dealId)
+    .eq('organization_id', workspace.organization.id)
+
+  if (error) redirect(`/deals/${dealId}?error=${encodeURIComponent(error.message)}`)
+
+  await recordAuditEvent({
+    organizationId: workspace.organization.id,
+    actorId: workspace.user.id,
+    eventType: 'deal.archived',
+    entityType: 'deal',
+    entityId: dealId,
+    metadata: { title: (deal as Row).title, previous_status: (deal as Row).status, archived_status: ARCHIVED_DEAL_STATUS },
+  })
+
+  revalidatePath('/deals')
+  revalidatePath(`/deals/${dealId}`)
+  redirect(`/deals/${dealId}?saved=archived`)
+}
+
+export async function deleteDealFileAction(formData: FormData) {
+  const dealId = String(formData.get('deal_id') || '').trim()
+  const fileId = String(formData.get('file_id') || '').trim()
+  const requestedRedirect = String(formData.get('redirect_to') || '').trim()
+  const redirectTo = requestedRedirect.startsWith('/deals/') ? requestedRedirect : `/deals/${dealId}`
+  if (!dealId || !fileId) redirect('/deals?error=Missing deal or file id')
+
+  const workspace = await getCurrentWorkspace()
+  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace organization')
+
+  const supabase = await createSupabaseServerClient()
+  const { data: file, error: readError } = await supabase
+    .from('deal_files')
+    .select('id, deal_id, organization_id, uploaded_by, storage_bucket, storage_path, file_name')
+    .eq('id', fileId)
+    .eq('deal_id', dealId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+
+  if (readError || !file) {
+    redirect(`${redirectTo}?error=${encodeURIComponent(readError?.message || 'File not found')}`)
+  }
+
+  const fileRow = file as Row
+  const isUploader = fileRow.uploaded_by === workspace.user.id
+  if (!isUploader && !hasOrganizationRole(workspace, MANAGEMENT_ROLES)) {
+    redirect(`${redirectTo}?error=${encodeURIComponent('Only the uploader or an org owner/admin can delete this file.')}`)
+  }
+
+  const admin = createSupabaseAdminClient()
+  const bucket = String(fileRow.storage_bucket || DEAL_FILE_BUCKET)
+  const { error: storageError } = await admin.storage.from(bucket).remove([String(fileRow.storage_path)])
+  if (storageError) {
+    redirect(`${redirectTo}?error=${encodeURIComponent(storageError.message)}`)
+  }
+
+  const { error: deleteError } = await admin
+    .from('deal_files')
+    .delete()
+    .eq('id', fileId)
+    .eq('organization_id', workspace.organization.id)
+  if (deleteError) {
+    redirect(`${redirectTo}?error=${encodeURIComponent(deleteError.message)}`)
+  }
+
+  await recordAuditEvent({
+    organizationId: workspace.organization.id,
+    actorId: workspace.user.id,
+    eventType: 'deal_file.deleted',
+    entityType: 'deal_file',
+    entityId: fileId,
+    metadata: { deal_id: dealId, file_name: fileRow.file_name, storage_path: fileRow.storage_path },
+  })
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/deals/${dealId}/edit`)
+  redirect(`${redirectTo}?saved=file_deleted`)
 }
 
 export async function deleteDealAction(formData: FormData) {
@@ -499,7 +743,7 @@ export async function deleteDealAction(formData: FormData) {
     event_type: 'deal.deleted',
     entity_type: 'deal',
     entity_id: dealId,
-    metadata: { title: (deal as any).title },
+    metadata: { title: (deal as Row).title },
   })
 
   revalidatePath('/deals')

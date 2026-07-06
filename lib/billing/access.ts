@@ -1,7 +1,8 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isCurrentUserPlatformAdmin } from '@/lib/auth/admin'
+import { asRow, firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
 import { normalizeAccountType, type AccountType } from '@/lib/product/accountTypes'
-import { ALL_FEATURES, CORE_FEATURES, FREE_FEATURES, FREE_LIMITS, TRIAL_LIMITS, accountTypeDefaultFeatures, mergeFeatures, type FeatureMap, type LimitMap } from '@/lib/billing/features'
+import { ALL_FEATURES, CORE_FEATURES, FREE_FEATURES, FREE_LIMITS, TRIAL_LIMITS, accountTypeDefaultFeatures, mergeFeatures, mergeLimits, type FeatureMap, type LimitMap } from '@/lib/billing/features'
 
 export type BillingPlan = {
   id: string
@@ -75,17 +76,17 @@ function parseObject<T extends Record<string, unknown>>(value: unknown, fallback
   return value as T
 }
 
-function normalizePlan(rawPlan: any): BillingPlan | null {
+function normalizePlan(rawPlan: Row | null): BillingPlan | null {
   if (!rawPlan) return null
   return {
-    id: rawPlan.id,
-    code: rawPlan.code,
-    name: rawPlan.name,
-    description: rawPlan.description,
-    monthly_price_cents: rawPlan.monthly_price_cents,
-    annual_price_cents: rawPlan.annual_price_cents,
-    currency: rawPlan.currency || 'usd',
-    trial_days: Number(rawPlan.trial_days || 0),
+    id: String(rawPlan.id),
+    code: String(rawPlan.code || ''),
+    name: String(rawPlan.name || ''),
+    description: rowString(rawPlan.description),
+    monthly_price_cents: rowNumber(rawPlan.monthly_price_cents),
+    annual_price_cents: rowNumber(rawPlan.annual_price_cents),
+    currency: rowString(rawPlan.currency) || 'usd',
+    trial_days: rowNumber(rawPlan.trial_days) || 0,
     is_public: Boolean(rawPlan.is_public),
     is_active: Boolean(rawPlan.is_active),
     features: parseObject<FeatureMap>(rawPlan.features, {}),
@@ -104,24 +105,24 @@ function getRestrictionReason(accessSource: AccessSource, status: string, hasOrg
   return null
 }
 
-function normalizeSubscription(row: any, plan: BillingPlan | null): OrganizationSubscription | null {
+function normalizeSubscription(row: Row | null, plan: BillingPlan | null): OrganizationSubscription | null {
   if (!row) return null
   return {
-    id: row.id,
-    organization_id: row.organization_id,
-    plan_id: row.plan_id,
-    status: row.status,
-    trial_start_at: row.trial_start_at,
-    trial_end_at: row.trial_end_at,
-    current_period_start: row.current_period_start,
-    current_period_end: row.current_period_end,
-    trial_source: row.trial_source,
-    stripe_customer_id: row.stripe_customer_id || null,
-    stripe_subscription_id: row.stripe_subscription_id || null,
-    stripe_price_id: row.stripe_price_id || null,
-    stripe_interval: row.stripe_interval || null,
-    stripe_cancel_at_period_end: row.stripe_cancel_at_period_end ?? null,
-    notes: row.notes,
+    id: String(row.id),
+    organization_id: String(row.organization_id),
+    plan_id: rowString(row.plan_id),
+    status: rowString(row.status) || 'trialing',
+    trial_start_at: rowString(row.trial_start_at),
+    trial_end_at: rowString(row.trial_end_at),
+    current_period_start: rowString(row.current_period_start),
+    current_period_end: rowString(row.current_period_end),
+    trial_source: rowString(row.trial_source),
+    stripe_customer_id: rowString(row.stripe_customer_id),
+    stripe_subscription_id: rowString(row.stripe_subscription_id),
+    stripe_price_id: rowString(row.stripe_price_id),
+    stripe_interval: rowString(row.stripe_interval),
+    stripe_cancel_at_period_end: typeof row.stripe_cancel_at_period_end === 'boolean' ? row.stripe_cancel_at_period_end : null,
+    notes: rowString(row.notes),
     features_override: parseObject<FeatureMap>(row.features_override, {}),
     limits_override: parseObject<Partial<LimitMap>>(row.limits_override, {}),
     plan,
@@ -135,7 +136,6 @@ export async function getWorkspaceAccess(params: {
 }): Promise<WorkspaceAccess> {
   const accountType = normalizeAccountType(params.accountType)
   const isPlatformAdmin = await isCurrentUserPlatformAdmin()
-  const defaultFeatures = mergeFeatures(CORE_FEATURES, accountTypeDefaultFeatures[accountType])
   const fullLimits = { unlimited: null, ...TRIAL_LIMITS }
 
   if (!params.organizationId) {
@@ -159,7 +159,7 @@ export async function getWorkspaceAccess(params: {
   }
 
   const supabase = await createSupabaseServerClient()
-  const [{ data }, overrideResult] = await Promise.all([
+  const [{ data }, overrideResult, memberOverrideResult] = await Promise.all([
     supabase
       .from('organization_subscriptions')
       .select('id, organization_id, plan_id, status, trial_start_at, trial_end_at, current_period_start, current_period_end, trial_source, stripe_customer_id, stripe_subscription_id, stripe_price_id, stripe_interval, stripe_cancel_at_period_end, notes, features_override, limits_override, billing_plans(id, code, name, description, monthly_price_cents, annual_price_cents, currency, trial_days, is_public, is_active, features, limits)')
@@ -178,75 +178,158 @@ export async function getWorkspaceAccess(params: {
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    params.userId
+      ? supabase
+          .from('member_access_overrides')
+          .select('id, user_id, organization_id, status, expires_at, features_override, limits_override')
+          .eq('user_id', params.userId)
+          .eq('organization_id', params.organizationId)
+          .eq('status', 'full_access')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ])
 
-  const row = data as any
-  const rawPlan = Array.isArray(row?.billing_plans) ? row.billing_plans[0] : row?.billing_plans
+  const row = asRow(data)
+  const rawPlan = firstRow(row?.billing_plans)
   const plan = normalizePlan(rawPlan)
   const subscription = normalizeSubscription(row, plan)
-  const overrideRow = overrideResult.data as any
+  const overrideRow = asRow(overrideResult.data)
   const userOverride: UserAccessOverride | null = overrideRow
     ? {
-        id: overrideRow.id,
-        user_id: overrideRow.user_id,
-        organization_id: overrideRow.organization_id,
-        status: overrideRow.status,
-        reason: overrideRow.reason,
-        expires_at: overrideRow.expires_at,
+        id: String(overrideRow.id),
+        user_id: String(overrideRow.user_id),
+        organization_id: rowString(overrideRow.organization_id),
+        status: rowString(overrideRow.status) || 'active',
+        reason: rowString(overrideRow.reason),
+        expires_at: rowString(overrideRow.expires_at),
         features_override: parseObject<FeatureMap>(overrideRow.features_override, {}),
         limits_override: parseObject<Partial<LimitMap>>(overrideRow.limits_override, {}),
       }
     : null
 
-  const status = subscription?.status || 'trialing'
-  const trialEndsAt = subscription?.trial_end_at || null
-  const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > Date.now())
-  const isOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > Date.now()))
-  const isFreePlan = Boolean(plan && (plan.code === 'free' || (Number(plan.monthly_price_cents || 0) <= 0 && Number(plan.annual_price_cents || 0) <= 0 && status === 'active')))
-  const isSubscriptionActive = ['active', 'paid', 'comped', 'manually_granted'].includes(status) && !isFreePlan
+  // Per-organization-member full-access override granted from /admin/access.
+  // Complements user_access_overrides (per-user, optionally global) with the
+  // same effect: full features/limits while active and unexpired.
+  const memberOverrideRow = asRow(memberOverrideResult.data)
+  const memberOverride: UserAccessOverride | null = memberOverrideRow
+    ? {
+        id: String(memberOverrideRow.id),
+        user_id: String(memberOverrideRow.user_id),
+        organization_id: rowString(memberOverrideRow.organization_id),
+        status: rowString(memberOverrideRow.status) || 'full_access',
+        reason: 'Member access override granted by platform admin.',
+        expires_at: rowString(memberOverrideRow.expires_at),
+        features_override: parseObject<FeatureMap>(memberOverrideRow.features_override, {}),
+        limits_override: parseObject<Partial<LimitMap>>(memberOverrideRow.limits_override, {}),
+      }
+    : null
 
-  let accessSource: AccessSource = 'free'
-  let features: FeatureMap = isFreePlan ? mergeFeatures(FREE_FEATURES, plan?.features, subscription?.features_override) : FREE_FEATURES
-  let limits: LimitMap = isFreePlan ? { ...FREE_LIMITS, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) } : FREE_LIMITS
-
-  if (isPlatformAdmin) {
-    accessSource = 'platform_admin'
-    features = ALL_FEATURES
-    limits = fullLimits
-  } else if (isOverrideActive) {
-    accessSource = 'user_override'
-    features = mergeFeatures(defaultFeatures, plan?.features, userOverride?.features_override)
-    limits = { ...fullLimits, ...(plan?.limits || {}), ...(userOverride?.limits_override || {}) }
-  } else if (isSubscriptionActive) {
-    accessSource = 'subscription'
-    features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
-    limits = { ...fullLimits, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) }
-  } else if (isTrialActive) {
-    accessSource = 'trial'
-    features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
-    limits = { ...fullLimits, ...(plan?.limits || {}), ...(subscription?.limits_override || {}) }
-  } else if (['past_due', 'unpaid', 'incomplete'].includes(status)) {
-    accessSource = 'payment_required'
-  }
-
-  const isPaymentRequired = accessSource === 'payment_required'
-  const restrictionReason = getRestrictionReason(accessSource, status, true)
+  const resolution = resolveAccessState({
+    isPlatformAdmin,
+    accountType,
+    plan,
+    subscription,
+    userOverride,
+    memberOverride,
+  })
 
   return {
     accountType,
     isPlatformAdmin,
     subscription,
     plan,
-    userOverride,
+    userOverride: resolution.activeOverride || userOverride,
+    accessSource: resolution.accessSource,
+    status: resolution.status,
+    trialEndsAt: resolution.trialEndsAt,
+    isTrialActive: resolution.isTrialActive,
+    isFreeAccess: resolution.accessSource === 'free',
+    isPaymentRequired: resolution.isPaymentRequired,
+    requiresPayment: resolution.isPaymentRequired,
+    restrictionReason: getRestrictionReason(resolution.accessSource, resolution.status, true),
+    features: resolution.features,
+    limits: resolution.limits,
+  }
+}
+
+export type AccessResolutionInput = {
+  isPlatformAdmin: boolean
+  accountType: AccountType
+  plan: BillingPlan | null
+  subscription: OrganizationSubscription | null
+  userOverride: UserAccessOverride | null
+  memberOverride: UserAccessOverride | null
+  /** Injectable clock for tests; defaults to Date.now(). */
+  now?: number
+}
+
+export type AccessResolution = {
+  accessSource: AccessSource
+  status: string
+  trialEndsAt: string | null
+  isTrialActive: boolean
+  isPaymentRequired: boolean
+  features: FeatureMap
+  limits: LimitMap
+  activeOverride: UserAccessOverride | null
+}
+
+/**
+ * Pure access resolution — the single source of truth for which access
+ * source wins and which features/limits apply. Order of precedence:
+ * platform admin > active override (user, then member) > paid subscription >
+ * active trial > payment-required statuses > free tier.
+ */
+export function resolveAccessState(input: AccessResolutionInput): AccessResolution {
+  const now = input.now ?? Date.now()
+  const { plan, subscription, userOverride, memberOverride } = input
+  const defaultFeatures = mergeFeatures(CORE_FEATURES, accountTypeDefaultFeatures[input.accountType])
+  const fullLimits: LimitMap = { unlimited: null, ...TRIAL_LIMITS }
+
+  const status = subscription?.status || 'trialing'
+  const trialEndsAt = subscription?.trial_end_at || null
+  const isTrialActive = Boolean(status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > now)
+  const isUserOverrideActive = Boolean(userOverride && (!userOverride.expires_at || new Date(userOverride.expires_at).getTime() > now))
+  const isMemberOverrideActive = Boolean(memberOverride && (!memberOverride.expires_at || new Date(memberOverride.expires_at).getTime() > now))
+  const activeOverride = isUserOverrideActive ? userOverride : isMemberOverrideActive ? memberOverride : null
+  const isFreePlan = Boolean(plan && (plan.code === 'free' || (Number(plan.monthly_price_cents || 0) <= 0 && Number(plan.annual_price_cents || 0) <= 0 && status === 'active')))
+  // Valid DB statuses per organization_subscriptions CHECK constraint (033).
+  const isSubscriptionActive = ['active', 'comped', 'manually_granted'].includes(status) && !isFreePlan
+
+  let accessSource: AccessSource = 'free'
+  let features: FeatureMap = isFreePlan ? mergeFeatures(FREE_FEATURES, plan?.features, subscription?.features_override) : FREE_FEATURES
+  let limits: LimitMap = isFreePlan ? mergeLimits(FREE_LIMITS, plan?.limits, subscription?.limits_override) : FREE_LIMITS
+
+  if (input.isPlatformAdmin) {
+    accessSource = 'platform_admin'
+    features = ALL_FEATURES
+    limits = fullLimits
+  } else if (activeOverride) {
+    accessSource = 'user_override'
+    features = mergeFeatures(defaultFeatures, plan?.features, activeOverride.features_override)
+    limits = mergeLimits(fullLimits, plan?.limits, activeOverride.limits_override)
+  } else if (isSubscriptionActive) {
+    accessSource = 'subscription'
+    features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
+    limits = mergeLimits(fullLimits, plan?.limits, subscription?.limits_override)
+  } else if (isTrialActive) {
+    accessSource = 'trial'
+    features = mergeFeatures(defaultFeatures, plan?.features, subscription?.features_override)
+    limits = mergeLimits(fullLimits, plan?.limits, subscription?.limits_override)
+  } else if (['past_due', 'unpaid', 'incomplete'].includes(status)) {
+    accessSource = 'payment_required'
+  }
+
+  return {
     accessSource,
     status,
     trialEndsAt,
     isTrialActive,
-    isFreeAccess: accessSource === 'free',
-    isPaymentRequired,
-    requiresPayment: isPaymentRequired,
-    restrictionReason,
+    isPaymentRequired: accessSource === 'payment_required',
     features,
     limits,
+    activeOverride,
   }
 }

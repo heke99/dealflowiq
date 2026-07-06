@@ -13,10 +13,6 @@ function toMessage(value: string) {
   return encodeURIComponent(value)
 }
 
-function normalizeCode(value: FormDataEntryValue | null) {
-  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-}
-
 function getBaseUrl() {
   const explicit = process.env.NEXT_PUBLIC_APP_URL
   if (explicit) return explicit.replace(/\/$/, '')
@@ -61,14 +57,30 @@ export async function createCommunityTeamAction(formData: FormData) {
   redirect('/community?message=Team created')
 }
 
+const INVITE_CREATION_LIMIT_PER_DAY = 20
+
 export async function createCommunityInviteAction(formData: FormData) {
   const workspace = await requireCommunityAdmin()
   const supabase = await createSupabaseServerClient()
 
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { count: recentInvites } = await supabase
+    .from('community_invites')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', workspace.organization!.id)
+    .gte('created_at', dayAgo)
+  if ((recentInvites || 0) >= INVITE_CREATION_LIMIT_PER_DAY) {
+    redirect(`/community?error=${toMessage(`Invite limit reached: your community can create at most ${INVITE_CREATION_LIMIT_PER_DAY} invites per 24 hours. Try again later.`)}`)
+  }
+
   const email = String(formData.get('email') || '').trim().toLowerCase()
   const fullName = String(formData.get('full_name') || '').trim()
   const teamId = String(formData.get('team_id') || '').trim() || null
-  const roleValue = String(formData.get('role') || 'member') as InviteRole
+  const VALID_INVITE_ROLES: InviteRole[] = ['member', 'viewer', 'buyer', 'acquisition_manager', 'disposition_manager', 'admin']
+  const rawRole = String(formData.get('role') || 'member')
+  // Validate against the allowed set — 'owner' is a valid enum value but must
+  // never be grantable through an invite.
+  const roleValue: InviteRole = (VALID_INVITE_ROLES as string[]).includes(rawRole) ? (rawRole as InviteRole) : 'member'
   const maxUses = Math.max(1, Math.min(500, Number(formData.get('max_uses') || 1)))
   const sendEmail = String(formData.get('send_email') || '') === 'on'
   const expiresInDays = Math.max(1, Math.min(365, Number(formData.get('expires_in_days') || 14)))
@@ -81,7 +93,7 @@ export async function createCommunityInviteAction(formData: FormData) {
 
   const { data: team } = teamId
     ? await supabase.from('community_teams').select('id,name').eq('organization_id', workspace.organization!.id).eq('id', teamId).maybeSingle()
-    : { data: null as any }
+    : { data: null }
 
   const inviteUrl = `${getBaseUrl()}/signup?invite=${encodeURIComponent(inviteCode)}`
 

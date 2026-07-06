@@ -136,6 +136,23 @@ export function mergeFeatures(...featureMaps: Array<FeatureMap | null | undefine
   return featureMaps.reduce<FeatureMap>((acc, map) => ({ ...acc, ...(map || {}) }), {})
 }
 
+/**
+ * Merges limit maps left-to-right (later maps win). Keys whose value is
+ * `undefined` are ignored so partial overrides never poison the result;
+ * `null` is preserved because it means "unlimited".
+ */
+export function mergeLimits(...limitMaps: Array<Partial<LimitMap> | null | undefined>): LimitMap {
+  const merged: LimitMap = {}
+  for (const map of limitMaps) {
+    if (!map) continue
+    for (const [key, value] of Object.entries(map)) {
+      if (value === undefined) continue
+      if (value === null || Number.isFinite(value)) merged[key] = value
+    }
+  }
+  return merged
+}
+
 export function canUseFeature(features: FeatureMap | null | undefined, feature: FeatureKey) {
   return Boolean(features?.[feature])
 }

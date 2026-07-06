@@ -1,6 +1,8 @@
 import Link from 'next/link'
+import { AnalysisDisclaimer } from '@/components/layout/AnalysisDisclaimer'
 import { createCalculationSnapshotAction } from '@/app/deals/actions'
 import { scoreMarketListing } from '@/lib/market/scoring'
+import { asRow, rowNumber, type Row } from '@/lib/types/rows'
 import {
   calculateDealUnderwriting,
   formatMoney,
@@ -10,20 +12,12 @@ import {
   type RentScenarioResult,
 } from '@/lib/calculations/underwriting'
 
-type CalculationSnapshotRow = {
-  id: string
-  snapshot_name: string | null
-  formula_version: string | null
-  created_at: string
-  results?: any
-}
-
 type FinancialSnapshotProps = {
-  deal: Record<string, any>
-  property?: Record<string, any> | null
+  deal: Row
+  property?: Row | null
   showAnalyzerLink?: boolean
   showSnapshotTools?: boolean
-  snapshots?: CalculationSnapshotRow[]
+  snapshots?: Row[]
   message?: string | null
   error?: string | null
   showMethodology?: boolean
@@ -104,7 +98,7 @@ function ScenarioCard({ scenario }: { scenario: RentScenarioResult }) {
   )
 }
 
-function SnapshotList({ snapshots }: { snapshots: CalculationSnapshotRow[] }) {
+function SnapshotList({ snapshots }: { snapshots: Row[] }) {
   if (!snapshots.length) {
     return <p className="mt-4 rounded-xl border border-white/10 bg-slate-900/70 p-4 text-sm text-slate-400">No saved snapshots yet. Save one before making major assumption changes.</p>
   }
@@ -112,16 +106,16 @@ function SnapshotList({ snapshots }: { snapshots: CalculationSnapshotRow[] }) {
   return (
     <div className="mt-4 space-y-3">
       {snapshots.map((snapshot) => {
-        const primary = snapshot.results?.primaryScenario
+        const primary = asRow(asRow(snapshot.results)?.primaryScenario)
         return (
-          <div key={snapshot.id} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+          <div key={String(snapshot.id)} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="font-semibold text-slate-100">{snapshot.snapshot_name || 'Underwriting snapshot'}</div>
-                <div className="mt-1 text-xs text-slate-500">{new Date(snapshot.created_at).toLocaleString()} · {snapshot.formula_version || 'formula version saved'}</div>
+                <div className="font-semibold text-slate-100">{String(snapshot.snapshot_name || 'Underwriting snapshot')}</div>
+                <div className="mt-1 text-xs text-slate-500">{new Date(String(snapshot.created_at)).toLocaleString()} · {String(snapshot.formula_version || 'formula version saved')}</div>
               </div>
               <div className="text-sm text-slate-300">
-                {primary ? `${formatMoney(primary.monthlyCashflow)}/mo · DSCR ${primary.dscr ? Number(primary.dscr).toFixed(2) : '—'}` : 'Snapshot saved'}
+                {primary ? `${formatMoney(rowNumber(primary.monthlyCashflow))}/mo · DSCR ${primary.dscr ? Number(primary.dscr).toFixed(2) : '—'}` : 'Snapshot saved'}
               </div>
             </div>
           </div>
@@ -165,7 +159,7 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
         <div className="flex flex-wrap gap-3">
           {showSnapshotTools ? (
             <form action={createCalculationSnapshotAction} className="flex flex-wrap gap-2">
-              <input type="hidden" name="deal_id" value={deal.id} />
+              <input type="hidden" name="deal_id" value={String(deal.id)} />
               <input type="hidden" name="redirect_to" value={`/deals/${deal.id}/analyzer`} />
               <input name="snapshot_name" placeholder="Snapshot name" className="w-44 rounded-xl border border-white/10 bg-slate-900/80 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
               <button className="rounded-xl bg-emerald-300 px-5 py-3 text-center text-sm font-semibold text-slate-950 transition hover:bg-emerald-200">Save Snapshot</button>
@@ -295,6 +289,8 @@ export function FinancialSnapshot({ deal, property, showAnalyzerLink = true, sho
           </div>
         </div>
       </div>
+
+      <AnalysisDisclaimer />
     </section>
   )
 }

@@ -4,17 +4,16 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { featureLabels } from '@/lib/billing/features'
+import { rowString, type Row } from '@/lib/types/rows'
 import { openBillingPortalAction, startCheckoutAction } from './actions'
 
 type BillingSettingsPageProps = {
   searchParams?: Promise<{ error?: string; checkout?: string }> | { error?: string; checkout?: string }
 }
 
-type Row = Record<string, any>
-
-function formatMoney(cents?: number | null, currency = 'usd') {
+function formatMoney(cents?: unknown, currency: unknown = 'usd') {
   if (!cents) return '$0'
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase(), minimumFractionDigits: Number(cents) % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(Number(cents) / 100)
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: String(currency).toUpperCase(), minimumFractionDigits: Number(cents) % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(Number(cents) / 100)
 }
 
 function formatDate(value?: string | null) {
@@ -148,11 +147,11 @@ export default async function BillingSettingsPage({ searchParams }: BillingSetti
           </div>
           <div className="mt-6 grid gap-5 lg:grid-cols-3">
             {plans.map((billingPlan) => (
-              <div key={billingPlan.id} className={`rounded-3xl border p-5 ${billingPlan.code === plan?.code ? 'border-emerald-400/40 bg-emerald-400/10' : 'border-white/10 bg-slate-950/50'}`}>
+              <div key={String(billingPlan.id)} className={`rounded-3xl border p-5 ${billingPlan.code === plan?.code ? 'border-emerald-400/40 bg-emerald-400/10' : 'border-white/10 bg-slate-950/50'}`}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-xl font-black">{billingPlan.name}</h3>
-                    <p className="mt-2 min-h-[64px] text-sm leading-6 text-slate-400">{billingPlan.description}</p>
+                    <h3 className="text-xl font-black">{rowString(billingPlan.name)}</h3>
+                    <p className="mt-2 min-h-[64px] text-sm leading-6 text-slate-400">{rowString(billingPlan.description)}</p>
                   </div>
                   {billingPlan.code === plan?.code ? <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-100">Current</span> : null}
                 </div>
@@ -163,13 +162,13 @@ export default async function BillingSettingsPage({ searchParams }: BillingSetti
                 </ul>
                 <div className="mt-5 grid gap-2">
                   <form action={startCheckoutAction}>
-                    <input type="hidden" name="plan_id" value={billingPlan.id} />
+                    <input type="hidden" name="plan_id" value={String(billingPlan.id)} />
                     <input type="hidden" name="interval" value="month" />
                     <button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">{Number(billingPlan.monthly_price_cents || 0) > 0 ? 'Checkout monthly' : 'Activate free'}</button>
                   </form>
                   {Number(billingPlan.annual_price_cents || 0) > 0 ? (
                     <form action={startCheckoutAction}>
-                      <input type="hidden" name="plan_id" value={billingPlan.id} />
+                      <input type="hidden" name="plan_id" value={String(billingPlan.id)} />
                       <input type="hidden" name="interval" value="year" />
                       <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-black text-slate-100 hover:bg-white/10">Checkout yearly</button>
                     </form>

@@ -7,14 +7,8 @@ import { canUseFeature } from '@/lib/billing/features'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createInAppNotification } from '@/lib/notifications'
 import { recordMarketListingActivity } from '@/lib/market/activity'
-
-type Row = Record<string, any>
-
-type MatchResult = {
-  matchScore: number
-  reasons: string[]
-  risks: string[]
-}
+import { asRows, rowString, type Row } from '@/lib/types/rows'
+import { BUYER_MATCH_PERSIST_SCORE, BUYER_MATCH_REVIEW_SCORE, scoreBuyerListingMatch } from '@/lib/matching/buyerListingMatch'
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -63,6 +57,11 @@ function proofOfFundsValue(formData: FormData) {
   return ['unknown', 'requested', 'received', 'verified', 'expired'].includes(value) ? value : 'unknown'
 }
 
+function interactionTypeValue(formData: FormData) {
+  const value = String(formData.get('interaction_type') || 'note')
+  return ['note', 'call', 'email', 'sms', 'meeting', 'deal_sent', 'offer', 'follow_up'].includes(value) ? value : 'note'
+}
+
 function requireBuyerAccess(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
   if (workspace.access.isPlatformAdmin) return
   if (canUseFeature(workspace.access.features, 'buyers') || canUseFeature(workspace.access.features, 'buyer_matching')) return
@@ -103,176 +102,6 @@ function buyerPayload(formData: FormData, workspace: Awaited<ReturnType<typeof g
     notes: text(formData, 'notes'),
     tags: listValue(formData, 'tags'),
   }
-}
-
-function normalizedList(values: unknown) {
-  return Array.isArray(values) ? values.map((value) => String(value).trim().toLowerCase()).filter(Boolean) : []
-}
-
-function dollars(value: unknown) {
-  const parsed = Number(value || 0)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function capRatePercent(value: unknown) {
-  const parsed = Number(value || 0)
-  if (!Number.isFinite(parsed)) return 0
-  return parsed > 1 ? parsed / 100 : parsed
-}
-
-function strategyMatches(buyerStrategies: string[], strategyFit: string | null | undefined) {
-  if (!buyerStrategies.length) return true
-  const fit = String(strategyFit || '').toLowerCase()
-  return buyerStrategies.some((strategy) => {
-    const s = strategy.toLowerCase()
-    if (s.includes('section') && fit.includes('section')) return true
-    if (s.includes('brrrr') && fit.includes('brrrr')) return true
-    if (s.includes('flip') && fit.includes('flip')) return true
-    if (s.includes('wholesale') && fit.includes('wholesale')) return true
-    if ((s.includes('hold') || s.includes('rental')) && (fit.includes('hold') || fit.includes('rental'))) return true
-    return fit.includes(s)
-  })
-}
-
-function scoreBuyerListingMatch(buyer: Row, listing: Row, score: Row | null): MatchResult {
-  let points = 20
-  const reasons: string[] = []
-  const risks: string[] = []
-
-  const price = dollars(listing.list_price || listing.asking_price)
-  const units = Number(listing.units || 1)
-  const bedrooms = Number(listing.bedrooms || 0)
-  const bathrooms = Number(listing.bathrooms || 0)
-  const sqft = Number(listing.sqft || 0)
-  const dealScore = Number(score?.deal_score || 0)
-  const cashflow = dollars(score?.estimated_monthly_cashflow)
-  const dscr = Number(score?.estimated_dscr || 0)
-  const capRate = Number(score?.estimated_cap_rate || 0)
-  const arvSpread = dollars(listing.arv) && price ? dollars(listing.arv) - price - dollars(listing.rehab_estimate) : 0
-
-  const preferredStates = normalizedList(buyer.preferred_states)
-  const preferredCities = normalizedList(buyer.preferred_cities)
-  const preferredZips = normalizedList(buyer.preferred_zip_codes)
-  const propertyTypes = normalizedList(buyer.property_types)
-  const strategies = normalizedList(buyer.strategies)
-
-  if (preferredStates.length || preferredCities.length || preferredZips.length) {
-    const stateHit = preferredStates.includes(String(listing.state || '').toLowerCase())
-    const cityHit = preferredCities.includes(String(listing.city || '').toLowerCase())
-    const zipHit = preferredZips.includes(String(listing.zip_code || '').toLowerCase())
-    if (stateHit || cityHit || zipHit) {
-      points += zipHit ? 18 : cityHit ? 15 : 10
-      reasons.push('Location fits buyer criteria.')
-    } else {
-      points -= 20
-      risks.push('Location is outside buyer criteria.')
-    }
-  } else {
-    points += 6
-    reasons.push('Buyer has broad geography.')
-  }
-
-  if (propertyTypes.length) {
-    const listingType = String(listing.property_type || '').toLowerCase()
-    if (propertyTypes.some((type) => listingType.includes(type))) {
-      points += 12
-      reasons.push('Property type fits buyer demand.')
-    } else {
-      points -= 14
-      risks.push('Property type does not match buyer criteria.')
-    }
-  } else {
-    points += 5
-  }
-
-  if (buyer.min_budget && price && price < Number(buyer.min_budget)) {
-    points -= 8
-    risks.push('Price is below buyer minimum budget.')
-  }
-  if (buyer.max_budget && price && price > Number(buyer.max_budget)) {
-    points -= 22
-    risks.push('Price is above buyer max budget.')
-  }
-  if (price && (!buyer.max_budget || price <= Number(buyer.max_budget)) && (!buyer.min_budget || price >= Number(buyer.min_budget))) {
-    points += 15
-    reasons.push('Price fits buyer budget.')
-  }
-
-  if (buyer.min_units && units < Number(buyer.min_units)) {
-    points -= 10
-    risks.push('Too few units for this buyer.')
-  } else if (buyer.min_units) {
-    points += 6
-  }
-  if (buyer.max_units && units > Number(buyer.max_units)) {
-    points -= 10
-    risks.push('Too many units for this buyer.')
-  } else if (buyer.max_units) {
-    points += 6
-  }
-  if (buyer.min_bedrooms && bedrooms && bedrooms >= Number(buyer.min_bedrooms)) points += 4
-  if (buyer.min_bathrooms && bathrooms && bathrooms >= Number(buyer.min_bathrooms)) points += 4
-  if (buyer.min_sqft && sqft && sqft >= Number(buyer.min_sqft)) points += 4
-
-  if (strategyMatches(strategies, score?.strategy_fit)) {
-    points += strategies.length ? 10 : 4
-    reasons.push('Strategy fit aligns with buyer preference.')
-  } else if (strategies.length) {
-    points -= 10
-    risks.push('Strategy fit does not match buyer preference.')
-  }
-
-  if (buyer.min_cashflow) {
-    if (cashflow >= Number(buyer.min_cashflow)) {
-      points += 10
-      reasons.push('Projected cashflow meets buyer target.')
-    } else {
-      points -= 10
-      risks.push('Projected cashflow is below buyer target.')
-    }
-  } else if (cashflow > 0) points += 6
-
-  if (buyer.min_dscr) {
-    if (dscr >= Number(buyer.min_dscr)) {
-      points += 8
-      reasons.push('DSCR meets buyer target.')
-    } else if (dscr) {
-      points -= 8
-      risks.push('DSCR is below buyer target.')
-    }
-  } else if (dscr >= 1.2) points += 6
-
-  if (buyer.min_cap_rate) {
-    if (capRate >= capRatePercent(buyer.min_cap_rate)) {
-      points += 8
-      reasons.push('Cap rate meets buyer target.')
-    } else if (capRate) {
-      points -= 8
-      risks.push('Cap rate is below buyer target.')
-    }
-  } else if (capRate >= 0.07) points += 6
-
-  if (buyer.min_arv_spread) {
-    if (arvSpread >= Number(buyer.min_arv_spread)) {
-      points += 8
-      reasons.push('ARV spread meets buyer target.')
-    } else if (arvSpread) {
-      points -= 8
-      risks.push('ARV spread is below buyer target.')
-    }
-  }
-
-  if (dealScore >= 80) {
-    points += 10
-    reasons.push('DealFlowIQ score is Opportunity-level.')
-  } else if (dealScore > 0 && dealScore < 65) {
-    points -= 8
-    risks.push('DealFlowIQ score is below strong-opportunity range.')
-  }
-
-  const matchScore = Math.max(0, Math.min(100, Math.round(points)))
-  if (!reasons.length) reasons.push('Buyer has broad criteria and this listing has enough data to review.')
-  return { matchScore, reasons: reasons.slice(0, 8), risks: risks.slice(0, 8) }
 }
 
 export async function createBuyerAction(formData: FormData) {
@@ -318,6 +147,15 @@ export async function updateBuyerAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
   if (error) redirect(`/buyers?error=${encodeURIComponent(error.message)}`)
 
+  await supabase.from('audit_logs').insert({
+    organization_id: workspace.organization.id,
+    actor_id: workspace.user.id,
+    event_type: 'buyer.updated',
+    entity_type: 'buyer',
+    entity_id: buyerId,
+    metadata: { name: payload.name, buyer_type: payload.buyer_type, status: payload.status },
+  })
+
   revalidatePath('/buyers')
   redirect('/buyers?saved=buyer_updated')
 }
@@ -349,13 +187,22 @@ export async function createBuyerInteractionAction(formData: FormData) {
   requireBuyerAccess(workspace)
   const supabase = await createSupabaseServerClient()
 
+  const { data: buyer, error: buyerError } = await supabase
+    .from('buyers')
+    .select('id')
+    .eq('id', buyerId)
+    .eq('organization_id', workspace.organization.id)
+    .maybeSingle()
+  if (buyerError) redirect(`/buyers?error=${encodeURIComponent(buyerError.message)}`)
+  if (!buyer?.id) redirect(`/buyers?error=${encodeURIComponent('Buyer not found in this workspace.')}`)
+
   const { error } = await supabase.from('buyer_interactions').insert({
     organization_id: workspace.organization.id,
     buyer_id: buyerId,
     listing_id: text(formData, 'listing_id'),
     deal_id: text(formData, 'deal_id'),
     created_by: workspace.user.id,
-    interaction_type: text(formData, 'interaction_type') || 'note',
+    interaction_type: interactionTypeValue(formData),
     direction: text(formData, 'direction') || 'internal',
     summary,
     next_follow_up_at: text(formData, 'next_follow_up_at'),
@@ -416,13 +263,13 @@ export async function runBuyerMatchingAction(formData: FormData) {
     for (const listing of listings || []) {
       const score = scoreByListing.get(String((listing as Row).id)) || null
       const result = scoreBuyerListingMatch(buyer as Row, listing as Row, score)
-      if (result.matchScore < 55) continue
+      if (result.matchScore < BUYER_MATCH_PERSIST_SCORE) continue
       rows.push({
         organization_id: workspace.organization.id,
         buyer_id: (buyer as Row).id,
         listing_id: (listing as Row).id,
         match_score: result.matchScore,
-        status: result.matchScore >= 80 ? 'review' : 'auto_matched',
+        status: result.matchScore >= BUYER_MATCH_REVIEW_SCORE ? 'review' : 'auto_matched',
         reasons: result.reasons,
         risks: result.risks,
         matched_at: new Date().toISOString(),
@@ -430,15 +277,28 @@ export async function runBuyerMatchingAction(formData: FormData) {
     }
   }
 
-  for (const row of rows.slice(0, 1000)) {
-    const { data: existingMatch } = await supabase
+  // Snapshot stored matches before upserting so notifications only fire for new or clearly improved matches.
+  const existingByPair = new Map<string, { id: string; matchScore: number }>()
+  const existingPageSize = 1000
+  for (let page = 0; page < 10; page += 1) {
+    const { data: existingMatches, error: existingError } = await supabase
       .from('buyer_deal_matches')
-      .select('id')
-      .eq('buyer_id', row.buyer_id)
-      .eq('listing_id', row.listing_id)
-      .maybeSingle()
+      .select('id, buyer_id, listing_id, match_score')
+      .eq('organization_id', workspace.organization.id)
+      .not('listing_id', 'is', null)
+      .range(page * existingPageSize, page * existingPageSize + existingPageSize - 1)
+    if (existingError) redirect(`/buyers?error=${encodeURIComponent(existingError.message)}`)
+    const pageRows = asRows(existingMatches)
+    for (const match of pageRows) {
+      existingByPair.set(`${match.buyer_id}:${match.listing_id}`, { id: String(match.id), matchScore: Number(match.match_score || 0) })
+    }
+    if (pageRows.length < existingPageSize) break
+  }
 
-    const { error } = existingMatch?.id
+  for (const row of rows.slice(0, 1000)) {
+    const existingMatch = existingByPair.get(`${row.buyer_id}:${row.listing_id}`) || null
+
+    const { error } = existingMatch
       ? await supabase
           .from('buyer_deal_matches')
           .update({
@@ -453,7 +313,9 @@ export async function runBuyerMatchingAction(formData: FormData) {
 
     if (!error) {
       createdOrUpdated += 1
-      if (Number(row.match_score || 0) >= 80) {
+      const isNewMatch = !existingMatch
+      const improvedEnough = existingMatch ? Number(row.match_score || 0) >= existingMatch.matchScore + 5 : false
+      if (Number(row.match_score || 0) >= BUYER_MATCH_REVIEW_SCORE && (isNewMatch || improvedEnough)) {
         await createInAppNotification(supabase, {
           organizationId: workspace.organization.id,
           userId: workspace.user.id,
@@ -462,13 +324,13 @@ export async function runBuyerMatchingAction(formData: FormData) {
           title: 'Strong buyer match found',
           message: `A buyer matched a listing with ${Math.round(Number(row.match_score || 0))}/100 fit.`,
           relatedEntityType: 'market_listing',
-          relatedEntityId: row.listing_id,
+          relatedEntityId: rowString(row.listing_id),
           actionHref: `/market/${row.listing_id}`,
           metadata: { buyerId: row.buyer_id, matchScore: row.match_score },
         })
         await recordMarketListingActivity(supabase, {
           organizationId: workspace.organization.id,
-          listingId: row.listing_id,
+          listingId: String(row.listing_id),
           actorId: workspace.user.id,
           eventType: 'buyer_matched',
           title: 'Buyer matched',

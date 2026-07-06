@@ -6,6 +6,8 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { runMarketSourceNow } from '@/lib/market/importRunner'
+import { createInAppNotification } from '@/lib/notifications'
+import { asRow, asRows, firstRow, rowString } from '@/lib/types/rows'
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -194,25 +196,25 @@ export async function updateBuyBoxAction(formData: FormData) {
     .eq('buy_box_id', buyBoxId)
     .eq('organization_id', workspace.organization.id)
 
-  for (const source of linkedSources || []) {
+  for (const source of asRows(linkedSources)) {
     await supabase.from('market_sources').update({
       auto_import_enabled: schedule !== 'manual',
       schedule_frequency: schedule === 'manual' ? 'daily' : schedule,
       opportunity_score_threshold: minDealScore,
       next_run_at: schedule === 'manual' ? null : new Date().toISOString(),
       settings: {
-        ...((source as any).settings || {}),
+        ...(asRow(source.settings) || {}),
         buy_box_id: buyBoxId,
         source_urls: sourceUrls,
         opportunity_score_threshold: minDealScore,
         min_rent_confidence: minRentConfidence,
       },
-    }).eq('id', (source as any).id)
+    }).eq('id', source.id)
 
     if (sourceUrls.length) {
       await supabase.from('market_source_queue_items').upsert(sourceUrls.map((inputUrl) => ({
         organization_id: workspace.organization!.id,
-        source_id: (source as any).id,
+        source_id: source.id,
         buy_box_id: buyBoxId,
         input_url: inputUrl,
         status: 'queued',
@@ -238,14 +240,34 @@ export async function runBuyBoxNowAction(formData: FormData) {
   if (buyBoxError || !buyBox) redirect(`/buy-boxes?error=${encodeURIComponent(buyBoxError?.message || 'Buy box not found')}`)
 
   const { data: sources } = await supabase.from('market_sources').select('*').eq('organization_id', workspace.organization.id).eq('buy_box_id', buyBoxId).eq('status', 'active')
+
+  // Snapshot listings that already had a match row so post-run notifications only cover genuinely new opportunities.
+  const runStartedAt = new Date().toISOString()
+  const preRunListingIds = new Set<string>()
+  const preRunPageSize = 1000
+  for (let page = 0; page < 10; page += 1) {
+    const { data: preRunMatches } = await supabase
+      .from('market_buy_box_matches')
+      .select('listing_id')
+      .eq('organization_id', workspace.organization.id)
+      .eq('buy_box_id', buyBoxId)
+      .range(page * preRunPageSize, page * preRunPageSize + preRunPageSize - 1)
+    const pageRows = asRows(preRunMatches)
+    for (const match of pageRows) {
+      const listingId = rowString(match.listing_id)
+      if (listingId) preRunListingIds.add(listingId)
+    }
+    if (pageRows.length < preRunPageSize) break
+  }
+
   let found = 0
   let opportunities = 0
   let created = 0
   let updated = 0
   let failed = 0
 
-  for (const source of sources || []) {
-    const result = await runMarketSourceNow(source as any, { maxUrls: 10 })
+  for (const source of asRows(sources)) {
+    const result = await runMarketSourceNow(source, { maxUrls: 10 })
     found += result.found
     created += result.created
     updated += result.updated
@@ -262,6 +284,40 @@ export async function runBuyBoxNowAction(formData: FormData) {
     settings: { ...(buyBox.settings || {}), lastRunSummary: { found, created, updated, failed, opportunities, ranAt: new Date().toISOString() } },
   }).eq('id', buyBoxId)
 
+  const { data: newOpportunityMatches } = await supabase
+    .from('market_buy_box_matches')
+    .select('listing_id, match_score, deal_score, market_listings(title, address, city, state)')
+    .eq('organization_id', workspace.organization.id)
+    .eq('buy_box_id', buyBoxId)
+    .eq('matched_status', 'opportunity')
+    .gte('matched_at', runStartedAt)
+    .order('match_score', { ascending: false })
+    .limit(50)
+
+  const buyBoxName = rowString(asRow(buyBox)?.name) || 'Buy Box'
+  let notified = 0
+  for (const match of asRows(newOpportunityMatches)) {
+    if (notified >= 10) break
+    const listingId = rowString(match.listing_id)
+    if (!listingId || preRunListingIds.has(listingId)) continue
+    const listing = firstRow(match.market_listings)
+    const listingLabel = rowString(listing?.title) || rowString(listing?.address) || 'a new listing'
+    const listingArea = [rowString(listing?.city), rowString(listing?.state)].filter(Boolean).join(', ')
+    await createInAppNotification(supabase, {
+      organizationId: workspace.organization.id,
+      userId: workspace.user.id,
+      actorId: workspace.user.id,
+      type: 'buy_box_match',
+      title: `Buy Box match: ${buyBoxName}`,
+      message: `${listingLabel}${listingArea ? ` in ${listingArea}` : ''} matched as an opportunity with ${Math.round(Number(match.deal_score || 0))}/100 deal score.`,
+      relatedEntityType: 'market_listing',
+      relatedEntityId: listingId,
+      actionHref: `/market/${listingId}`,
+      metadata: { buyBoxId, matchScore: Number(match.match_score || 0), dealScore: Number(match.deal_score || 0) },
+    })
+    notified += 1
+  }
+
   revalidatePath('/buy-boxes')
   revalidatePath('/market')
   redirect(`/buy-boxes/${buyBoxId}?saved=run`)
@@ -272,6 +328,7 @@ export async function archiveBuyBoxAction(formData: FormData) {
   if (!buyBoxId) redirect('/buy-boxes?error=Missing buy box id')
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  requireBuyBoxAccess(workspace)
   const supabase = await createSupabaseServerClient()
   await supabase.from('market_buy_boxes').update({ status: 'archived' }).eq('id', buyBoxId).eq('organization_id', workspace.organization.id)
   await supabase.from('market_sources').update({ status: 'archived', auto_import_enabled: false }).eq('buy_box_id', buyBoxId).eq('organization_id', workspace.organization.id)

@@ -1,6 +1,7 @@
 import { normalizePropertyType } from '@/lib/market/scoring'
 import { getMarketSourceAdapter } from '@/lib/market/sourceAdapters'
 import { isReasonableMonthlyRent } from '@/lib/underwriting/rentIntelligence'
+import { asRow } from '@/lib/types/rows'
 
 export type MarketSourceType = 'zillow' | 'crexi' | 'loopnet' | 'redfin' | 'realtor' | 'apartments' | 'investorlift' | 'csv' | 'partner_api' | 'mls_feed' | 'manual' | 'manual_url' | 'generic' | 'other'
 
@@ -141,7 +142,7 @@ function findJsonLd(html: string) {
   const blocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
     .map((match) => match[1])
     .filter(Boolean)
-  const parsed: any[] = []
+  const parsed: unknown[] = []
   for (const block of blocks) {
     try {
       const value = JSON.parse(block.trim())
@@ -190,7 +191,7 @@ function collectImages(html: string, jsonObjects: unknown[]) {
         for (const item of value) {
           if (typeof item === 'string' && item.startsWith('http')) images.add(item)
           if (item && typeof item === 'object') {
-            const url = (item as any).url || (item as any).contentUrl
+            const url = asRow(item)?.url || asRow(item)?.contentUrl
             if (typeof url === 'string' && url.startsWith('http')) images.add(url)
           }
         }
@@ -200,7 +201,7 @@ function collectImages(html: string, jsonObjects: unknown[]) {
   return [...images].slice(0, 12)
 }
 
-function extractFromStructuredData(jsonObjects: any[]) {
+function extractFromStructuredData(jsonObjects: unknown[]) {
   const facts: Record<string, unknown> = {}
   for (const obj of jsonObjects) {
     walk(obj, (key, value) => {

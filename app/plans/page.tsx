@@ -3,6 +3,7 @@ import { CheckCircle2, Sparkles, Users, Zap } from 'lucide-react'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getCurrentUser } from '@/lib/auth/session'
 import { PublicFooter } from '@/components/layout/PublicFooter'
+import { asRow, rowString, type Row } from '@/lib/types/rows'
 
 const fallbackPlans = [
   {
@@ -31,19 +32,18 @@ const fallbackPlans = [
   },
 ]
 
-type Row = Record<string, any>
-
-function money(cents?: number | null) {
+function money(cents?: unknown) {
   if (!cents) return '$0'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: Number(cents) % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(Number(cents) / 100)
 }
 
 function featuresFor(plan: Row) {
-  const limits = plan.limits && typeof plan.limits === 'object' ? plan.limits : {}
+  const limits = asRow(plan.limits) || {}
   if (plan.code === 'free') return fallbackPlans[0].features
   if (plan.code === 'community_owner') return fallbackPlans[2].features
   if (plan.code === 'premium') return fallbackPlans[1].features
-  const features = plan.features && typeof plan.features === 'object' ? Object.entries(plan.features).filter(([, enabled]) => enabled).map(([key]) => key.replaceAll('_', ' ')) : []
+  const featuresRow = asRow(plan.features)
+  const features = featuresRow ? Object.entries(featuresRow).filter(([, enabled]) => enabled).map(([key]) => key.replaceAll('_', ' ')) : []
   const limitText = limits.max_imports_per_month ? [`${limits.max_imports_per_month} imports/month`] : []
   return [...limitText, ...features].slice(0, 6)
 }
@@ -92,11 +92,11 @@ export default async function PlansPage() {
             const highlighted = plan.code === 'premium'
             const community = plan.code === 'community_owner'
             return (
-              <div key={plan.code} className={`rounded-[2rem] border p-6 ${highlighted ? 'border-emerald-400/30 bg-emerald-400/10 shadow-2xl shadow-emerald-950/30' : 'border-white/10 bg-white/[0.035]'}`}>
+              <div key={String(plan.code)} className={`rounded-[2rem] border p-6 ${highlighted ? 'border-emerald-400/30 bg-emerald-400/10 shadow-2xl shadow-emerald-950/30' : 'border-white/10 bg-white/[0.035]'}`}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-2xl font-black">{plan.name}</h2>
-                    <p className="mt-3 min-h-[72px] text-sm leading-6 text-slate-300">{plan.description}</p>
+                    <h2 className="text-2xl font-black">{rowString(plan.name)}</h2>
+                    <p className="mt-3 min-h-[72px] text-sm leading-6 text-slate-300">{rowString(plan.description)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3 text-slate-200">{community ? <Users className="h-5 w-5" /> : highlighted ? <Zap className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}</div>
                 </div>

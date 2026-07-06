@@ -1,4 +1,4 @@
-import type { NormalizedMarketListing } from '@/lib/market/sourceConnectors'
+import { asRow } from '@/lib/types/rows'
 
 export type RentIntelligenceResult = {
   estimatedRent: number | null
@@ -24,7 +24,7 @@ function bedroomsKey(value: unknown) {
   return beds as 0 | 1 | 2 | 3 | 4
 }
 
-export function buildRentConfidenceBreakdown(listing: Record<string, any>, hudRent?: number | null): RentIntelligenceResult {
+export function buildRentConfidenceBreakdown(listing: Record<string, unknown>, hudRent?: number | null): RentIntelligenceResult {
   const confidence: string[] = []
   const missing: string[] = []
   let points = 8
@@ -89,7 +89,7 @@ function estimateRuleBasedRent(params: { beds: number; sqft: number; price: numb
   return candidates.reduce((sum, value) => sum + value, 0) / candidates.length
 }
 
-export function buildDataQualityChecklist(listing: Record<string, any>, score?: Record<string, any> | null, hudSnapshot?: Record<string, any> | null) {
+export function buildDataQualityChecklist(listing: Record<string, unknown>, score?: Record<string, unknown> | null, hudSnapshot?: Record<string, unknown> | null) {
   return [
     { label: 'Address found', ok: Boolean(listing.address || listing.city) },
     { label: 'ZIP found', ok: Boolean(listing.zip_code) },
@@ -98,14 +98,14 @@ export function buildDataQualityChecklist(listing: Record<string, any>, score?: 
     { label: 'Sqft found', ok: Boolean(Number(listing.sqft || 0)) },
     { label: 'HUD rent found', ok: Boolean(hudSnapshot?.selected_fmr || listing.hud_rent) },
     { label: 'Market rent estimated', ok: Boolean(listing.market_rent || listing.estimated_rent || score?.market_rent) },
-    { label: 'Buyer match complete', ok: Boolean(Number(listing.buyer_match_count || 0) > 0 || listing.raw_payload?.buyerMatchingRunAt) },
+    { label: 'Buyer match complete', ok: Boolean(Number(listing.buyer_match_count || 0) > 0 || asRow(listing.raw_payload)?.buyerMatchingRunAt) },
     { label: 'Images imported', ok: Boolean(listing.primary_image_url || (Array.isArray(listing.image_urls) && listing.image_urls.length)) },
     { label: 'Source link saved', ok: Boolean(listing.source_url) },
     { label: 'Provider data expiry tracked', ok: Boolean(listing.source_data_expires_at) },
   ]
 }
 
-export function buildWhyThisDeal(params: { listing: Record<string, any>; score?: Record<string, any> | null; missing?: string[] }) {
+export function buildWhyThisDeal(params: { listing: Record<string, unknown>; score?: Record<string, unknown> | null; missing?: string[] }) {
   const score = params.score || {}
   const dealScore = Number(score.deal_score || 0)
   const rentConfidence = Number(score.rent_confidence_score || 0)
@@ -131,7 +131,7 @@ export function buildWhyThisDeal(params: { listing: Record<string, any>; score?:
   return 'This deal needs more review before it can be promoted to a qualified opportunity.'
 }
 
-export function selectedHudRentFromSnapshot(snapshot: Record<string, any> | null | undefined, bedrooms: unknown) {
+export function selectedHudRentFromSnapshot(snapshot: Record<string, unknown> | null | undefined, bedrooms: unknown) {
   if (!snapshot) return null
   const bed = bedroomsKey(bedrooms)
   return positive(snapshot.selected_fmr || snapshot[`fmr_${bed}br`] || snapshot.fmr_4br || snapshot.fmr_3br || snapshot.fmr_2br || snapshot.fmr_1br || snapshot.fmr_0br) || null

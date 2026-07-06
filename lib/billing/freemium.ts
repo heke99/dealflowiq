@@ -1,8 +1,11 @@
 import type { WorkspaceAccess } from '@/lib/billing/access'
 import type { createSupabaseServerClient } from '@/lib/supabase/server'
+import { asRow, rowString } from '@/lib/types/rows'
 
 export const FREE_OPPORTUNITY_LIST_LIMIT = 2
 export const FREE_OPPORTUNITY_DETAIL_COOLDOWN_HOURS = 48
+/** One outbound listing message per this window for free users. */
+export const FREE_MESSAGE_COOLDOWN_HOURS = 48
 
 export function hasFullOpportunityAccess(access: WorkspaceAccess) {
   return ['platform_admin', 'user_override', 'subscription', 'trial'].includes(access.accessSource)
@@ -27,7 +30,7 @@ export async function getNextFreeOpportunityDetailUnlock(params: {
     .order('viewed_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-  const lastViewedAt = (data as any)?.viewed_at || null
+  const lastViewedAt = rowString(asRow(data)?.viewed_at)
   if (!lastViewedAt) return { allowed: true, nextUnlockAt: null, lastViewedAt }
   const next = new Date(new Date(lastViewedAt).getTime() + cooldownHours * 60 * 60 * 1000)
   return { allowed: next.getTime() <= Date.now(), nextUnlockAt: next.toISOString(), lastViewedAt }

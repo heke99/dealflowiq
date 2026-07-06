@@ -10,7 +10,7 @@ export async function recordImportAuditEvent(supabase: SupabaseLike, params: {
   listingId?: string | null
   eventType: string
   message: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }) {
   await supabase.from('market_import_audit_events').insert({
     organization_id: params.organizationId,

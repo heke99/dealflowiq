@@ -4,10 +4,12 @@ import { determineDealReviewStatus } from '@/lib/market/review'
 import { classifyOpportunity } from '@/lib/market/opportunityRules'
 import { recordMarketListingActivity } from '@/lib/market/activity'
 import { createInAppNotification } from '@/lib/notifications'
+import type { createSupabaseAdminClient } from '@/lib/supabase/admin'
+import type { createSupabaseServerClient } from '@/lib/supabase/server'
 
-type SupabaseLike = any
+type SupabaseLike = Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>
 
-type ListingLike = Record<string, any>
+type ListingLike = Record<string, unknown>
 
 function n(value: unknown) {
   const parsed = Number(String(value ?? '').replace(/[$,\s]/g, ''))
@@ -23,7 +25,7 @@ function bedroomCount(listing: ListingLike) {
   return Math.max(0, Math.min(4, beds || 2))
 }
 
-export function buildDataQualityChecklist(listing: ListingLike, score?: Record<string, any> | null) {
+export function buildDataQualityChecklist(listing: ListingLike, score?: Record<string, unknown> | null) {
   return [
     { key: 'address', label: 'Address found', ok: Boolean(listing.address || listing.city) },
     { key: 'zip', label: 'ZIP found', ok: Boolean(listing.zip_code) },
@@ -38,7 +40,7 @@ export function buildDataQualityChecklist(listing: ListingLike, score?: Record<s
   ]
 }
 
-export function buildConfidenceBreakdown(listing: ListingLike, score?: Record<string, any> | null) {
+export function buildConfidenceBreakdown(listing: ListingLike, score?: Record<string, unknown> | null) {
   const positives: string[] = []
   const negatives: string[] = []
   if (listing.zip_code) positives.push('ZIP matched')
@@ -134,7 +136,7 @@ export async function applyMarketRentEstimateToListing(params: { supabase: Supab
 
   await recordMarketListingActivity(params.supabase, {
     organizationId: params.organizationId,
-    listingId: params.listing.id,
+    listingId: String(params.listing.id),
     actorId: params.userId || null,
     eventType: 'rent_analysis_completed',
     title: 'Market rent estimated',
@@ -151,7 +153,7 @@ export async function applyMarketRentEstimateToListing(params: { supabase: Supab
       title: 'Market rent needs review',
       message: `${params.listing.title || 'A listing'} has low market rent confidence.`,
       relatedEntityType: 'market_listing',
-      relatedEntityId: params.listing.id,
+      relatedEntityId: String(params.listing.id),
       actionHref: `/market/${params.listing.id}`,
       metadata: { confidence: rent.confidence, missing: rent.missing },
     })
@@ -184,7 +186,7 @@ export async function applyHudFmrToListing(params: { supabase: SupabaseLike; org
     lookup_status: selected ? 'completed' : 'missing_selected_rent',
     confidence_score: selected ? 80 : 45,
     source_url: hud.sourceUrl,
-    raw_payload: hud.raw as any,
+    raw_payload: hud.raw,
   })
 
   const { data: updated } = selected
@@ -199,7 +201,7 @@ export async function applyHudFmrToListing(params: { supabase: SupabaseLike; org
 
   await recordMarketListingActivity(params.supabase, {
     organizationId: params.organizationId,
-    listingId: params.listing.id,
+    listingId: String(params.listing.id),
     actorId: params.userId || null,
     eventType: 'hud_lookup_completed',
     title: selected ? 'HUD/FMR lookup completed' : 'HUD/FMR lookup missing selected rent',
@@ -241,7 +243,7 @@ export async function rescoreListingAfterIntelligence(params: { supabase: Supaba
     calculated_at: calculatedAt,
   }).select('id').single()
   if (scoreInsertError) throw new Error(scoreInsertError.message || 'Could not save recalculated listing score')
-  const review = determineDealReviewStatus(score as any, params.listing)
+  const review = determineDealReviewStatus(score, params.listing)
   const rank = classifyOpportunity(score.dealScore, score.rentConfidenceScore, Array.isArray(score.missingFields) && score.missingFields.length > 0)
   await params.supabase.from('market_listings').update({
     deal_status: review.dealStatus,
@@ -261,8 +263,8 @@ export async function rescoreListingAfterIntelligence(params: { supabase: Supaba
     latest_opportunity_rank: rank.rank,
     latest_opportunity_rank_label: rank.label,
     latest_opportunity_rank_reason: rank.reason,
-    data_quality_checklist: buildDataQualityChecklist(params.listing, score as any),
-    confidence_breakdown: buildConfidenceBreakdown(params.listing, score as any),
+    data_quality_checklist: buildDataQualityChecklist(params.listing, score),
+    confidence_breakdown: buildConfidenceBreakdown(params.listing, score),
   }).eq('id', params.listing.id).eq('organization_id', params.organizationId)
   return score
 }
@@ -284,7 +286,7 @@ export async function runListingRentIntelligence(params: { supabase: SupabaseLik
         title: 'HUD/FMR lookup failed',
         message: hudError,
         relatedEntityType: 'market_listing',
-        relatedEntityId: params.listing.id,
+        relatedEntityId: String(params.listing.id),
         actionHref: `/market/${params.listing.id}`,
         metadata: { zipCode: params.listing.zip_code },
       })

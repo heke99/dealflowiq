@@ -5,11 +5,16 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { isReasonableMonthlyRent, summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
 import { addMarketRentCompAction, applyMarketRentSummaryAction, importZillowMarketRentCompAction, lookupHudRentAction, smartAnalyzeDealAction } from '@/app/deals/[id]/rent-intelligence/actions'
+import { asRow, asRows, firstRow, rowString, type Row } from '@/lib/types/rows'
 
 function money(value: unknown) {
   const num = Number(value || 0)
   if (!num) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num)
+}
+
+function compRentValue(value: unknown): number | string | null {
+  return typeof value === 'number' || typeof value === 'string' ? value : null
 }
 
 function Stat({ label, value, help }: { label: string; value: React.ReactNode; help?: string }) {
@@ -22,11 +27,11 @@ function Stat({ label, value, help }: { label: string; value: React.ReactNode; h
   )
 }
 
-function Field({ label, name, type = 'text', defaultValue, placeholder, help }: { label: string; name: string; type?: string; defaultValue?: string | number | null; placeholder?: string; help?: string }) {
+function Field({ label, name, type = 'text', defaultValue, placeholder, help }: { label: string; name: string; type?: string; defaultValue?: unknown; placeholder?: string; help?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-300">{label}</span>
-      <input name={name} type={type} step={type === 'number' ? '0.01' : undefined} defaultValue={defaultValue ?? ''} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+      <input name={name} type={type} step={type === 'number' ? '0.01' : undefined} defaultValue={String(defaultValue ?? '')} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
       {help ? <span className="mt-1 block text-xs leading-5 text-slate-500">{help}</span> : null}
     </label>
   )
@@ -38,7 +43,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
 
-  const { data: deal } = workspace.organization?.id
+  const { data: dealData } = workspace.organization?.id
     ? await supabase
         .from('deals')
         .select('*, properties(*)')
@@ -47,8 +52,9 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
         .maybeSingle()
     : { data: null }
 
-  if (!deal) notFound()
-  const property = Array.isArray((deal as any).properties) ? (deal as any).properties[0] : (deal as any).properties
+  if (!dealData) notFound()
+  const deal = dealData as Row
+  const property = firstRow(deal.properties)
 
   const { data: comps } = workspace.organization?.id
     ? await supabase
@@ -59,7 +65,7 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
         .order('created_at', { ascending: false })
     : { data: [] }
 
-  const { data: hudCache } = property?.zip_code
+  const { data: hudCacheData } = property?.zip_code
     ? await supabase
         .from('hud_fmr_cache')
         .select('*')
@@ -68,12 +74,48 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
         .limit(1)
         .maybeSingle()
     : { data: null }
+  const hudCache = asRow(hudCacheData)
 
-  const summary = summarizeMarketRentComps((comps || []) as any)
-  const currentRent = Number((deal as any).current_rent || 0)
-  const rawMarketRent = Number((deal as any).market_rent || 0)
+  const compRows = asRows(comps)
+  const summary = summarizeMarketRentComps(compRows.map((comp) => ({
+    monthly_rent: compRentValue(comp.monthly_rent),
+    bedrooms: compRentValue(comp.bedrooms),
+    square_feet: compRentValue(comp.square_feet),
+    confidence_score: compRentValue(comp.confidence_score),
+  })))
+  const currentRent = Number(deal.current_rent || 0)
+  const rawMarketRent = Number(deal.market_rent || 0)
   const marketRent = isReasonableMonthlyRent(rawMarketRent) ? rawMarketRent : 0
-  const hudRent = Number((deal as any).section8_rent || 0)
+  const hudRent = Number(deal.section8_rent || 0)
+
+  // Rent transparency: where each rent value likely came from and how fresh
+  // the underlying source data is.
+  const dateLabel = (value: unknown) => (value ? new Date(String(value)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null)
+  const hudFetchedAt = dateLabel(hudCache?.fetched_at || hudCache?.updated_at)
+  const latestCompAt = dateLabel(compRows[0]?.created_at)
+  const rentSources: Array<{ label: string; value: number; source: string; freshness: string | null; confidence: string | null }> = [
+    {
+      label: 'Market rent',
+      value: marketRent,
+      source: summary.validCount ? `Estimated from ${summary.validCount} verified comp(s) (median ${money(summary.medianRent || 0)})` : marketRent ? 'Manual entry (no saved comps back this number)' : 'Not set',
+      freshness: summary.validCount ? (latestCompAt ? `Newest comp ${latestCompAt}` : null) : null,
+      confidence: summary.validCount ? `${summary.confidenceScore}/100 comp confidence` : null,
+    },
+    {
+      label: 'HUD / Section 8 rent',
+      value: hudRent,
+      source: hudCache ? `HUD FMR ${String(hudCache.hud_year || '')} for ZIP ${String(hudCache.zip_code || property?.zip_code || '')}` : hudRent ? 'Manual entry (no HUD lookup cached for this ZIP)' : 'Not set',
+      freshness: hudFetchedAt ? `Fetched ${hudFetchedAt}` : null,
+      confidence: hudCache ? 'Official HUD published benchmark' : null,
+    },
+    {
+      label: 'Current rent',
+      value: currentRent,
+      source: currentRent ? 'Manual entry (lease/actuals)' : 'Not set',
+      freshness: null,
+      confidence: null,
+    },
+  ]
 
   return (
     <AppShell
@@ -104,8 +146,8 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
             <form action={lookupHudRentAction}>
               <input type="hidden" name="deal_id" value={id} />
               <input type="hidden" name="redirect_to" value={`/deals/${id}/rent-intelligence`} />
-              <input type="hidden" name="zip_code" value={property?.zip_code || ''} />
-              <input type="hidden" name="bedrooms" value={property?.bedrooms || ''} />
+              <input type="hidden" name="zip_code" value={String(property?.zip_code || '')} />
+              <input type="hidden" name="bedrooms" value={String(property?.bedrooms || '')} />
               <input type="hidden" name="hud_year" value="auto" />
               <button className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 hover:bg-white/10">Search HUD rent</button>
             </form>
@@ -126,6 +168,22 @@ export default async function DealRentIntelligencePage({ params, searchParams }:
             The saved market rent looks unrealistic and is being ignored by the analyzer: {money(rawMarketRent)}. Add verified rent comps or edit the deal and enter a realistic monthly market rent.
           </div>
         ) : null}
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <h2 className="text-xl font-bold">Rent sources & freshness</h2>
+          <p className="mt-1 text-sm text-slate-500">Every rent number shows where it came from, so estimates are never mistaken for verified data.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {rentSources.map((entry) => (
+              <div key={entry.label} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{entry.label}</div>
+                <div className="mt-1 text-2xl font-black text-slate-100">{entry.value ? money(entry.value) : '—'}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">{entry.source}</div>
+                {entry.freshness ? <div className="mt-1 text-xs text-sky-300">{entry.freshness}</div> : null}
+                {entry.confidence ? <div className="mt-1 text-xs text-emerald-300">{entry.confidence}</div> : null}
+              </div>
+            ))}
+          </div>
+        </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Stat label="Current Rent" value={money(currentRent)} />
@@ -237,15 +295,15 @@ Uses official HUD USER data. Default is Auto/latest available; use a specific ye
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
           <h2 className="text-xl font-bold">Saved comps</h2>
           <div className="mt-5 overflow-hidden rounded-2xl border border-white/10">
-            {(comps || []).length ? (comps || []).map((comp: any) => (
-              <div key={comp.id} className="grid gap-3 border-b border-white/10 p-4 last:border-b-0 md:grid-cols-[1fr_0.7fr_0.7fr_0.7fr] md:items-center">
+            {compRows.length ? compRows.map((comp) => (
+              <div key={String(comp.id)} className="grid gap-3 border-b border-white/10 p-4 last:border-b-0 md:grid-cols-[1fr_0.7fr_0.7fr_0.7fr] md:items-center">
                 <div>
-                  <div className="font-semibold">{comp.comp_address || comp.source_name || 'Rental comp'}</div>
-                  <div className="mt-1 text-xs text-slate-500">{comp.source_type?.replaceAll('_', ' ')} · {comp.source_url ? <a href={comp.source_url} target="_blank" className="text-slate-300 underline">source</a> : 'no source URL'}</div>
+                  <div className="font-semibold">{String(comp.comp_address || comp.source_name || 'Rental comp')}</div>
+                  <div className="mt-1 text-xs text-slate-500">{rowString(comp.source_type)?.replaceAll('_', ' ')} · {comp.source_url ? <a href={String(comp.source_url)} target="_blank" className="text-slate-300 underline">source</a> : 'no source URL'}</div>
                 </div>
                 <div className="text-sm text-slate-300">{money(comp.monthly_rent)}/mo</div>
-                <div className="text-sm text-slate-300">{comp.bedrooms || '—'} bd · {comp.square_feet || '—'} sqft</div>
-                <div className="text-sm text-slate-400">Confidence {comp.confidence_score || '—'}</div>
+                <div className="text-sm text-slate-300">{String(comp.bedrooms || '—')} bd · {String(comp.square_feet || '—')} sqft</div>
+                <div className="text-sm text-slate-400">Confidence {String(comp.confidence_score || '—')}</div>
               </div>
             )) : <div className="p-6 text-sm text-slate-500">No valid comps yet. Add at least three verified monthly-rent comps for a more useful market rent confidence score.</div>}
           </div>

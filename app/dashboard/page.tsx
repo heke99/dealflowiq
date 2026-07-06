@@ -1,25 +1,26 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
+import { retrySubscriptionSetupAction, retryWorkspaceSetupAction } from '@/app/onboarding/actions'
 import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
+import { rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function money(value: number | string | null | undefined, compact = false) {
+function money(value: unknown, compact = false) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
-function numberText(value: number | null | undefined) {
+function numberText(value: unknown) {
   return new Intl.NumberFormat('en-US').format(Number(value || 0))
 }
 
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return 'No date set'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(String(value)))
 }
 
 function StatCard({ label, value, hint, href, tone = 'default' }: { label: string; value: string; hint: string; href?: string; tone?: 'default' | 'green' | 'amber' | 'red' }) {
@@ -61,7 +62,7 @@ function OpportunityRow({ listing }: { listing: Row }) {
             <span className={strong ? 'rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-100' : 'rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-300'}>{strong ? 'Strong Opportunity' : 'Opportunity'}</span>
             <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-slate-400">Rent {rentConfidence}</span>
           </div>
-          <div className="mt-2 line-clamp-1 font-bold text-slate-100">{listing.title || listing.address || 'Market listing'}</div>
+          <div className="mt-2 line-clamp-1 font-bold text-slate-100">{rowString(listing.title) || rowString(listing.address) || 'Market listing'}</div>
           <div className="mt-1 text-xs text-slate-500">{[listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || 'Location pending'}</div>
         </div>
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-center text-emerald-100">
@@ -78,12 +79,20 @@ function OpportunityRow({ listing }: { listing: Row }) {
   )
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const query = await searchParams
   const workspace = await getCurrentWorkspace()
+
+  // First-run users go through the (skippable) onboarding wizard once.
+  if (workspace.profile && !workspace.profile.onboarding_completed) {
+    redirect('/onboarding')
+  }
+
   const accountType = workspace.access.accountType
   const config = getAccountTypeConfig(accountType)
   const supabase = await createSupabaseServerClient()
   const orgId = workspace.organization?.id
+  const missingSubscription = Boolean(orgId && !workspace.access.subscription && !workspace.access.isPlatformAdmin)
 
   const [dealsResult, listingsResult, opportunitiesResult, strongResult, reviewResult, importJobsResult, buyerMatchResult, watchResult, notificationsResult, sourcesResult] = orgId
     ? await Promise.all([
@@ -109,6 +118,38 @@ export default async function DashboardPage() {
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
       <div className="space-y-8">
+        {query?.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {query?.message ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{String(query.message)}</div> : null}
+
+        {!orgId ? (
+          <section className="rounded-3xl border border-amber-400/30 bg-amber-400/10 p-6">
+            <h2 className="text-xl font-bold text-amber-100">Your workspace is missing</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/80">
+              Your account exists but no workspace/organization is connected yet — usually because the signup bootstrap was interrupted. Retry it now (safe to run multiple times), or contact support if it keeps failing.
+            </p>
+            <form action={retryWorkspaceSetupAction} className="mt-4">
+              <input type="hidden" name="return_to" value="/dashboard" />
+              <button className="rounded-xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 hover:bg-amber-200">Retry workspace setup</button>
+            </form>
+          </section>
+        ) : null}
+
+        {missingSubscription ? (
+          <section className="rounded-3xl border border-amber-400/30 bg-amber-400/10 p-6">
+            <h2 className="text-xl font-bold text-amber-100">No subscription found for this workspace</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-100/80">
+              Your workspace has no plan or trial attached, so you are on restricted free access. Restore the default plan/trial now or pick a plan on the billing page.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <form action={retrySubscriptionSetupAction}>
+                <input type="hidden" name="return_to" value="/dashboard" />
+                <button className="rounded-xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 hover:bg-amber-200">Restore default plan</button>
+              </form>
+              <Link href="/settings/billing" className="rounded-xl border border-amber-300/40 px-5 py-3 text-sm font-bold text-amber-100 hover:bg-amber-400/10">Open billing</Link>
+            </div>
+          </section>
+        ) : null}
+
         <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-blue-500/10 p-6 sm:p-8">
           <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
             <div>
@@ -169,7 +210,7 @@ export default async function DashboardPage() {
               <Link href="/opportunities" className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">View all</Link>
             </div>
             <div className="mt-5 grid gap-3">
-              {opportunities.length ? opportunities.map((listing) => <OpportunityRow key={listing.id} listing={listing} />) : (
+              {opportunities.length ? opportunities.map((listing) => <OpportunityRow key={String(listing.id)} listing={listing} />) : (
                 <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">
                   No qualified opportunities yet. Import listings or update analysis inputs to sync scores.
                 </div>
@@ -191,7 +232,7 @@ export default async function DashboardPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-bold capitalize">{String(job.status || 'queued').replaceAll('_', ' ')}</div>
-                      <div className="mt-1 truncate text-xs text-slate-500">{job.source_url || 'Manual/import job'}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">{rowString(job.source_url) || 'Manual/import job'}</div>
                     </div>
                     <div className="text-right text-xs text-slate-500">{dateText(job.created_at)}</div>
                   </div>
@@ -200,7 +241,7 @@ export default async function DashboardPage() {
                     <div>Updated <span className="block font-bold text-slate-100">{numberText(job.items_updated || 0)}</span></div>
                     <div>Failed <span className="block font-bold text-slate-100">{numberText(job.items_failed || 0)}</span></div>
                   </div>
-                  {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{job.error_message}</div> : null}
+                  {job.error_message ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{String(job.error_message)}</div> : null}
                 </div>
               )) : <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No import jobs yet.</div>}
             </div>

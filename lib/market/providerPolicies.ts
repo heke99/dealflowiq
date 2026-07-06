@@ -124,7 +124,7 @@ export const DEFAULT_PROVIDER_POLICIES: Record<string, ProviderPolicy> = {
   },
 }
 
-export function providerPolicyFromRow(sourceType: string, row?: Record<string, any> | null): ProviderPolicy {
+export function providerPolicyFromRow(sourceType: string, row?: Record<string, unknown> | null): ProviderPolicy {
   const base = DEFAULT_PROVIDER_POLICIES[sourceType] || DEFAULT_PROVIDER_POLICIES.generic
   if (!row) return base
   return {

@@ -2,17 +2,16 @@ import Link from 'next/link'
 import { MessageCircle } from 'lucide-react'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { firstRow, rowString, type Row } from '@/lib/types/rows'
 
-type Row = Record<string, any>
-
-function dateText(value?: string | null) {
+function dateText(value?: unknown) {
   if (!value) return ''
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
 function listingTitle(conversation: Row) {
-  const listing = Array.isArray(conversation.market_listings) ? conversation.market_listings[0] : conversation.market_listings
-  return listing?.title || listing?.address || 'Listing conversation'
+  const listing = firstRow(conversation.market_listings)
+  return rowString(listing?.title) || rowString(listing?.address) || 'Listing conversation'
 }
 
 export async function MessageBell() {
@@ -65,9 +64,9 @@ export async function MessageBell() {
         </div>
         <div className="max-h-96 overflow-y-auto p-2">
           {conversations.length ? conversations.map((item) => (
-            <Link key={item.id} href={`/messages/${item.id}`} className="block rounded-xl border border-white/10 bg-white/[0.03] p-3 transition hover:bg-white/[0.07]">
+            <Link key={String(item.id)} href={`/messages/${item.id}`} className="block rounded-xl border border-white/10 bg-white/[0.03] p-3 transition hover:bg-white/[0.07]">
               <div className="line-clamp-1 text-sm font-semibold text-white">{listingTitle(item)}</div>
-              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{item.last_message_preview || 'Open conversation'}</p>
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{rowString(item.last_message_preview) || 'Open conversation'}</p>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-slate-600">
                 <span>{String(item.status || 'new').replaceAll('_', ' ')}</span>
                 <span>{dateText(item.last_message_at || item.created_at)}</span>

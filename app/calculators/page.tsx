@@ -53,6 +53,7 @@ export default async function CalculatorsPage({ searchParams }: { searchParams?:
   const loanMonths = num(params, 'loan_term_months', 360)
   const sellingCosts = num(params, 'selling_costs_percent', 8)
   const holdingCosts = num(params, 'holding_costs_monthly', 0)
+  const holdingMonths = num(params, 'flip_holding_months', 6)
   const mao = num(params, 'mao_percentage', 70)
   const wholesaleFee = num(params, 'desired_wholesale_fee', 10000)
   const refiLtv = num(params, 'refinance_ltv_percent', 75)
@@ -76,6 +77,7 @@ export default async function CalculatorsPage({ searchParams }: { searchParams?:
     closing_costs: num(params, 'closing_costs', 0),
     selling_costs_percent: sellingCosts,
     holding_costs_monthly: holdingCosts,
+    flip_holding_months: holdingMonths,
     mao_percentage: mao,
     desired_wholesale_fee: wholesaleFee,
     refinance_ltv_percent: refiLtv,
@@ -131,6 +133,7 @@ export default async function CalculatorsPage({ searchParams }: { searchParams?:
             {input('CapEx / month', 'capex_monthly', num(params, 'capex_monthly', 0))}
             {input('Selling costs %', 'selling_costs_percent', sellingCosts)}
             {input('Holding costs / mo', 'holding_costs_monthly', holdingCosts)}
+            {input('Holding months', 'flip_holding_months', holdingMonths, 'Months of holding costs in the flip preview.')}
             {input('MAO %', 'mao_percentage', mao)}
             {input('Wholesale fee', 'desired_wholesale_fee', wholesaleFee)}
             {input('Refi LTV %', 'refinance_ltv_percent', refiLtv)}
@@ -138,6 +141,15 @@ export default async function CalculatorsPage({ searchParams }: { searchParams?:
             <button className="rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200 md:col-span-3 xl:col-span-6">Recalculate</button>
           </form>
         </section>
+
+        {summary.warnings.length ? (
+          <section className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-5">
+            <div className="text-sm font-bold text-amber-100">Input warnings</div>
+            <ul className="mt-2 space-y-1 text-sm leading-6 text-amber-100/80">
+              {summary.warnings.map((warning, index) => <li key={index}>• {warning}</li>)}
+            </ul>
+          </section>
+        ) : null}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {card('Monthly cashflow', `${formatMoney(primary.monthlyCashflow)}/mo`, primary.label, primary.monthlyCashflow >= 0 ? 'good' : 'bad')}

@@ -1,13 +1,15 @@
+import Link from 'next/link'
 import type { createDealAction, updateDealAction } from '@/app/deals/actions'
 import type { UnderwritingDefaults } from '@/lib/underwriting/defaults'
+import type { Row } from '@/lib/types/rows'
 
 type Action = typeof createDealAction | typeof updateDealAction
 
 type DealFormProps = {
   action: Action
   submitLabel: string
-  deal?: Record<string, any> | null
-  property?: Record<string, any> | null
+  deal?: Row | null
+  property?: Row | null
   error?: string | null
   assumptionDefaults?: UnderwritingDefaults | null
 }
@@ -40,7 +42,7 @@ const propertyTypes = [
   'Land',
 ]
 
-function value(row: Record<string, any> | null | undefined, key: string) {
+function value(row: Row | null | undefined, key: string) {
   const current = row?.[key]
   return current === null || current === undefined ? '' : String(current)
 }
@@ -78,7 +80,7 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
   const defaults = assumptionDefaults
   return (
     <form action={action} encType="multipart/form-data" className="space-y-6">
-      {deal?.id ? <input type="hidden" name="deal_id" value={deal.id} /> : null}
+      {deal?.id ? <input type="hidden" name="deal_id" value={String(deal.id)} /> : null}
       {error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
 
       <Section title="Deal basics" description="Create the core record first. Calculators and projections will use these numbers later.">
@@ -184,6 +186,7 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
         <Field label="Closing costs" name="closing_costs" type="number" defaultValue={value(deal, 'closing_costs')} />
         <Field label="Selling costs %" name="selling_costs_percent" type="number" defaultValue={value(deal, 'selling_costs_percent') || String(defaults?.selling_costs_percent ?? 8)} help="Used in flip profit preview." />
         <Field label="Monthly holding costs" name="holding_costs_monthly" type="number" defaultValue={value(deal, 'holding_costs_monthly') || String(defaults?.holding_costs_monthly ?? '')} help="Used in flip profit preview." />
+        <Field label="Flip holding months" name="flip_holding_months" type="number" defaultValue={value(deal, 'flip_holding_months')} help="How many months of holding costs the flip preview assumes (default 6)." />
         <Field label="MAO %" name="mao_percentage" type="number" defaultValue={value(deal, 'mao_percentage') || String(defaults?.mao_percentage ?? 70)} help="Editable wholesale rule. 70% is only a common default, not a law." />
         <Field label="Desired wholesale fee" name="desired_wholesale_fee" type="number" defaultValue={value(deal, 'desired_wholesale_fee') || String(defaults?.desired_wholesale_fee ?? 10000)} />
         <Field label="Refinance LTV %" name="refinance_ltv_percent" type="number" defaultValue={value(deal, 'refinance_ltv_percent') || String(defaults?.refinance_ltv_percent ?? 75)} help="Used in BRRRR refi loan preview." />
@@ -201,7 +204,7 @@ export function DealForm({ action, submitLabel, deal, property, error, assumptio
 
       <div className="flex flex-wrap items-center gap-3">
         <button className="rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 transition hover:bg-slate-200">{submitLabel}</button>
-        <a href="/deals" className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-slate-100 transition hover:bg-white/10">Cancel</a>
+        <Link href="/deals" className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-slate-100 transition hover:bg-white/10">Cancel</Link>
       </div>
     </form>
   )

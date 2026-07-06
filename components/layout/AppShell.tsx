@@ -54,6 +54,7 @@ export function AppShell({
   const rawNav: NavItem[] = [
     { href: '/dashboard', label: 'Dashboard', visible: true, core: true },
     { href: '/community', label: 'Community', visible: true, core: true },
+    { href: '/messages', label: 'Messages', visible: true, core: true },
     { href: '/market', label: 'Market', visible: true, feature: 'market_opportunities', core: true },
     { href: '/opportunities', label: 'Opportunities', visible: true, feature: 'market_opportunities', core: true },
     { href: '/buy-boxes', label: 'Buy Boxes', visible: true, feature: 'scheduled_market_imports' },
@@ -66,8 +67,11 @@ export function AppShell({
     { href: '/settings/billing', label: 'Plan & Billing', visible: true, core: true },
     { href: '/settings/underwriting', label: 'Underwriting Defaults', visible: true, core: true },
     { href: '/settings', label: 'Settings', visible: true, core: true },
+    { href: '/admin', label: 'Admin', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
+    { href: '/admin/users', label: 'Admin Users', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/plans', label: 'Admin Plans', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
     { href: '/admin/access', label: 'Admin Access', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
+    { href: '/admin/moderation', label: 'Admin Moderation', visible: Boolean(isPlatformAdmin), feature: 'admin_plan_management' },
   ]
   const nav = rawNav.filter((item) => item.visible)
 
@@ -115,6 +119,13 @@ export function AppShell({
               Sign out
             </button>
           </form>
+          <div className="mt-3 flex items-center justify-center gap-1 text-xs text-slate-500">
+            <Link href="/terms" className="hover:text-slate-300">Terms</Link>
+            <span>·</span>
+            <Link href="/privacy" className="hover:text-slate-300">Privacy</Link>
+            <span>·</span>
+            <Link href="/support" className="hover:text-slate-300">Support</Link>
+          </div>
         </div>
       </aside>
 

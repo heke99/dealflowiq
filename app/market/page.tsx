@@ -17,9 +17,9 @@ import { getMarketSourceAdapters } from '@/lib/market/sourceAdapters'
 import { dealStatusLabel } from '@/lib/market/review'
 import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { SubmitButton } from '@/components/forms/SubmitButton'
+import { rowString, type Row } from '@/lib/types/rows'
 
 type Search = Record<string, string | string[] | undefined>
-type Row = Record<string, any>
 
 const tabs = [
   ['all', 'All Listings'],
@@ -35,49 +35,43 @@ function one(value: string | string[] | undefined, fallback = '') {
   return value || fallback
 }
 
-function money(value: number | string | null | undefined, compact = false) {
+function money(value: unknown, compact = false) {
   const parsed = Number(value || 0)
   if (!parsed) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(parsed)
 }
 
-function numeric(value: number | string | null | undefined) {
+function numeric(value: unknown) {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) && parsed !== 0 ? parsed : null
 }
 
-function compactNumber(value: number | string | null | undefined) {
-  const parsed = numeric(value)
-  if (parsed === null) return '—'
-  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(parsed)
-}
-
-function percentText(value: number | string | null | undefined) {
+function percentText(value: unknown) {
   const parsed = numeric(value)
   if (parsed === null) return '—'
   const display = Math.abs(parsed) <= 1 ? parsed * 100 : parsed
   return `${display.toFixed(display >= 10 ? 1 : 2)}%`
 }
 
-function ratioText(value: number | string | null | undefined) {
+function ratioText(value: unknown) {
   const parsed = numeric(value)
   return parsed === null ? '—' : parsed.toFixed(2)
 }
 
-function clampPercent(value: number | string | null | undefined) {
+function clampPercent(value: unknown) {
   const parsed = Number(value || 0)
   if (!Number.isFinite(parsed)) return 0
   return Math.max(0, Math.min(100, parsed))
 }
 
-function positiveTone(value: number | string | null | undefined) {
+function positiveTone(value: unknown) {
   const parsed = Number(value || 0)
   if (parsed > 0) return 'text-emerald-300'
   if (parsed < 0) return 'text-red-300'
   return 'text-slate-100'
 }
 
-function dscrTone(value: number | string | null | undefined) {
+function dscrTone(value: unknown) {
   const parsed = Number(value || 0)
   if (parsed >= 1.25) return 'text-emerald-300'
   if (parsed >= 1.05) return 'text-amber-200'
@@ -85,9 +79,9 @@ function dscrTone(value: number | string | null | undefined) {
   return 'text-slate-100'
 }
 
-function dateText(value: string | null | undefined) {
+function dateText(value: unknown) {
   if (!value) return 'Not scheduled'
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(String(value)))
 }
 
 
@@ -126,7 +120,7 @@ function scoreTone(score: number) {
   return 'border-white/10 bg-white/5 text-slate-200'
 }
 
-function riskTone(risk: string | null | undefined) {
+function riskTone(risk: unknown) {
   const value = String(risk || '').toLowerCase()
   if (value === 'low') return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
   if (value === 'high') return 'border-red-400/30 bg-red-400/10 text-red-100'
@@ -185,7 +179,7 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
   const rentConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_rent_confidence_score', 'rent_confidence_score') || 0))
   const dataConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_data_confidence_score', 'data_confidence_score') || 0))
   const sourceConfidence = Math.round(Number(metricFromListingOrScore(listing, score, 'latest_source_confidence_score', 'source_confidence_score') || 0))
-  const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || listing.address || 'Location pending'
+  const location = [listing.city, listing.state, listing.zip_code].filter(Boolean).join(', ') || String(listing.address || '') || 'Location pending'
   const reasons = Array.isArray(score?.reasons) ? score.reasons : []
   const risks = Array.isArray(score?.risks) ? score.risks : []
   const missing = Array.isArray(score?.missing_fields) ? score.missing_fields : []
@@ -196,17 +190,17 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
   const capRate = metricFromListingOrScore(listing, score, 'latest_estimated_cap_rate', 'estimated_cap_rate')
   const breakEven = metricFromListingOrScore(listing, score, 'latest_break_even_rent', 'break_even_rent')
   const rehabOrArv = listing.rehab_estimate ? `Rehab ${money(listing.rehab_estimate, true)}` : listing.arv ? `ARV ${money(listing.arv, true)}` : 'Needs ARV/rehab'
-  const rankLabel = listing.latest_opportunity_rank_label || (dealScore >= STRONG_OPPORTUNITY_SCORE_THRESHOLD ? 'Strong opportunity' : dealScore >= OPPORTUNITY_SCORE_THRESHOLD ? 'Opportunity' : 'Needs review')
+  const rankLabel = String(listing.latest_opportunity_rank_label || (dealScore >= STRONG_OPPORTUNITY_SCORE_THRESHOLD ? 'Strong opportunity' : dealScore >= OPPORTUNITY_SCORE_THRESHOLD ? 'Opportunity' : 'Needs review'))
 
   return (
     <article className="group overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035] p-4 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.055]">
       <Link href={`/market/${listing.id}`} className="block"><ImageBlock listing={listing} /></Link>
       <div className="mt-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-lg font-bold text-white hover:underline">{listing.title || listing.address || 'Market listing'}</Link>
+          <Link href={`/market/${listing.id}`} className="line-clamp-2 text-lg font-bold text-white hover:underline">{String(listing.title || listing.address || 'Market listing')}</Link>
           <p className="mt-1 text-sm text-slate-400">{location}</p>
           <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            <span>{listing.source_type || 'manual'}</span>
+            <span>{String(listing.source_type || 'manual')}</span>
             <span>•</span>
             <span>{dateText(listing.latest_score_calculated_at || listing.updated_at || listing.created_at)}</span>
           </div>
@@ -219,10 +213,10 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.property_type || 'Type pending'}</span>
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{listing.units || 1} unit(s)</span>
-        <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {score?.risk_level || 'medium'}</span>
-        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{dealStatusLabel(listing.deal_status)}</span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{String(listing.property_type || 'Type pending')}</span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-slate-300">{String(listing.units || 1)} unit(s)</span>
+        <span className={`rounded-full border px-3 py-1 ${riskTone(score?.risk_level)}`}>Risk: {String(score?.risk_level || 'medium')}</span>
+        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{dealStatusLabel(rowString(listing.deal_status))}</span>
         {watch?.status ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sky-100">{String(watch.status).replaceAll('_', ' ')}</span> : null}
         {missing.length ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-amber-100">{missing.length} missing input(s)</span> : null}
       </div>
@@ -256,25 +250,25 @@ function ListingCard({ listing, score, watch }: { listing: Row; score: Row | nul
           <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{reasons.slice(0, 3).map((reason: string, index: number) => <li key={index}>• {reason}</li>)}</ul>
         ) : <p className="mt-2 text-xs leading-5 text-slate-500">Add rent, price and ZIP data to improve ranking.</p>}
         {risks.length ? <p className="mt-2 text-xs text-amber-200">Risk: {String(risks[0])}</p> : null}
-        {listing.why_this_deal ? <p className="mt-2 text-xs leading-5 text-slate-400">{listing.why_this_deal}</p> : null}
+        {listing.why_this_deal ? <p className="mt-2 text-xs leading-5 text-slate-400">{String(listing.why_this_deal)}</p> : null}
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <form action={saveOpportunityAction}>
-          <input type="hidden" name="listing_id" value={listing.id} />
+          <input type="hidden" name="listing_id" value={String(listing.id)} />
           <input type="hidden" name="status" value="saved" />
           <button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-slate-200">Save</button>
         </form>
         <form action={convertListingToDealAction}>
-          <input type="hidden" name="listing_id" value={listing.id} />
+          <input type="hidden" name="listing_id" value={String(listing.id)} />
           <button className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/15">Analyze deal</button>
         </form>
         <form action={rescoreMarketListingAction}>
-          <input type="hidden" name="listing_id" value={listing.id} />
+          <input type="hidden" name="listing_id" value={String(listing.id)} />
           <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-white/10">Rescore</button>
         </form>
         <form action={saveOpportunityAction}>
-          <input type="hidden" name="listing_id" value={listing.id} />
+          <input type="hidden" name="listing_id" value={String(listing.id)} />
           <input type="hidden" name="status" value="ignored" />
           <button className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-white/10">Ignore</button>
         </form>
@@ -493,11 +487,11 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                   {(sourcesResult.data || []).map((source: Row) => {
                     const sourceQueue = queueRows.filter((row) => row.source_id === source.id)
                     return (
-                      <div key={source.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                      <div key={String(source.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <div className="font-semibold text-slate-100">{source.source_name}</div>
-                            <div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{source.source_type} · {source.schedule_frequency} · threshold {Number(source.opportunity_score_threshold || OPPORTUNITY_SCORE_THRESHOLD)}</div>
+                            <div className="font-semibold text-slate-100">{rowString(source.source_name)}</div>
+                            <div className="mt-1 text-xs uppercase tracking-wide text-slate-500">{rowString(source.source_type)} · {rowString(source.schedule_frequency)} · threshold {Number(source.opportunity_score_threshold || OPPORTUNITY_SCORE_THRESHOLD)}</div>
                           </div>
                           <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${source.auto_import_enabled ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : 'border-white/10 bg-white/5 text-slate-300'}`}>{source.auto_import_enabled ? 'Auto' : 'Manual'}</span>
                         </div>
@@ -506,9 +500,9 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                           <div>Queued: {sourceQueue.filter((row) => row.status === 'queued').length}</div>
                           <div>Last: {dateText(source.last_run_at)}</div>
                         </div>
-                        {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{source.last_error}</div> : null}
+                        {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{String(source.last_error)}</div> : null}
                         <form action={runMarketSourceAction} className="mt-3">
-                          <input type="hidden" name="source_id" value={source.id} />
+                          <input type="hidden" name="source_id" value={String(source.id)} />
                           <SubmitButton disabled={!canRunSources} pendingText="Running source..." className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">Run now</SubmitButton>
                         </form>
                       </div>
@@ -522,13 +516,13 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                 <h2 className="text-xl font-bold">Recent import jobs</h2>
                 <div className="mt-5 space-y-3">
                   {(jobsResult.data || []).map((job: Row) => (
-                    <div key={job.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                    <div key={String(job.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-100">{job.job_type.replaceAll('_', ' ')}</div>
-                        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${job.status === 'completed' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : job.status === 'failed' ? 'border-red-400/30 bg-red-400/10 text-red-100' : 'border-amber-400/30 bg-amber-400/10 text-amber-100'}`}>{job.status}</span>
+                        <div className="text-sm font-semibold text-slate-100">{String(job.job_type).replaceAll('_', ' ')}</div>
+                        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${job.status === 'completed' ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100' : job.status === 'failed' ? 'border-red-400/30 bg-red-400/10 text-red-100' : 'border-amber-400/30 bg-amber-400/10 text-amber-100'}`}>{rowString(job.status)}</span>
                       </div>
-                      <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · created {job.items_created || 0} · updated {job.items_updated || 0} · failed {job.items_failed || 0}</div>
-                      {job.error_message ? <div className="mt-2 text-xs text-red-200">{job.error_message}</div> : null}
+                      <div className="mt-2 text-xs text-slate-500">{dateText(job.created_at)} · created {Number(job.items_created || 0)} · updated {Number(job.items_updated || 0)} · failed {Number(job.items_failed || 0)}</div>
+                      {job.error_message ? <div className="mt-2 text-xs text-red-200">{String(job.error_message)}</div> : null}
                     </div>
                   ))}
                   {!(jobsResult.data || []).length ? <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-500">No import jobs yet.</div> : null}
@@ -549,7 +543,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
           <section>
             {visibleListings.length ? (
               <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                {visibleListings.map((listing) => <ListingCard key={listing.id} listing={listing} score={scoresByListing.get(String(listing.id)) || null} watch={watchByListing.get(String(listing.id)) || null} />)}
+                {visibleListings.map((listing) => <ListingCard key={String(listing.id)} listing={listing} score={scoresByListing.get(String(listing.id)) || null} watch={watchByListing.get(String(listing.id)) || null} />)}
               </div>
             ) : (
               <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-10 text-center">

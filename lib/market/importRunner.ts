@@ -350,7 +350,7 @@ function capRateNumber(value: unknown) {
   return parsed > 1 ? parsed / 100 : parsed
 }
 
-function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string, unknown>, score: Awaited<ReturnType<typeof insertMarketListingScore>>, threshold: number) {
+export function evaluateBuyBoxCriteria(buyBox: SourceRow | null, listing: Record<string, unknown>, score: Awaited<ReturnType<typeof insertMarketListingScore>>, threshold: number) {
   if (!buyBox) {
     return {
       matchScore: score.dealScore,

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { safeRedirectPath } from '@/lib/auth/redirects'
 
 const allowedOtpTypes = new Set<EmailOtpType>(['signup', 'invite', 'magiclink', 'recovery', 'email', 'email_change'])
 
@@ -9,9 +10,7 @@ function isAllowedOtpType(value: string): value is EmailOtpType {
 }
 
 function safeNext(value: string | null, type: string) {
-  const fallback = type === 'recovery' ? '/reset-password' : '/dashboard'
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return fallback
-  return value
+  return safeRedirectPath(value, type === 'recovery' ? '/reset-password' : '/dashboard')
 }
 
 export async function GET(request: NextRequest) {

@@ -1,15 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-
-function safeNext(value: string | null) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/dashboard'
-  return value
-}
+import { safeRedirectPath } from '@/lib/auth/redirects'
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
-  const next = safeNext(url.searchParams.get('next'))
+  const next = safeRedirectPath(url.searchParams.get('next'))
   const errorDescription = url.searchParams.get('error_description') || url.searchParams.get('error')
 
   if (errorDescription) {

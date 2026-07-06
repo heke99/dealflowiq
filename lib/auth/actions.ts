@@ -4,11 +4,10 @@ import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { ACCOUNT_TYPES, type AccountType } from '@/lib/product/accountTypes'
+import { safeRedirectPath } from '@/lib/auth/redirects'
 
 function getSafeRedirect(path: FormDataEntryValue | null) {
-  const value = typeof path === 'string' ? path : ''
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/dashboard'
-  return value
+  return safeRedirectPath(path)
 }
 
 function toMessage(value: string) {

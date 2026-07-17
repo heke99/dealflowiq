@@ -9,5 +9,7 @@
       "schedule": "0 * * * *"
     }
   ],
-  "installCommand": "npm ci --no-audit --no-fund"
+  "installCommand": "pnpm install --frozen-lockfile",
+  "framework": "nextjs",
+  "buildCommand": "pnpm run build"
 }

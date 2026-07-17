@@ -1,10 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["iad1"],
+  "regions": [
+    "iad1"
+  ],
   "crons": [
     {
       "path": "/api/cron/market-imports",
       "schedule": "0 * * * *"
     }
-  ]
+  ],
+  "installCommand": "npm ci --no-audit --no-fund"
 }

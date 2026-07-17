@@ -65,7 +65,7 @@ function interactionTypeValue(formData: FormData) {
 function requireBuyerAccess(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
   if (workspace.access.isPlatformAdmin) return
   if (canUseFeature(workspace.access.features, 'buyers') || canUseFeature(workspace.access.features, 'buyer_matching')) return
-  redirect(`/buyers?error=${encodeURIComponent('Buyer CRM and buyer matching are premium features. Enable Buyers or Buyer Matching for this workspace.')}`)
+  redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 }
 
 function buyerPayload(formData: FormData, workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
@@ -110,11 +110,11 @@ export async function createBuyerAction(formData: FormData) {
   requireBuyerAccess(workspace)
 
   const payload = buyerPayload(formData, workspace)
-  if (!payload.name || payload.name === 'Unnamed buyer') redirect(`/buyers?error=${encodeURIComponent('Buyer name is required.')}`)
+  if (!payload.name || payload.name === 'Unnamed buyer') redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 
   const supabase = await createSupabaseServerClient()
   const { data, error } = await supabase.from('buyers').insert(payload).select('id').single()
-  if (error || !data) redirect(`/buyers?error=${encodeURIComponent(error?.message || 'Could not create buyer')}`)
+  if (error || !data) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 
   await supabase.from('audit_logs').insert({
     organization_id: workspace.organization.id,
@@ -145,7 +145,7 @@ export async function updateBuyerAction(formData: FormData) {
     .update(payload)
     .eq('id', buyerId)
     .eq('organization_id', workspace.organization.id)
-  if (error) redirect(`/buyers?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 
   await supabase.from('audit_logs').insert({
     organization_id: workspace.organization.id,
@@ -172,7 +172,7 @@ export async function archiveBuyerAction(formData: FormData) {
     .update({ status: 'archived', archived_at: new Date().toISOString() })
     .eq('id', buyerId)
     .eq('organization_id', workspace.organization.id)
-  if (error) redirect(`/buyers?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
   revalidatePath('/buyers')
   redirect('/buyers?saved=buyer_archived')
 }
@@ -193,8 +193,8 @@ export async function createBuyerInteractionAction(formData: FormData) {
     .eq('id', buyerId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (buyerError) redirect(`/buyers?error=${encodeURIComponent(buyerError.message)}`)
-  if (!buyer?.id) redirect(`/buyers?error=${encodeURIComponent('Buyer not found in this workspace.')}`)
+  if (buyerError) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
+  if (!buyer?.id) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 
   const { error } = await supabase.from('buyer_interactions').insert({
     organization_id: workspace.organization.id,
@@ -207,7 +207,7 @@ export async function createBuyerInteractionAction(formData: FormData) {
     summary,
     next_follow_up_at: text(formData, 'next_follow_up_at'),
   })
-  if (error) redirect(`/buyers?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 
   await supabase.from('buyers').update({ last_contacted_at: new Date().toISOString() }).eq('id', buyerId).eq('organization_id', workspace.organization.id)
   revalidatePath('/buyers')
@@ -220,7 +220,7 @@ export async function runBuyerMatchingAction(formData: FormData) {
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   requireBuyerAccess(workspace)
   if (!canUseFeature(workspace.access.features, 'buyer_matching') && !workspace.access.isPlatformAdmin) {
-    redirect(`/buyers?error=${encodeURIComponent('Buyer matching is not enabled for this workspace.')}`)
+    redirect(`/buyers?error=BUYER_ACTION_FAILED`)
   }
 
   const supabase = await createSupabaseServerClient()
@@ -243,8 +243,8 @@ export async function runBuyerMatchingAction(formData: FormData) {
       .limit(250),
   ])
 
-  if (buyersError) redirect(`/buyers?error=${encodeURIComponent(buyersError.message)}`)
-  if (listingsError) redirect(`/buyers?error=${encodeURIComponent(listingsError.message)}`)
+  if (buyersError) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
+  if (listingsError) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
 
   const listingIds = (listings || []).map((listing: Row) => listing.id).filter(Boolean)
   const { data: scores } = listingIds.length
@@ -287,7 +287,7 @@ export async function runBuyerMatchingAction(formData: FormData) {
       .eq('organization_id', workspace.organization.id)
       .not('listing_id', 'is', null)
       .range(page * existingPageSize, page * existingPageSize + existingPageSize - 1)
-    if (existingError) redirect(`/buyers?error=${encodeURIComponent(existingError.message)}`)
+    if (existingError) redirect(`/buyers?error=BUYER_ACTION_FAILED`)
     const pageRows = asRows(existingMatches)
     for (const match of pageRows) {
       existingByPair.set(`${match.buyer_id}:${match.listing_id}`, { id: String(match.id), matchScore: Number(match.match_score || 0) })

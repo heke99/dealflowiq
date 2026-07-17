@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { featureLabels } from '@/lib/billing/features'
 import { rowString, type Row } from '@/lib/types/rows'
 import { openBillingPortalAction, startCheckoutAction } from './actions'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type BillingSettingsPageProps = {
   searchParams?: Promise<{ error?: string; checkout?: string }> | { error?: string; checkout?: string }
@@ -101,7 +102,7 @@ export default async function BillingSettingsPage({ searchParams }: BillingSetti
               </form>
             ) : null}
           </div>
-          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{decodeURIComponent(params.error)}</div> : null}
+          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{publicErrorMessage(params.error)}</div> : null}
           {params.checkout === 'success' ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Checkout completed. Stripe webhook will keep access synced.</div> : null}
           {params.checkout === 'free' ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Free plan activated.</div> : null}
         </section>

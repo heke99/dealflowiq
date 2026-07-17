@@ -48,7 +48,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
   const { data: plans } = await supabase.from('billing_plans').select('id, name, code, is_active').eq('is_active', true).order('display_order')
   const { data: invites } = await supabase
     .from('admin_access_invites')
-    .select('id, email, organization_name, account_type, role, trial_days, status, invite_token, expires_at, used_at, created_at, billing_plans(name, code)')
+    .select('id, email, organization_id, organization_name, account_type, role, trial_days, status, invite_token, expires_at, used_at, created_at, billing_plans(name, code), organizations(name)')
     .order('created_at', { ascending: false })
     .limit(30)
   const { data: organizations } = await supabase.from('organizations').select('id, name').order('name').limit(200)
@@ -88,7 +88,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
           <p className="mt-3 max-w-3xl text-slate-300">
             Invite a user by email before signup, or override a specific existing member so they get full access even when the organization trial/subscription is restricted.
           </p>
-          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{params.error}</div> : null}
+          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">The admin action could not be completed. Check the target, role and invite details.</div> : null}
           {params.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Saved.</div> : null}
         </section>
 
@@ -100,6 +100,11 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
                 <label className="block text-sm"><span className="text-slate-300">Email</span><input name="email" type="email" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-white/30" placeholder="investor@example.com" /></label>
                 <label className="block text-sm"><span className="text-slate-300">Workspace / company name</span><input name="organization_name" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-white/30" placeholder="Optional" /></label>
               </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm"><span className="text-slate-300">Invite target</span><select name="target_mode" defaultValue="new" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="new">Create a new workspace</option><option value="existing">Join an existing workspace</option></select></label>
+                <label className="block text-sm"><span className="text-slate-300">Existing workspace</span><select name="organization_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Only required for existing target</option>{asRows(organizations).map((org) => <option key={String(org.id)} value={String(org.id)}>{rowString(org.name)}</option>)}</select></label>
+              </div>
+              <p className="text-xs leading-5 text-slate-500">A new workspace requires the owner role. An existing target is stored on the invite and is never inferred from the user&apos;s oldest membership.</p>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block text-sm"><span className="text-slate-300">Account type</span><select name="account_type" defaultValue="solo_investor" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3">{ACCOUNT_TYPE_CONFIGS.map((item) => <option key={item.value} value={item.value}>{item.title}</option>)}</select></label>
@@ -140,12 +145,13 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
             <div className="mt-5 space-y-3">
               {asRows(invites).map((invite) => {
                 const plan = firstRow(invite.billing_plans)
+                const targetOrganization = firstRow(invite.organizations)
                 return (
                   <div key={String(invite.id)} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <div className="font-semibold">{rowString(invite.email)}</div>
-                        <div className="mt-1 text-xs text-slate-500">{rowString(invite.account_type)} · {rowString(invite.role)} · {rowString(plan?.name) || 'default plan'}</div>
+                        <div className="mt-1 text-xs text-slate-500">{rowString(invite.account_type)} · {rowString(invite.role)} · {rowString(plan?.name) || 'default plan'} · {rowString(targetOrganization?.name) || 'new workspace'}</div>
                         <div className="mt-2 text-xs text-slate-500">Token: {rowString(invite.invite_token)}</div>
                       </div>
                       <div className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">{rowString(invite.status)}</div>

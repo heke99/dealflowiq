@@ -3,6 +3,7 @@ import { DealForm } from '@/components/deals/DealForm'
 import { createDealAction } from '@/app/deals/actions'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { getOrganizationUnderwritingDefaults } from '@/lib/underwriting/defaults'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 export default async function NewDealPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams
@@ -28,7 +29,7 @@ export default async function NewDealPage({ searchParams }: { searchParams?: Pro
             Enter the core property, rent, purchase and expense assumptions. These fields become the base for Batch 4 calculations.
           </p>
         </section>
-        <DealForm action={createDealAction} submitLabel="Create Deal" error={params?.error ? String(params.error) : null} assumptionDefaults={assumptionDefaults} />
+        <DealForm action={createDealAction} submitLabel="Create Deal" error={params?.error ? publicErrorMessage(params.error) : null} assumptionDefaults={assumptionDefaults} />
       </div>
     </AppShell>
   )

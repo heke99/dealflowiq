@@ -4,6 +4,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 import { archiveReportedConversationAction, resolveReportAction } from '@/app/admin/moderation/actions'
 import { asRows, firstRow, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -94,7 +95,7 @@ export default async function AdminModerationPage({ searchParams }: { searchPara
           </div>
         </section>
 
-        {error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
+        {error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(error)}</div> : null}
         {saved ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved: {saved}</div> : null}
 
         <section className="flex flex-wrap gap-2">

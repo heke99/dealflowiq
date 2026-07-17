@@ -1,40 +1,56 @@
 # Database reference
 
-Schema is defined by forward-only migrations in `supabase/migrations/`, applied in **filename order**. Several prefixes are duplicated (`017`, `019`, `025`, `026`) — this is historical; do not renumber. New migrations continue from `035_`.
+Schema migrations use unique 14-digit timestamps and run in filename order. `scripts/check-migrations.mjs` rejects duplicate or malformed versions. The old-to-new filename mapping is retained in `supabase/migration-version-map.csv`; never rename an applied migration without the documented history-repair procedure.
 
-## Multi-defined functions — final state
+The canonical reconciliation migration is `20260717000100_auth_tenant_reconciliation.sql`.
 
-Several functions were redefined across migrations. The authoritative final versions are:
+## Canonical auth and tenant functions
 
-| Function | Final version | Behavior |
+| Function | Client access | Purpose |
 |---|---|---|
-| `handle_new_user()` | `017_community_invites_signup_codes` | Auth trigger. Copies signup metadata (email, full name, account type, organization name, `pending_invite_code`) into `profiles`; marks onboarding complete when account type or invite metadata is present. |
-| `create_default_organization()` | `026_trial_access_member_overrides` | Workspace bootstrap RPC called on login/workspace load. Ensures profile → accepts pending community invite → reuses existing org or creates org + owner membership → `ensure_organization_subscription` → `apply_admin_access_invite`. Note: the intermediate `017_community` version dropped the subscription/admin-invite calls; `026` restored them. |
-| `ensure_organization_subscription(uuid, text)` | `033_batch_stripe_billing_and_parser_intelligence` | Creates a 7-day launch trial on the account-type default plan for new orgs (skipped for platform admins, who get `manually_granted`). Writes `subscription.created` to `audit_logs`. The stale `(uuid, uuid, integer)` overload from `025_freemium` is **dropped in `034`**. |
-| `default_plan_for_account_type(text)` | `033` | `community_guru_owner`/`team_company` → `community_owner` plan; every other account type → `premium`; fallback → `free`. |
-| `apply_admin_access_invite(uuid, uuid, text)` | `026_trial_access_member_overrides` | Applies an active `admin_access_invites` row matched **by email**. `trial_days` defaults to 0, which grants a `manually_granted` subscription rather than a trial. |
-| `cleanup_expired_market_source_data()` | `019_batch_12i2` | Returns `TABLE(cleaned_count integer)`. Clears description/images/raw payload for listings with `provider_data_expires_at <= now()` and stamps `provider_data_expired_at`. |
+| `bootstrap_current_user(text)` | authenticated | Explicit, advisory-locked, idempotent profile/workspace bootstrap. |
+| `validate_community_invite(text)` | service role via server route | Non-consuming invite status and workspace preview; never exposed directly to browsers. |
+| `accept_community_invite(text)` | authenticated | Atomic, row-locked, idempotent invite acceptance. |
+| `create_community_invite(...)` | authenticated | Tenant/role/team/rate validated invite creation plus audit/outbox. |
+| `set_active_organization(uuid)` | authenticated | Verifies membership and switches tenant context. |
+| `complete_user_onboarding(...)` | authenticated | Atomically saves onboarding and audit data. |
+| `skip_user_onboarding(integer)` | authenticated | Explicitly records onboarding skip. |
+| `update_user_workspace_settings(...)` | authenticated | Validated profile/workspace edits. |
+| `restore_organization_subscription(uuid)` | owner/platform admin | Creates a missing subscription only; never overwrites a live one. |
+| `transfer_organization_ownership(uuid,uuid)` | current owner | Atomic ownership transfer. |
+| `ensure_organization_subscription_internal(...)` | internal only | Bootstrap/recovery implementation. |
+| `apply_admin_access_invite_internal(uuid)` | internal only | Applies a locked invite to its explicit target or new bootstrap org. |
 
-## RLS model (after `034_production_hardening`)
+`create_default_organization()` remains only as a compatibility wrapper. Application reads must not call it.
 
-- Every `public.*` table has RLS enabled.
-- **Reads**: org members (active `organization_members` row) read their org's rows; platform admins read everything; explicitly `public`/`community` listings, deals, posts and contact settings are readable across orgs by any authenticated user.
-- **Writes**: `current_user_is_org_writer(org_id)` — active member with any role **except `viewer`** — is required for inserts/updates on org content tables (deals, properties, deal units/files, market listings, notes, rent comps, buyers, matches, interactions, buy boxes). Deletes generally require owner/admin.
-- **audit_logs**: API inserts require the caller to be an active org member writing with `actor_id = auth.uid()`. SECURITY DEFINER functions and the service role bypass RLS for system events.
-- **hud_fmr_cache**: global read for authenticated users; writes restricted to platform admins / service role (the app writes through the admin client).
-- **stripe_webhook_events**: service-role writes only; platform admins can read.
-- **Service role**: used only server-side (`lib/supabase/admin.ts`) for the Stripe webhook, deal file storage, HUD cache writes and the import worker.
+## Tenant isolation
 
-## Subscription statuses
+- `profiles.active_organization_id` selects the current tenant.
+- Every active workspace must be backed by `organization_members(status='active')`.
+- Community invites and team memberships use composite `(organization_id,team_id)` foreign keys.
+- Direct organization-member INSERT/UPDATE/DELETE is revoked from authenticated clients; role changes must use controlled functions.
+- Existing roles are compared using explicit organization/team role ranks and are not implicitly downgraded.
 
-Valid values (CHECK constraint, migration 033): `trialing`, `active`, `past_due`, `canceled`, `expired`, `comped`, `manually_granted`, `incomplete`, `unpaid`. Application code must not invent other statuses (a legacy `paid` reference was removed in the hardening pass).
+## Ownership
 
-## Bootstrap
+`organizations.owner_id` references `auth.users` with `ON DELETE RESTRICT`. Auth-account deletion must first transfer ownership or intentionally close the organization. The final active owner cannot be removed, disabled or downgraded. A trigger also rejects every direct `owner_id` update unless the controlled transfer function has opened the transaction-local transfer guard.
 
-First platform admin is seeded manually:
+## Billing state
 
-```sql
-insert into public.platform_admins (user_id, note)
-select id, 'bootstrap admin' from auth.users where email = 'you@example.com'
-on conflict (user_id) do nothing;
+Application states are `trialing`, `active`, `past_due`, `canceled`, `expired`, `comped`, `manually_granted`, `incomplete`, and `unpaid` as permitted by the final constraints. Member acceptance never invokes billing. Initial access is attached to organization creation, while Stripe/admin events own subsequent changes.
+
+## Migration reconciliation
+
+For a new local database:
+
+```bash
+./scripts/sync-supabase.sh --local-reset
 ```
+
+For a linked database that already contains the old 001–037 schema, back up and repair migration-history records before pushing the reconciliation migration:
+
+```bash
+CONFIRM_MIGRATION_HISTORY_REWRITE=YES ./scripts/sync-supabase.sh --existing-linked-project
+```
+
+Do not run the existing-project mode against a partially migrated database. Inspect the generated backup and `supabase migration list` first.

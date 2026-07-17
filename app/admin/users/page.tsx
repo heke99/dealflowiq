@@ -4,6 +4,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { grantUserFullAccessOverrideAction, revokeUserAccessOverrideAction } from '@/app/admin/users/actions'
 import { firstRow, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type AdminUsersPageProps = {
   searchParams?: Promise<{ q?: string; role?: string; access?: string; community?: string; saved?: string; error?: string }> | { q?: string; role?: string; access?: string; community?: string; saved?: string; error?: string }
@@ -126,7 +127,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
             <select name="community" defaultValue={communityFilter} className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm"><option value="">All communities</option>{communities.map((team) => <option key={String(team.id)} value={String(team.id)}>{rowString(team.name)}</option>)}</select>
             <button className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-950">Filter</button>
           </div>
-          {params.error ? <div className="mt-3 rounded-xl border border-red-400/25 bg-red-400/10 p-3 text-sm text-red-100">{params.error}</div> : null}
+          {params.error ? <div className="mt-3 rounded-xl border border-red-400/25 bg-red-400/10 p-3 text-sm text-red-100">{publicErrorMessage(params.error)}</div> : null}
           {params.saved ? <div className="mt-3 rounded-xl border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm text-emerald-100">Saved.</div> : null}
         </form>
 

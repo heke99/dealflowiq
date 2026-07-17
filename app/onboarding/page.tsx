@@ -1,9 +1,9 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { hasOrganizationRole, MANAGEMENT_ROLES } from '@/lib/auth/access'
 import { ACCOUNT_TYPE_CONFIGS } from '@/lib/product/accountTypes'
 import { completeOnboardingAction, retryWorkspaceSetupAction, skipOnboardingAction } from '@/app/onboarding/actions'
+import { authErrorMessage } from '@/lib/errors/auth-errors'
 
 const STRATEGY_OPTIONS = [
   { value: 'buy_and_hold', label: 'Buy & hold rentals' },
@@ -37,10 +37,10 @@ export default async function OnboardingPage({ searchParams }: { searchParams?: 
         </p>
 
         {query?.error ? (
-          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div>
+          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{authErrorMessage(query.error)}</div>
         ) : null}
         {workspace.error ? (
-          <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">Workspace setup warning: {workspace.error}</div>
+          <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">{authErrorMessage(workspace.error)}</div>
         ) : null}
 
         {missingOrganization ? (
@@ -79,8 +79,12 @@ export default async function OnboardingPage({ searchParams }: { searchParams?: 
             </section>
 
             <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <h2 className="text-xl font-bold">2. Confirm your workspace</h2>
+              <h2 className="text-xl font-bold">2. Confirm your profile and workspace</h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Full name</span>
+                  <input name="full_name" required minLength={2} maxLength={120} defaultValue={workspace.profile?.full_name || ''} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+                </label>
                 <label className="block">
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Workspace name</span>
                   <input
@@ -95,13 +99,13 @@ export default async function OnboardingPage({ searchParams }: { searchParams?: 
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Primary market / location</span>
                   <input
                     name="primary_market"
-                    placeholder="e.g. Cleveland, OH"
+                    defaultValue={workspace.organization?.primary_market || ''} placeholder="e.g. Cleveland, OH"
                     className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30"
                   />
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Primary strategy</span>
-                  <select name="primary_strategy" defaultValue="" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
+                  <select name="primary_strategy" defaultValue={workspace.organization?.primary_strategy || ''} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-white/30">
                     <option value="">Choose later</option>
                     {STRATEGY_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -135,7 +139,6 @@ export default async function OnboardingPage({ searchParams }: { searchParams?: 
               <button formAction={skipOnboardingAction} formNoValidate className="rounded-2xl border border-white/10 px-6 py-3 text-sm font-bold text-slate-300 hover:bg-white/10">
                 Skip for now
               </button>
-              <Link href="/dashboard" className="text-sm text-slate-500 hover:text-slate-300">Go to dashboard</Link>
             </div>
           </form>
         )}

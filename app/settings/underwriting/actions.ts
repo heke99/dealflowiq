@@ -51,7 +51,7 @@ export async function saveUnderwritingDefaultsAction(formData: FormData) {
   const { error } = await supabase
     .from('organization_underwriting_defaults')
     .upsert(payload, { onConflict: 'organization_id' })
-  if (error) redirect(`/settings/underwriting?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/settings/underwriting?error=SETTINGS_ACTION_FAILED`)
 
   await recordAuditEvent({
     organizationId: workspace.organization.id,

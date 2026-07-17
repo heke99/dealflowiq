@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { archiveDealAction, deleteDealAction, deleteDealFileAction, duplicateDealAction, quickUpdateDealAssumptionsAction } from '@/app/deals/actions'
 import { publishDealToMarketAction, unpublishDealAction } from '@/app/market/actions'
 import { asRows, firstRow, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 function money(value: unknown) {
   const numberValue = Number(value || 0)
@@ -242,7 +243,7 @@ export default async function DealDetailPage({ params, searchParams }: { params:
         </section>
 
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
-        {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(query.error)}</div> : null}
 
         <DealFilesSection dealId={id} files={signedDealFiles} />
 

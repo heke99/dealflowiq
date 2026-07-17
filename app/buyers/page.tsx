@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { archiveBuyerAction, createBuyerAction, createBuyerInteractionAction, runBuyerMatchingAction, updateBuyerAction } from '@/app/buyers/actions'
 import { firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -324,8 +325,8 @@ export default async function BuyersPage({ searchParams }: { searchParams?: Prom
             </form>
           </div>
           {params?.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully{params.matches ? ` · ${one(params.matches)} matches updated` : ''}.</div> : null}
-          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(params.error)}</div> : null}
-          {buyersResult.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{buyersResult.error.message}</div> : null}
+          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(params.error)}</div> : null}
+          {buyersResult.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage('DATA_LOAD_FAILED')}</div> : null}
           {!buyersEnabled ? <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">Buyer CRM is locked on this workspace. Enable Buyers or Buyer Matching in the plan/admin settings to save buyers.</div> : null}
         </section>
 

@@ -5,6 +5,7 @@ import { NotificationBell } from '@/components/layout/NotificationBell'
 import type { FeatureMap, FeatureKey } from '@/lib/billing/features'
 import { canUseFeature, featureLabels } from '@/lib/billing/features'
 import { getAccountTypeConfig } from '@/lib/product/accountTypes'
+import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher'
 
 type NavItem = {
   href: string
@@ -95,6 +96,7 @@ export function AppShell({
             <div className="mt-2 text-xs text-slate-500">{planName || 'Plan pending'} · {subscriptionStatus || 'trialing'}</div>
             {trialDate ? <div className="mt-1 text-xs text-emerald-300">Trial ends {trialDate}</div> : null}
           </div>
+          <WorkspaceSwitcher />
         </div>
 
         <nav className="mt-8 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1 pb-4">

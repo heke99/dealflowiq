@@ -146,7 +146,7 @@ export async function savePlanAction(formData: FormData) {
     : await supabase.from('billing_plans').insert(payload).select('*').single()
 
   if (response.error || !response.data) {
-    redirect(`/admin/plans?error=${encodeURIComponent(response.error?.message || 'Could not save plan')}`)
+    redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
   }
 
   await recordAuditEvent({
@@ -159,8 +159,8 @@ export async function savePlanAction(formData: FormData) {
 
   try {
     await persistStripeSync(supabase, response.data, { forceMonthlyPrice, forceAnnualPrice })
-  } catch (error) {
-    redirect(`/admin/plans?error=${encodeURIComponent(error instanceof Error ? error.message : 'Plan saved but Stripe sync failed')}`)
+  } catch {
+    redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
   }
 
   refreshAdminPaths()
@@ -176,8 +176,8 @@ export async function syncPlanStripeAction(formData: FormData) {
   if (!plan) redirect('/admin/plans?error=Plan not found')
   try {
     await persistStripeSync(supabase, plan)
-  } catch (error) {
-    redirect(`/admin/plans?error=${encodeURIComponent(error instanceof Error ? error.message : 'Stripe sync failed')}`)
+  } catch {
+    redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
   }
   refreshAdminPaths()
   redirect('/admin/plans?saved=stripe')
@@ -198,7 +198,7 @@ export async function deletePlanAction(formData: FormData) {
     supabase.from('organization_subscriptions').select('id', { count: 'exact', head: true }).eq('plan_id', planId).in('status', ACTIVE_OR_BILLING_STATUSES).not('stripe_subscription_id', 'is', null),
   ])
 
-  if (countError || activeCountError || stripeActiveCountError) redirect(`/admin/plans?error=${encodeURIComponent(countError?.message || activeCountError?.message || stripeActiveCountError?.message || 'Could not check plan usage')}`)
+  if (countError || activeCountError || stripeActiveCountError) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
 
   if ((activeCount || 0) > 0 && (!replacementPlanId || (stripeActiveCount || 0) > 0)) {
     const { error } = await supabase
@@ -211,7 +211,7 @@ export async function deletePlanAction(formData: FormData) {
         stripe_last_error: (stripeActiveCount || 0) > 0 ? 'Archived instead of deleted because active Stripe subscriptions are assigned to this plan. Migrate Stripe subscription items before deleting.' : 'Archived instead of deleted because active subscriptions are assigned to this plan.',
       })
       .eq('id', planId)
-    if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+    if (error) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
     refreshAdminPaths()
     redirect('/admin/plans?saved=archived')
   }
@@ -230,11 +230,11 @@ export async function deletePlanAction(formData: FormData) {
       })
       .eq('plan_id', planId)
 
-    if (syncError) redirect(`/admin/plans?error=${encodeURIComponent(syncError.message)}`)
+    if (syncError) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
   }
 
   const { error } = await supabase.from('billing_plans').delete().eq('id', planId)
-  if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     actorId: await getActorId(),
@@ -280,7 +280,7 @@ export async function syncOrganizationSubscriptionAction(formData: FormData) {
     updated_at: now,
   }, { onConflict: 'organization_id' })
 
-  if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     organizationId,
@@ -312,7 +312,7 @@ export async function cancelOrganizationSubscriptionAction(formData: FormData) {
     })
     .eq('id', id)
 
-  if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     actorId: await getActorId(),
@@ -333,7 +333,7 @@ export async function deleteOrganizationSubscriptionAction(formData: FormData) {
 
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase.from('organization_subscriptions').delete().eq('id', id)
-  if (error) redirect(`/admin/plans?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/plans?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     actorId: await getActorId(),

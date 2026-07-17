@@ -1,0 +1,211 @@
+import { AppShell } from '@/components/layout/AppShell'
+import { createAdminAccessInviteAction, grantMemberFullAccessOverrideAction, revokeAdminAccessInviteAction, revokeMemberAccessOverrideAction } from '@/app/admin/access/actions'
+import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { ACCOUNT_TYPE_CONFIGS } from '@/lib/product/accountTypes'
+import { FEATURE_KEYS, featureLabels } from '@/lib/billing/features'
+import { asRows, firstRow, rowString, type Row } from '@/lib/types/rows'
+
+type AdminAccessPageProps = {
+  searchParams?: Promise<{ error?: string; saved?: string }> | { error?: string; saved?: string }
+}
+
+const roles = [
+  ['owner', 'Owner'],
+  ['admin', 'Admin'],
+  ['acquisition_manager', 'Acquisition Manager'],
+  ['disposition_manager', 'Disposition Manager'],
+  ['member', 'Member'],
+  ['buyer', 'Buyer'],
+  ['viewer', 'Viewer'],
+]
+
+export default async function AdminAccessPage({ searchParams }: AdminAccessPageProps) {
+  const params = await Promise.resolve(searchParams || {})
+  const workspace = await getCurrentWorkspace()
+  const supabase = await createSupabaseServerClient()
+
+  if (!workspace.access.isPlatformAdmin) {
+    return (
+      <AppShell
+        organizationName={workspace.organization?.name}
+        userEmail={workspace.user.email}
+        accountType={workspace.access.accountType}
+        features={workspace.access.features}
+        subscriptionStatus={workspace.access.status}
+        planName={workspace.access.plan?.name}
+        trialEndsAt={workspace.access.trialEndsAt}
+        isPlatformAdmin={workspace.access.isPlatformAdmin}
+      >
+        <div className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-8 text-amber-100">
+          <h1 className="text-3xl font-bold">Platform admin required</h1>
+          <p className="mt-3 text-sm">Only platform admins can create access invites and manual grants.</p>
+        </div>
+      </AppShell>
+    )
+  }
+
+  const { data: plans } = await supabase.from('billing_plans').select('id, name, code, is_active').eq('is_active', true).order('display_order')
+  const { data: invites } = await supabase
+    .from('admin_access_invites')
+    .select('id, email, organization_name, account_type, role, trial_days, status, invite_token, expires_at, used_at, created_at, billing_plans(name, code)')
+    .order('created_at', { ascending: false })
+    .limit(30)
+  const { data: organizations } = await supabase.from('organizations').select('id, name').order('name').limit(200)
+  const { data: memberRows } = await supabase
+    .from('organization_members')
+    .select('id, organization_id, user_id, role, status, organizations(id, name)')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(250)
+  const memberUserIds = Array.from(new Set(asRows(memberRows).map((row) => rowString(row.user_id)).filter((id): id is string => Boolean(id))))
+  const { data: profiles } = memberUserIds.length
+    ? await supabase.from('profiles').select('id, email, full_name').in('id', memberUserIds)
+    : { data: [] as Row[] }
+  const profileById = new Map(asRows(profiles).map((profile) => [String(profile.id), profile]))
+  const { data: overrides } = await supabase
+    .from('member_access_overrides')
+    .select('id, organization_id, user_id, status, starts_at, expires_at, notes, created_at, organizations(id, name)')
+    .neq('status', 'revoked')
+    .order('updated_at', { ascending: false })
+    .limit(80)
+
+  return (
+    <AppShell
+      organizationName={workspace.organization?.name}
+      userEmail={workspace.user.email}
+      accountType={workspace.access.accountType}
+      features={workspace.access.features}
+      subscriptionStatus={workspace.access.status}
+      planName={workspace.access.plan?.name}
+      trialEndsAt={workspace.access.trialEndsAt}
+      isPlatformAdmin={workspace.access.isPlatformAdmin}
+    >
+      <div className="space-y-8">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-8">
+          <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Platform Admin</div>
+          <h1 className="mt-2 text-3xl font-bold">Access Invites, Member Overrides & Manual Grants</h1>
+          <p className="mt-3 max-w-3xl text-slate-300">
+            Invite a user by email before signup, or override a specific existing member so they get full access even when the organization trial/subscription is restricted.
+          </p>
+          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{params.error}</div> : null}
+          {params.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Saved.</div> : null}
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Create invite / access grant</h2>
+            <form action={createAdminAccessInviteAction} className="mt-6 space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm"><span className="text-slate-300">Email</span><input name="email" type="email" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-white/30" placeholder="investor@example.com" /></label>
+                <label className="block text-sm"><span className="text-slate-300">Workspace / company name</span><input name="organization_name" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-white/30" placeholder="Optional" /></label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm"><span className="text-slate-300">Account type</span><select name="account_type" defaultValue="solo_investor" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3">{ACCOUNT_TYPE_CONFIGS.map((item) => <option key={item.value} value={item.value}>{item.title}</option>)}</select></label>
+                <label className="block text-sm"><span className="text-slate-300">Role</span><select name="role" defaultValue="owner" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3">{roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              </div>
+
+              <input type="hidden" name="trial_days" value="0" />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm"><span className="text-slate-300">Plan</span><select name="plan_id" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Default by account type</option>{asRows(plans).map((plan) => <option key={String(plan.id)} value={String(plan.id)}>{rowString(plan.name)}</option>)}</select></label>
+                <label className="block text-sm"><span className="text-slate-300">Invite expires in days</span><input name="expires_in_days" type="number" min="0" defaultValue="30" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold">Feature overrides</div>
+                <p className="mt-1 text-xs text-slate-500">Checked features are explicitly granted on top of the selected plan.</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {FEATURE_KEYS.filter((feature) => feature !== 'admin_plan_management').map((feature) => (
+                    <label key={feature} className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm">
+                      <input name={`feature_${feature}`} type="checkbox" /> {featureLabels[feature]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label className="block text-sm"><span className="text-slate-300">Max deals override</span><input name="max_deals" type="number" min="0" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+                <label className="block text-sm"><span className="text-slate-300">Max buyers override</span><input name="max_buyers" type="number" min="0" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+                <label className="block text-sm"><span className="text-slate-300">Team members override</span><input name="max_team_members" type="number" min="0" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /></label>
+              </div>
+
+              <label className="block text-sm"><span className="text-slate-300">Admin notes</span><textarea name="notes" rows={3} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" placeholder="Why this person gets access." /></label>
+              <button className="w-full rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Create access invite</button>
+            </form>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Recent invites</h2>
+            <div className="mt-5 space-y-3">
+              {asRows(invites).map((invite) => {
+                const plan = firstRow(invite.billing_plans)
+                return (
+                  <div key={String(invite.id)} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">{rowString(invite.email)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{rowString(invite.account_type)} · {rowString(invite.role)} · {rowString(plan?.name) || 'default plan'}</div>
+                        <div className="mt-2 text-xs text-slate-500">Token: {rowString(invite.invite_token)}</div>
+                      </div>
+                      <div className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">{rowString(invite.status)}</div>
+                    </div>
+                    {invite.status === 'active' ? (
+                      <form action={revokeAdminAccessInviteAction} className="mt-4">
+                        <input type="hidden" name="id" value={String(invite.id)} />
+                        <button className="rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/10">Revoke</button>
+                      </form>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section id="member-overrides" className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Grant full access to an existing member</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-400">Use this when a user is already a member of a workspace and you want them to bypass trial/payment restrictions. Platform admins never need this; they already bypass billing.</p>
+            <form action={grantMemberFullAccessOverrideAction} className="mt-6 space-y-5">
+              <label className="block text-sm"><span className="text-slate-300">Organization</span><select name="organization_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select organization</option>{asRows(organizations).map((org) => <option key={String(org.id)} value={String(org.id)}>{rowString(org.name)}</option>)}</select></label>
+              <label className="block text-sm"><span className="text-slate-300">Member</span><select name="user_id" required className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3"><option value="">Select member</option>{asRows(memberRows).map((member) => { const org = firstRow(member.organizations); const profile = profileById.get(String(member.user_id)); return <option key={String(member.id)} value={String(member.user_id)}>{rowString(profile?.email) || String(member.user_id)} · {rowString(org?.name) || String(member.organization_id)} · {rowString(member.role)}</option> })}</select></label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm"><span className="text-slate-300">Expires in days</span><input name="expires_in_days" type="number" min="0" defaultValue="0" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">0 means no expiry.</span></label>
+                <label className="block text-sm"><span className="text-slate-300">Admin note</span><input name="notes" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3" placeholder="Reason for full access" /></label>
+              </div>
+              <button className="w-full rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Grant full access override</button>
+            </form>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-xl font-bold">Active member overrides</h2>
+            <div className="mt-5 space-y-3">
+              {asRows(overrides).map((override) => {
+                const org = firstRow(override.organizations)
+                const profile = profileById.get(String(override.user_id))
+                return (
+                  <div key={String(override.id)} className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-semibold">{rowString(profile?.email) || String(override.user_id)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{rowString(org?.name) || String(override.organization_id)} · {String(override.status).replaceAll('_', ' ')} · expires {override.expires_at ? new Date(String(override.expires_at)).toLocaleDateString('en-US') : 'never'}</div>
+                        {override.notes ? <div className="mt-2 text-xs text-slate-500">{String(override.notes)}</div> : null}
+                      </div>
+                      <form action={revokeMemberAccessOverrideAction}>
+                        <input type="hidden" name="id" value={String(override.id)} />
+                        <button className="rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/10">Revoke</button>
+                      </form>
+                    </div>
+                  </div>
+                )
+              })}
+              {!(overrides || []).length ? <div className="rounded-2xl border border-dashed border-white/15 p-8 text-center text-slate-400">No active member overrides.</div> : null}
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </AppShell>
+  )
+}

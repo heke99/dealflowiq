@@ -243,7 +243,7 @@ export async function createDealAction(formData: FormData) {
     .single()
 
   if (dealError || !deal) {
-    redirect(`/deals/new?error=${encodeURIComponent(dealError?.message || 'Could not create deal')}`)
+    redirect(`/deals/new?error=DEAL_ACTION_FAILED`)
   }
 
   const { error: propertyError } = await supabase.from('properties').insert({
@@ -253,14 +253,13 @@ export async function createDealAction(formData: FormData) {
   })
 
   if (propertyError) {
-    redirect(`/deals/${deal.id}/edit?error=${encodeURIComponent(propertyError.message)}`)
+    redirect(`/deals/${deal.id}/edit?error=DEAL_ACTION_FAILED`)
   }
 
   try {
     await uploadDealFiles({ formData, organizationId: workspace.organization.id, dealId: deal.id, userId: workspace.user.id })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Deal was created, but file upload failed.'
-    redirect(`/deals/${deal.id}/edit?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/deals/${deal.id}/edit?error=DEAL_ACTION_FAILED`)
   }
 
   await supabase.from('audit_logs').insert({
@@ -291,7 +290,7 @@ export async function updateDealAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
 
   if (dealError) {
-    redirect(`/deals/${dealId}/edit?error=${encodeURIComponent(dealError.message)}`)
+    redirect(`/deals/${dealId}/edit?error=DEAL_ACTION_FAILED`)
   }
 
   const propertyPayload = {
@@ -305,14 +304,13 @@ export async function updateDealAction(formData: FormData) {
     .upsert(propertyPayload, { onConflict: 'deal_id' })
 
   if (propertyError) {
-    redirect(`/deals/${dealId}/edit?error=${encodeURIComponent(propertyError.message)}`)
+    redirect(`/deals/${dealId}/edit?error=DEAL_ACTION_FAILED`)
   }
 
   try {
     await uploadDealFiles({ formData, organizationId: workspace.organization.id, dealId, userId: workspace.user.id })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Deal was saved, but file upload failed.'
-    redirect(`/deals/${dealId}/edit?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/deals/${dealId}/edit?error=DEAL_ACTION_FAILED`)
   }
 
   await supabase.from('audit_logs').insert({
@@ -375,14 +373,14 @@ export async function quickUpdateDealAssumptionsAction(formData: FormData) {
   for (const key of keys) {
     if (!hasFormValue(formData, key)) continue
     const value = key.endsWith('_rent') ? maybeRent(formData, key) : maybeNumber(formData, key)
-    if (value === null) redirect(`${redirectTo}?error=${encodeURIComponent(`${key.replaceAll('_', ' ')} must be a realistic value.`)}`)
+    if (value === null) redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
     if (value !== undefined) payload[key] = value
   }
 
   if (hasFormValue(formData, 'cap_rate_basis')) payload.cap_rate_basis = capRateBasisValue(formData)
   if (hasFormValue(formData, 'cap_rate_custom_value')) payload.cap_rate_custom_value = numberValue(formData, 'cap_rate_custom_value')
 
-  if (!Object.keys(payload).length) redirect(`${redirectTo}?error=${encodeURIComponent('Enter at least one value to update.')}`)
+  if (!Object.keys(payload).length) redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
 
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase
@@ -391,7 +389,7 @@ export async function quickUpdateDealAssumptionsAction(formData: FormData) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
 
-  if (error) redirect(`${redirectTo}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
 
   await supabase.from('audit_logs').insert({
     organization_id: workspace.organization.id,
@@ -426,7 +424,7 @@ export async function createCalculationSnapshotAction(formData: FormData) {
     .maybeSingle()
 
   if (dealError || !deal) {
-    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
+    redirect(`/deals/${dealId}/analyzer?error=DEAL_ACTION_FAILED`)
   }
 
   const dealRow = deal as Row
@@ -446,7 +444,7 @@ export async function createCalculationSnapshotAction(formData: FormData) {
   })
 
   if (snapshotError) {
-    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(snapshotError.message)}`)
+    redirect(`/deals/${dealId}/analyzer?error=DEAL_ACTION_FAILED`)
   }
 
   await supabase.from('audit_logs').insert({
@@ -485,7 +483,7 @@ export async function restoreCalculationSnapshotAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
   if (snapshotError || !snapshot) {
-    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(snapshotError?.message || 'Snapshot not found')}`)
+    redirect(`/deals/${dealId}/analyzer?error=DEAL_ACTION_FAILED`)
   }
 
   const snapshotRow = snapshot as Row
@@ -542,7 +540,7 @@ export async function restoreCalculationSnapshotAction(formData: FormData) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
   if (updateError) {
-    redirect(`/deals/${dealId}/analyzer?error=${encodeURIComponent(updateError.message)}`)
+    redirect(`/deals/${dealId}/analyzer?error=DEAL_ACTION_FAILED`)
   }
 
   await supabase.from('audit_logs').insert({
@@ -576,7 +574,7 @@ export async function duplicateDealAction(formData: FormData) {
     .maybeSingle()
 
   if (readError || !sourceDeal) {
-    redirect(`/deals?error=${encodeURIComponent(readError?.message || 'Deal not found')}`)
+    redirect(`/deals?error=DEAL_ACTION_FAILED`)
   }
 
   const sourceRow = sourceDeal as Row
@@ -589,7 +587,7 @@ export async function duplicateDealAction(formData: FormData) {
     .single()
 
   if (insertError || !newDeal) {
-    redirect(`/deals/${dealId}?error=${encodeURIComponent(insertError?.message || 'Could not duplicate deal')}`)
+    redirect(`/deals/${dealId}?error=DEAL_ACTION_FAILED`)
   }
 
   if (sourceProperty) {
@@ -597,7 +595,7 @@ export async function duplicateDealAction(formData: FormData) {
       .from('properties')
       .insert(duplicatePropertyPayload(sourceProperty, { organizationId: workspace.organization.id, dealId: newDeal.id }))
     if (propertyError) {
-      redirect(`/deals/${newDeal.id}/edit?error=${encodeURIComponent(propertyError.message)}`)
+      redirect(`/deals/${newDeal.id}/edit?error=DEAL_ACTION_FAILED`)
     }
   }
 
@@ -629,7 +627,7 @@ export async function archiveDealAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
 
-  if (readError || !deal) redirect(`/deals?error=${encodeURIComponent(readError?.message || 'Deal not found')}`)
+  if (readError || !deal) redirect(`/deals?error=DEAL_ACTION_FAILED`)
 
   const { error } = await supabase
     .from('deals')
@@ -637,7 +635,7 @@ export async function archiveDealAction(formData: FormData) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
 
-  if (error) redirect(`/deals/${dealId}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/deals/${dealId}?error=DEAL_ACTION_FAILED`)
 
   await recordAuditEvent({
     organizationId: workspace.organization.id,
@@ -673,20 +671,20 @@ export async function deleteDealFileAction(formData: FormData) {
     .maybeSingle()
 
   if (readError || !file) {
-    redirect(`${redirectTo}?error=${encodeURIComponent(readError?.message || 'File not found')}`)
+    redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
   }
 
   const fileRow = file as Row
   const isUploader = fileRow.uploaded_by === workspace.user.id
   if (!isUploader && !hasOrganizationRole(workspace, MANAGEMENT_ROLES)) {
-    redirect(`${redirectTo}?error=${encodeURIComponent('Only the uploader or an org owner/admin can delete this file.')}`)
+    redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
   }
 
   const admin = createSupabaseAdminClient()
   const bucket = String(fileRow.storage_bucket || DEAL_FILE_BUCKET)
   const { error: storageError } = await admin.storage.from(bucket).remove([String(fileRow.storage_path)])
   if (storageError) {
-    redirect(`${redirectTo}?error=${encodeURIComponent(storageError.message)}`)
+    redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
   }
 
   const { error: deleteError } = await admin
@@ -695,7 +693,7 @@ export async function deleteDealFileAction(formData: FormData) {
     .eq('id', fileId)
     .eq('organization_id', workspace.organization.id)
   if (deleteError) {
-    redirect(`${redirectTo}?error=${encodeURIComponent(deleteError.message)}`)
+    redirect(`${redirectTo}?error=DEAL_ACTION_FAILED`)
   }
 
   await recordAuditEvent({
@@ -727,7 +725,7 @@ export async function deleteDealAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
 
-  if (readError || !deal) redirect(`/deals?error=${encodeURIComponent(readError?.message || 'Deal not found')}`)
+  if (readError || !deal) redirect(`/deals?error=DEAL_ACTION_FAILED`)
 
   const { error } = await supabase
     .from('deals')
@@ -735,7 +733,7 @@ export async function deleteDealAction(formData: FormData) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
 
-  if (error) redirect(`/deals/${dealId}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/deals/${dealId}?error=DEAL_ACTION_FAILED`)
 
   await supabase.from('audit_logs').insert({
     organization_id: workspace.organization.id,

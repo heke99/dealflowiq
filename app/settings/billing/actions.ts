@@ -38,14 +38,14 @@ export async function startCheckoutAction(formData: FormData) {
       .maybeSingle(),
   ])
 
-  if (planError || !plan) redirect(`/settings/billing?error=${encodeURIComponent(planError?.message || 'Plan not found')}`)
+  if (planError || !plan) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
 
   const validation = validateCheckoutPlan({
     plan: asRow(plan) as CheckoutPlanCandidate | null,
     interval,
     current: asRow(subscription) as CurrentSubscriptionState | null,
   })
-  if (!validation.ok) redirect(`/settings/billing?error=${encodeURIComponent(validation.reason)}`)
+  if (!validation.ok) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
 
   if (validation.isFree) {
     const { error } = await supabase.from('organization_subscriptions').upsert({
@@ -60,7 +60,7 @@ export async function startCheckoutAction(formData: FormData) {
       notes: 'Free plan selected by workspace owner.',
       updated_at: new Date().toISOString(),
     }, { onConflict: 'organization_id' })
-    if (error) redirect(`/settings/billing?error=${encodeURIComponent(error.message)}`)
+    if (error) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
     await recordAuditEvent({
       organizationId: workspace.organization.id,
       actorId: workspace.user.id,
@@ -82,7 +82,7 @@ export async function startCheckoutAction(formData: FormData) {
       .eq('id', planId)
       .select('*')
       .single()
-    if (updateError) redirect(`/settings/billing?error=${encodeURIComponent(updateError.message)}`)
+    if (updateError) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
     stripeReadyPlan = updatedPlan as StripePlanRow
   }
 
@@ -104,7 +104,7 @@ export async function startCheckoutAction(formData: FormData) {
     checkoutError = error instanceof Error ? error.message : 'Could not create Stripe Checkout session'
   }
 
-  if (checkoutError) redirect(`/settings/billing?error=${encodeURIComponent(checkoutError)}`)
+  if (checkoutError) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
   if (!session?.url) redirect('/settings/billing?error=Stripe Checkout did not return a redirect URL')
   redirect(session.url)
 }
@@ -120,7 +120,7 @@ export async function openBillingPortalAction() {
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
 
-  if (error) redirect(`/settings/billing?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
   const customerId = rowString(asRow(subscription)?.stripe_customer_id)
   if (!customerId) redirect('/settings/billing?error=No Stripe customer is connected to this workspace yet')
 
@@ -132,7 +132,7 @@ export async function openBillingPortalAction() {
     portalError = error instanceof Error ? error.message : 'Could not open Stripe customer portal'
   }
 
-  if (portalError) redirect(`/settings/billing?error=${encodeURIComponent(portalError)}`)
+  if (portalError) redirect(`/settings/billing?error=BILLING_ACTION_FAILED`)
   if (!session?.url) redirect('/settings/billing?error=Stripe Customer Portal did not return a redirect URL')
   redirect(session.url)
 }

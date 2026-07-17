@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { replyListingConversationAction, reportConversationAction, updateConversationStatusAction } from '@/app/messages/actions'
 import { hasFullOpportunityAccess } from '@/lib/billing/freemium'
 import { firstRow, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 function dateTime(value?: unknown) {
   if (!value) return '—'
@@ -103,7 +104,7 @@ export default async function MessageConversationPage({ params, searchParams }: 
           </div>
         </section>
 
-        {error ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">{error}</div> : null}
+        {error ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">{publicErrorMessage(error)}</div> : null}
         {reported === '1' ? <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/10 p-4 text-sm text-emerald-100">Conversation reported. Super admin can review it from moderation.</div> : null}
         {reported === 'already' ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">You already reported this conversation. It is queued for moderation review.</div> : null}
         {!isFullMessaging ? <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">Free plan messaging: you can send 1 message every 48 hours. Upgrade to Pro for full listing conversations.</div> : null}

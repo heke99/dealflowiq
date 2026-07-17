@@ -1,0 +1,314 @@
+import Link from 'next/link'
+import { notFound } from 'next/navigation'
+import { AppShell } from '@/components/layout/AppShell'
+import { getCurrentWorkspace } from '@/lib/auth/workspace'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { isReasonableMonthlyRent, summarizeMarketRentComps } from '@/lib/underwriting/rentIntelligence'
+import { addMarketRentCompAction, applyMarketRentSummaryAction, importZillowMarketRentCompAction, lookupHudRentAction, smartAnalyzeDealAction } from '@/app/deals/[id]/rent-intelligence/actions'
+import { asRow, asRows, firstRow, rowString, type Row } from '@/lib/types/rows'
+
+function money(value: unknown) {
+  const num = Number(value || 0)
+  if (!num) return '—'
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num)
+}
+
+function compRentValue(value: unknown): number | string | null {
+  return typeof value === 'number' || typeof value === 'string' ? value : null
+}
+
+function Stat({ label, value, help }: { label: string; value: React.ReactNode; help?: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+      <div className="text-sm text-slate-400">{label}</div>
+      <div className="mt-2 text-2xl font-bold text-slate-100">{value}</div>
+      {help ? <div className="mt-1 text-xs text-slate-500">{help}</div> : null}
+    </div>
+  )
+}
+
+function Field({ label, name, type = 'text', defaultValue, placeholder, help }: { label: string; name: string; type?: string; defaultValue?: unknown; placeholder?: string; help?: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-300">{label}</span>
+      <input name={name} type={type} step={type === 'number' ? '0.01' : undefined} defaultValue={String(defaultValue ?? '')} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-600 focus:border-white/30" />
+      {help ? <span className="mt-1 block text-xs leading-5 text-slate-500">{help}</span> : null}
+    </label>
+  )
+}
+
+export default async function DealRentIntelligencePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const { id } = await params
+  const query = await searchParams
+  const workspace = await getCurrentWorkspace()
+  const supabase = await createSupabaseServerClient()
+
+  const { data: dealData } = workspace.organization?.id
+    ? await supabase
+        .from('deals')
+        .select('*, properties(*)')
+        .eq('id', id)
+        .eq('organization_id', workspace.organization.id)
+        .maybeSingle()
+    : { data: null }
+
+  if (!dealData) notFound()
+  const deal = dealData as Row
+  const property = firstRow(deal.properties)
+
+  const { data: comps } = workspace.organization?.id
+    ? await supabase
+        .from('market_rent_comps')
+        .select('*')
+        .eq('organization_id', workspace.organization.id)
+        .eq('deal_id', id)
+        .order('created_at', { ascending: false })
+    : { data: [] }
+
+  const { data: hudCacheData } = property?.zip_code
+    ? await supabase
+        .from('hud_fmr_cache')
+        .select('*')
+        .eq('zip_code', property.zip_code)
+        .order('hud_year', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null }
+  const hudCache = asRow(hudCacheData)
+
+  const compRows = asRows(comps)
+  const summary = summarizeMarketRentComps(compRows.map((comp) => ({
+    monthly_rent: compRentValue(comp.monthly_rent),
+    bedrooms: compRentValue(comp.bedrooms),
+    square_feet: compRentValue(comp.square_feet),
+    confidence_score: compRentValue(comp.confidence_score),
+  })))
+  const currentRent = Number(deal.current_rent || 0)
+  const rawMarketRent = Number(deal.market_rent || 0)
+  const marketRent = isReasonableMonthlyRent(rawMarketRent) ? rawMarketRent : 0
+  const hudRent = Number(deal.section8_rent || 0)
+
+  // Rent transparency: where each rent value likely came from and how fresh
+  // the underlying source data is.
+  const dateLabel = (value: unknown) => (value ? new Date(String(value)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null)
+  const hudFetchedAt = dateLabel(hudCache?.fetched_at || hudCache?.updated_at)
+  const latestCompAt = dateLabel(compRows[0]?.created_at)
+  const rentSources: Array<{ label: string; value: number; source: string; freshness: string | null; confidence: string | null }> = [
+    {
+      label: 'Market rent',
+      value: marketRent,
+      source: summary.validCount ? `Estimated from ${summary.validCount} verified comp(s) (median ${money(summary.medianRent || 0)})` : marketRent ? 'Manual entry (no saved comps back this number)' : 'Not set',
+      freshness: summary.validCount ? (latestCompAt ? `Newest comp ${latestCompAt}` : null) : null,
+      confidence: summary.validCount ? `${summary.confidenceScore}/100 comp confidence` : null,
+    },
+    {
+      label: 'HUD / Section 8 rent',
+      value: hudRent,
+      source: hudCache ? `HUD FMR ${String(hudCache.hud_year || '')} for ZIP ${String(hudCache.zip_code || property?.zip_code || '')}` : hudRent ? 'Manual entry (no HUD lookup cached for this ZIP)' : 'Not set',
+      freshness: hudFetchedAt ? `Fetched ${hudFetchedAt}` : null,
+      confidence: hudCache ? 'Official HUD published benchmark' : null,
+    },
+    {
+      label: 'Current rent',
+      value: currentRent,
+      source: currentRent ? 'Manual entry (lease/actuals)' : 'Not set',
+      freshness: null,
+      confidence: null,
+    },
+  ]
+
+  return (
+    <AppShell
+      organizationName={workspace.organization?.name}
+      userEmail={workspace.user.email}
+      accountType={workspace.access.accountType}
+      features={workspace.access.features}
+      subscriptionStatus={workspace.access.status}
+      planName={workspace.access.plan?.name}
+      trialEndsAt={workspace.access.trialEndsAt}
+      isPlatformAdmin={workspace.access.isPlatformAdmin}
+    >
+      <div className="space-y-6">
+        <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Rent Intelligence</div>
+            <h1 className="mt-2 text-3xl font-bold">Smart rent lookup</h1>
+            <p className="mt-3 max-w-3xl text-slate-300">
+              Pull HUD/FMR rent by ZIP, collect market comps, and apply the best rent assumptions to the deal before analysis.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <form action={smartAnalyzeDealAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <input type="hidden" name="redirect_to" value={`/deals/${id}/rent-intelligence`} />
+              <button className="rounded-xl bg-emerald-300 px-5 py-3 text-center font-semibold text-slate-950 hover:bg-emerald-200">Smart analyze</button>
+            </form>
+            <form action={lookupHudRentAction}>
+              <input type="hidden" name="deal_id" value={id} />
+              <input type="hidden" name="redirect_to" value={`/deals/${id}/rent-intelligence`} />
+              <input type="hidden" name="zip_code" value={String(property?.zip_code || '')} />
+              <input type="hidden" name="bedrooms" value={String(property?.bedrooms || '')} />
+              <input type="hidden" name="hud_year" value="auto" />
+              <button className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 hover:bg-white/10">Search HUD rent</button>
+            </form>
+            <Link href={`/deals/${id}/analyzer`} className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 hover:bg-slate-200">Analyze</Link>
+            <Link href={`/deals/${id}/edit`} className="rounded-xl border border-white/10 px-5 py-3 text-center font-semibold text-slate-100 hover:bg-white/10">Edit Deal</Link>
+          </div>
+        </section>
+
+        {query?.notice ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{String(query.notice)}</div> : query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
+        {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {summary.warnings.length ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+            {summary.warnings.map((warning) => <div key={warning}>{warning}</div>)}
+          </div>
+        ) : null}
+        {rawMarketRent > 0 && !marketRent ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+            The saved market rent looks unrealistic and is being ignored by the analyzer: {money(rawMarketRent)}. Add verified rent comps or edit the deal and enter a realistic monthly market rent.
+          </div>
+        ) : null}
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <h2 className="text-xl font-bold">Rent sources & freshness</h2>
+          <p className="mt-1 text-sm text-slate-500">Every rent number shows where it came from, so estimates are never mistaken for verified data.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {rentSources.map((entry) => (
+              <div key={entry.label} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{entry.label}</div>
+                <div className="mt-1 text-2xl font-black text-slate-100">{entry.value ? money(entry.value) : '—'}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">{entry.source}</div>
+                {entry.freshness ? <div className="mt-1 text-xs text-sky-300">{entry.freshness}</div> : null}
+                {entry.confidence ? <div className="mt-1 text-xs text-emerald-300">{entry.confidence}</div> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Stat label="Current Rent" value={money(currentRent)} />
+          <Stat label="Market Rent" value={money(marketRent)} help={summary.count ? `Based on ${summary.validCount}/${summary.count} valid comp(s)` : 'No saved comps yet'} />
+          <Stat label="HUD / Section 8 Benchmark" value={money(hudRent)} help={hudCache ? `HUD year ${hudCache.hud_year}` : 'Run HUD lookup'} />
+          <Stat label="Rent Confidence" value={`${summary.confidenceScore}/100`} help="Based on comps count, sqft data and manual confidence." />
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <form action={addMarketRentCompAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+            <input type="hidden" name="deal_id" value={id} />
+            <h2 className="text-xl font-bold">Add market rent comp</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Add a manual comparable rent. You can also use the direct Zillow importer below when you have authorization for that source.
+            </p>
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-300">Source type</span>
+                <select name="source_type" defaultValue="manual" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                  <option value="manual">Manual comp</option>
+                  <option value="zillow_url">Zillow URL</option>
+                  <option value="licensed_api">Licensed API</option>
+                  <option value="csv_upload">CSV upload</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <Field label="Monthly rent" name="monthly_rent" type="number" />
+              <Field label="Source name" name="source_name" placeholder="Zillow, Apartments.com, PM quote..." />
+              <Field label="Source URL" name="source_url" placeholder="https://..." />
+              <Field label="Comp address" name="comp_address" />
+              <Field label="ZIP code" name="zip_code" defaultValue={property?.zip_code || ''} />
+              <Field label="Bedrooms" name="bedrooms" type="number" defaultValue={property?.bedrooms || ''} />
+              <Field label="Bathrooms" name="bathrooms" type="number" defaultValue={property?.bathrooms || ''} />
+              <Field label="Square feet" name="square_feet" type="number" />
+              <Field label="Distance miles" name="distance_miles" type="number" />
+              <Field label="Listing date" name="listing_date" type="date" />
+              <Field label="Confidence 0-100" name="confidence_score" type="number" />
+            </div>
+            <label className="mt-5 flex items-center gap-3 text-sm text-slate-300">
+              <input type="checkbox" name="apply_to_deal" className="h-4 w-4" defaultChecked />
+              Apply median/recommended market rent to the deal after saving.
+            </label>
+            <button className="mt-6 rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Save Comp</button>
+          </form>
+
+          <div className="space-y-6">
+
+            <form action={importZillowMarketRentCompAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <input type="hidden" name="deal_id" value={id} />
+              <h2 className="text-xl font-bold">Import Zillow comp</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Use this only for Zillow access you are authorized to use. DealFlowIQ fetches the page server-side, extracts rent/address/beds/baths/sqft when available, then stores the URL and raw import metadata for auditability.
+              </p>
+              <div className="mt-6 grid gap-5 md:grid-cols-2">
+                <Field label="Zillow URL" name="zillow_url" placeholder="https://www.zillow.com/..." />
+                <Field label="Manual rent override" name="monthly_rent_override" type="number" help="Optional. Use this if Zillow blocks or does not expose the rent clearly." />
+              </div>
+              <label className="mt-5 flex items-center gap-3 text-sm text-slate-300">
+                <input type="checkbox" name="apply_to_deal" className="h-4 w-4" defaultChecked />
+                Apply updated recommended market rent to the deal after import.
+              </label>
+              <button className="mt-6 rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Import Zillow Comp</button>
+            </form>
+
+            <form action={lookupHudRentAction} className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <input type="hidden" name="deal_id" value={id} />
+              <h2 className="text-xl font-bold">HUD / Section 8 lookup</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+Uses official HUD USER data. Default is Auto/latest available; use a specific year only when you need historical underwriting.
+              </p>
+              <div className="mt-6 grid gap-5 md:grid-cols-3">
+                <Field label="ZIP code" name="zip_code" defaultValue={property?.zip_code || ''} />
+                <Field label="Bedrooms" name="bedrooms" type="number" defaultValue={property?.bedrooms || ''} />
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-300">HUD year</span>
+                  <select name="hud_year" defaultValue="auto" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-100 outline-none focus:border-white/30">
+                    <option value="auto">Auto / Latest available</option>
+                    <option value="2027">2027</option>
+                    <option value="2026">2026</option>
+                    <option value="2025">2025</option>
+                    <option value="2024">2024</option>
+                    <option value="2023">2023</option>
+                  </select>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">Auto tries newest available HUD/FMR year and falls back if not published yet.</span>
+                </label>
+              </div>
+              <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+                HUD/FMR is a benchmark, not guaranteed contract rent. Final Section 8 rent depends on local PHA payment standards, voucher size, tenant income, utility allowance and inspection approval.
+              </div>
+              <button className="mt-6 rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 hover:bg-slate-200">Run HUD Lookup</button>
+            </form>
+
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+              <h2 className="text-xl font-bold">Market rent summary</h2>
+              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3"><dt className="text-slate-500">Low</dt><dd className="font-semibold">{money(summary.lowRent)}</dd></div>
+                <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3"><dt className="text-slate-500">Median</dt><dd className="font-semibold">{money(summary.medianRent)}</dd></div>
+                <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3"><dt className="text-slate-500">High</dt><dd className="font-semibold">{money(summary.highRent)}</dd></div>
+                <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3"><dt className="text-slate-500">Avg $/sqft</dt><dd className="font-semibold">{summary.averageRentPerSqft ? `$${summary.averageRentPerSqft.toFixed(2)}` : '—'}</dd></div>
+              </dl>
+              <form action={applyMarketRentSummaryAction} className="mt-5">
+                <input type="hidden" name="deal_id" value={id} />
+                <button className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-slate-100 hover:bg-white/10">Apply Recommended Market Rent</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+          <h2 className="text-xl font-bold">Saved comps</h2>
+          <div className="mt-5 overflow-hidden rounded-2xl border border-white/10">
+            {compRows.length ? compRows.map((comp) => (
+              <div key={String(comp.id)} className="grid gap-3 border-b border-white/10 p-4 last:border-b-0 md:grid-cols-[1fr_0.7fr_0.7fr_0.7fr] md:items-center">
+                <div>
+                  <div className="font-semibold">{String(comp.comp_address || comp.source_name || 'Rental comp')}</div>
+                  <div className="mt-1 text-xs text-slate-500">{rowString(comp.source_type)?.replaceAll('_', ' ')} · {comp.source_url ? <a href={String(comp.source_url)} target="_blank" className="text-slate-300 underline">source</a> : 'no source URL'}</div>
+                </div>
+                <div className="text-sm text-slate-300">{money(comp.monthly_rent)}/mo</div>
+                <div className="text-sm text-slate-300">{String(comp.bedrooms || '—')} bd · {String(comp.square_feet || '—')} sqft</div>
+                <div className="text-sm text-slate-400">Confidence {String(comp.confidence_score || '—')}</div>
+              </div>
+            )) : <div className="p-6 text-sm text-slate-500">No valid comps yet. Add at least three verified monthly-rent comps for a more useful market rent confidence score.</div>}
+          </div>
+        </section>
+      </div>
+    </AppShell>
+  )
+}

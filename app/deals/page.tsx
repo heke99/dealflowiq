@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { asRows, firstRow } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 function money(value: unknown) {
   const numberValue = Number(value || 0)
@@ -46,8 +47,8 @@ export default async function DealsPage({ searchParams }: { searchParams?: Promi
             <p className="mt-3 max-w-3xl text-slate-300">
               Every account type can create and analyze deals. Account type personalizes the workflow; subscription plans control premium features and limits.
             </p>
-            {error ? <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error.message}</div> : null}
-            {params?.error ? <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(params.error)}</div> : null}
+            {error ? <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage('DATA_LOAD_FAILED')}</div> : null}
+            {params?.error ? <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(params.error)}</div> : null}
           </div>
           <Link href="/deals/new" className="rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200">
             Create Deal

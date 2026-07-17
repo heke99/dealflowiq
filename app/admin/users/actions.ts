@@ -43,7 +43,7 @@ export async function grantUserFullAccessOverrideAction(formData: FormData) {
     features_override: {},
     limits_override: { max_visible_opportunities: null, opportunity_detail_cooldown_hours: 0, max_imports_per_7_days: null },
   })
-  if (error) redirect(`/admin/users?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/users?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     organizationId,
@@ -69,7 +69,7 @@ export async function revokeUserAccessOverrideAction(formData: FormData) {
     .from('user_access_overrides')
     .update({ status: 'revoked', revoked_by: actor.id, revoked_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) redirect(`/admin/users?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/users?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     actorId: actor.id,

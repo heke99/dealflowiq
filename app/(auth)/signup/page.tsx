@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { signUpAction } from '@/lib/auth/actions'
+import { authErrorMessage } from '@/lib/errors/auth-errors'
+import { Turnstile } from '@/components/auth/Turnstile'
 
 type SignupPageProps = {
   searchParams?: Promise<{ error?: string; invite?: string }> | { error?: string; invite?: string }
@@ -68,7 +70,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
         <section className="flex items-center">
           <div className="w-full rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30 sm:p-8">
             <div>
-              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">Start 7-day trial</div>
+              <div className="text-sm font-medium uppercase tracking-wide text-slate-500">{isInviteSignup ? 'Join workspace' : 'Start 7-day trial'}</div>
               <h2 className="mt-2 text-3xl font-bold tracking-tight">{isInviteSignup ? 'Accept your invite' : 'Choose your setup'}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
                 {isInviteSignup
@@ -79,7 +81,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
 
             {params.error ? (
               <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                {decodeURIComponent(params.error)}
+                {authErrorMessage(params.error)}
               </div>
             ) : null}
 
@@ -87,7 +89,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Full name</span>
-                  <input name="full_name" type="text" autoComplete="name" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white/30 focus:ring-4 focus:ring-white/5" placeholder="Your name" />
+                  <input name="full_name" type="text" required minLength={2} maxLength={120} autoComplete="name" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white/30 focus:ring-4 focus:ring-white/5" placeholder="Your name" />
                 </label>
 
                 <label className="block">
@@ -104,9 +106,14 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
 
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300">Password</span>
-                  <input name="password" type="password" required minLength={6} autoComplete="new-password" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white/30 focus:ring-4 focus:ring-white/5" placeholder="At least 6 characters" />
+                  <input name="password" type="password" required minLength={12} autoComplete="new-password" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white/30 focus:ring-4 focus:ring-white/5" placeholder="12+ chars, uppercase, lowercase and number" />
                 </label>
               </div>
+
+              <label className="block">
+                <span className="text-sm font-medium text-slate-300">Confirm password</span>
+                <input name="confirm_password" type="password" required minLength={12} autoComplete="new-password" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white/30 focus:ring-4 focus:ring-white/5" placeholder="Repeat password" />
+              </label>
 
               <label className="block rounded-2xl border border-white/10 bg-slate-900/60 p-4">
                 <span className="text-sm font-semibold text-slate-200">Invite code</span>
@@ -136,14 +143,21 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
                 <input type="hidden" name="account_type" value="solo_investor" />
               )}
 
+              <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-sm text-slate-300">
+                <input type="checkbox" name="legal_acceptance" required className="mt-1" />
+                <span>I accept the <Link href="/terms" className="font-bold text-white underline">Terms</Link> and <Link href="/privacy" className="font-bold text-white underline">Privacy Policy</Link>.</span>
+              </label>
+
+              <Turnstile action="signup" />
+
               <button className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200">
-                {isInviteSignup ? 'Start 7-day trial and join community' : 'Create DealFlowIQ account'}
+                {isInviteSignup ? 'Create account and join community' : 'Create DealFlowIQ account'}
               </button>
             </form>
 
             <p className="mt-6 text-center text-sm text-slate-400">
               Already have an account?{' '}
-              <Link href="/login" className="font-semibold text-white hover:underline">Log in</Link>
+              <Link href={inviteCode ? `/login?next=${encodeURIComponent(`/invites/accept?code=${inviteCode}`)}` : '/login'} className="font-semibold text-white hover:underline">Log in</Link>
             </p>
           </div>
         </section>

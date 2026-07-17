@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { analyzeImportUrlAction, createImportBatchAction, generateImportPreviewAction, importPreviewItemsAction, runProviderCleanupAction, skipPreviewItemsAction, updateImportBatchStatusAction } from '@/app/imports/actions'
 import { SubmitButton } from '@/components/forms/SubmitButton'
 import { asRow, asRows, rowNumber, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -68,7 +69,7 @@ function BatchCard({ batch, selected }: { batch: Row; selected: boolean }) {
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{prettyStatus(batch.import_mode)}</span>
           </div>
           <h2 className="mt-3 text-xl font-bold text-white">{rowString(batch.source_name) || rowString(batch.title)}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{rowString(batch.last_error) || rowString(batch.summary) || 'URL analyzed and ready for provider import workflow.'}</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{batch.last_error ? 'The latest import attempt failed. Review the source and retry.' : rowString(batch.summary) || 'URL analyzed and ready for provider import workflow.'}</p>
           <div className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Location</div><div className="mt-1 font-semibold">{location}</div></div>
             <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Max price</div><div className="mt-1 font-semibold">{money(batch.max_price)}</div></div>
@@ -145,7 +146,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             </div>
           </div>
           {params?.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
-          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{one(params.error)}</div> : null}
+          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(one(params.error))}</div> : null}
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
@@ -222,7 +223,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Retention cleanup</h2><p className="mt-2 text-sm text-slate-400">Provider data is cleaned after its policy retention period. DealFlowIQ analysis, scores, notes and source links stay.</p></div><form action={runProviderCleanupAction}><SubmitButton pendingText="Running cleanup..." className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Run cleanup now</SubmitButton></form></div>
+              <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Retention cleanup</h2><p className="mt-2 text-sm text-slate-400">Provider data is cleaned after its policy retention period. DealFlowIQ analysis, scores, notes and source links stay.</p></div>{workspace.access.isPlatformAdmin ? <form action={runProviderCleanupAction}><SubmitButton pendingText="Running cleanup..." className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10">Run cleanup now</SubmitButton></form> : null}</div>
               <div className="mt-5 space-y-2">
                 {expiringRows.map((row) => <Link key={String(row.id)} href={`/market/${row.id}`} className="block rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm hover:bg-white/5"><span className="font-semibold text-white">{rowString(row.title)}</span><span className="ml-2 text-xs text-slate-500">expires {dateText(row.provider_data_expires_at)}</span></Link>)}
                 {!expiringRows.length ? <div className="rounded-2xl border border-dashed border-white/15 p-4 text-sm text-slate-500">No provider data expiring soon.</div> : null}
@@ -237,7 +238,7 @@ export default async function ImportsPage({ searchParams }: { searchParams?: Pro
                   <div>
                     <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(String(selectedBatch.status))}`}>{prettyStatus(selectedBatch.status)}</span><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{rowString(selectedBatch.source_type)}</span><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">{prettyStatus(selectedBatch.import_mode)}</span></div>
                     <h2 className="mt-3 text-2xl font-black text-white">Selected import batch</h2>
-                    <p className="mt-2 text-sm text-slate-300">{rowString(selectedBatch.last_error) || rowString(selectedBatch.summary)}</p>
+                    <p className="mt-2 text-sm text-slate-300">{selectedBatch.last_error ? 'The latest import attempt failed. Review the source and retry.' : rowString(selectedBatch.summary)}</p>
                     <div className="mt-3 truncate text-xs text-slate-500">{rowString(selectedBatch.normalized_url) || rowString(selectedBatch.input_url)}</div>
                   </div>
                 </div>

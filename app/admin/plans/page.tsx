@@ -6,6 +6,7 @@ import { savePlanAction, deletePlanAction, syncPlanStripeAction, syncOrganizatio
 import { ACCOUNT_TYPE_CONFIGS } from '@/lib/product/accountTypes'
 import { FEATURE_KEYS, featureLabels } from '@/lib/billing/features'
 import { firstRow, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type AdminPlansPageProps = {
   searchParams?: Promise<{ error?: string; saved?: string }> | { error?: string; saved?: string }
@@ -227,7 +228,7 @@ export default async function AdminPlansPage({ searchParams }: AdminPlansPagePro
               <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-4"><div className="text-xs text-slate-500">Organizations</div><div className="mt-1 text-3xl font-black">{numberText(organizations.length)}</div><div className="text-xs text-slate-500">Selectable below</div></div>
             </div>
           </div>
-          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{decodeURIComponent(params.error)}</div> : null}
+          {params.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{publicErrorMessage(params.error)}</div> : null}
           {params.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">Saved and synced.</div> : null}
         </section>
 
@@ -274,7 +275,7 @@ export default async function AdminPlansPage({ searchParams }: AdminPlansPagePro
                             <div className="text-sm">
                               <div className="font-black text-blue-100">Stripe sync</div>
                               <div className="mt-1 text-xs text-blue-100/75">Status: {rowString(plan.stripe_sync_status) || 'pending'} · Product: {shortId(plan.stripe_product_id)} · Monthly: {shortId(plan.stripe_monthly_price_id)} · Yearly: {shortId(plan.stripe_annual_price_id)}</div>
-                              {plan.stripe_last_error ? <div className="mt-2 rounded-xl border border-amber-400/20 bg-amber-400/10 p-2 text-xs text-amber-100">{String(plan.stripe_last_error)}</div> : null}
+                              {plan.stripe_last_error ? <div className="mt-2 rounded-xl border border-amber-400/20 bg-amber-400/10 p-2 text-xs text-amber-100">Stripe synchronization failed. Review the server logs for the provider response.</div> : null}
                             </div>
                             <form action={syncPlanStripeAction}>
                               <input type="hidden" name="plan_id" value={String(plan.id)} />

@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/session'
 import { getWorkspaceAccess, type WorkspaceAccess } from '@/lib/billing/access'
@@ -9,6 +10,10 @@ export type WorkspaceProfile = {
   account_type: string | null
   organization_name: string | null
   onboarding_completed: boolean
+  onboarding_completed_at: string | null
+  onboarding_skipped_at: string | null
+  onboarding_version: number
+  active_organization_id: string | null
 }
 
 export type WorkspaceOrganization = {
@@ -18,6 +23,8 @@ export type WorkspaceOrganization = {
   owner_id: string
   organization_type?: string | null
   account_type?: string | null
+  primary_market?: string | null
+  primary_strategy?: string | null
 }
 
 export type WorkspaceMembership = {
@@ -26,7 +33,6 @@ export type WorkspaceMembership = {
   status: string
   organization: WorkspaceOrganization
 }
-
 
 export type CurrentWorkspace = {
   user: Awaited<ReturnType<typeof requireUser>>
@@ -38,21 +44,33 @@ export type CurrentWorkspace = {
   error: string | null
 }
 
-export async function getCurrentWorkspace(): Promise<CurrentWorkspace> {
+/** Read-only and request-memoized. Bootstrap is an explicit auth/recovery action. */
+export const getCurrentWorkspace = cache(async (): Promise<CurrentWorkspace> => {
   const user = await requireUser()
   const supabase = await createSupabaseServerClient()
 
-  const { error: rpcError } = await supabase.rpc('create_default_organization')
-
-  const { data: profile } = await supabase
+  const { data: profileData, error: profileError } = await supabase
     .from('profiles')
-    .select('id, email, full_name, account_type, organization_name, onboarding_completed')
+    .select('id,email,full_name,account_type,organization_name,onboarding_completed,onboarding_completed_at,onboarding_skipped_at,onboarding_version,active_organization_id')
     .eq('id', user.id)
     .maybeSingle()
 
-  const { data, error } = await supabase
+  if (profileError) {
+    return {
+      user,
+      profile: null,
+      organization: null,
+      membership: null,
+      memberships: [],
+      access: await getWorkspaceAccess({ userId: user.id, accountType: 'solo_investor' }),
+      error: 'PROFILE_READ_FAILED',
+    }
+  }
+
+  const profile = (profileData as WorkspaceProfile | null) || null
+  const { data, error: membershipsError } = await supabase
     .from('organization_members')
-    .select('id, role, status, organizations(id, name, slug, owner_id, organization_type, account_type)')
+    .select('id,role,status,created_at,organizations(id,name,slug,owner_id,organization_type,account_type,primary_market,primary_strategy)')
     .eq('user_id', user.id)
     .eq('status', 'active')
     .order('created_at', { ascending: true })
@@ -66,18 +84,18 @@ export async function getCurrentWorkspace(): Promise<CurrentWorkspace> {
     }))
     .filter((row): row is WorkspaceMembership & { organization: WorkspaceOrganization } => Boolean(row.organization))
 
-  const membership = memberships[0] || null
+  const membership = memberships.find((item) => item.organization.id === profile?.active_organization_id) || memberships[0] || null
   const organization = membership?.organization || null
-  const accountType = organization?.account_type || organization?.organization_type || (profile as WorkspaceProfile | null)?.account_type || 'solo_investor'
+  const accountType = organization?.account_type || organization?.organization_type || profile?.account_type || 'solo_investor'
   const access = await getWorkspaceAccess({ organizationId: organization?.id, accountType, userId: user.id })
 
   return {
     user,
-    profile: (profile as WorkspaceProfile | null) || null,
+    profile,
     organization,
     membership,
     memberships,
     access,
-    error: rpcError?.message || error?.message || null,
+    error: membershipsError ? 'MEMBERSHIP_READ_FAILED' : profile ? null : 'PROFILE_MISSING',
   }
-}
+})

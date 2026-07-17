@@ -97,7 +97,7 @@ function scoreThresholdValue(formData: FormData) {
 
 function requireSourceImports(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
   if (!canUseFeature(workspace.access.features, 'market_source_imports')) {
-    redirect(`/imports?error=${encodeURIComponent('Source imports are a premium feature. Upgrade to import URLs, CSV feeds and external market sources.')}`)
+    redirect(`/imports?error=MARKET_ACTION_FAILED`)
   }
 }
 
@@ -133,7 +133,7 @@ export async function createMarketSourceAction(formData: FormData) {
       createdFrom: 'market_sources_ui',
     },
   }).select('id').single()
-  if (error || !source) redirect(`/imports?error=${encodeURIComponent(error?.message || 'Could not create source')}`)
+  if (error || !source) redirect(`/imports?error=MARKET_ACTION_FAILED`)
 
   if (sourceUrls.length) {
     await supabase.from('market_source_queue_items').upsert(sourceUrls.map((inputUrl) => ({
@@ -156,7 +156,7 @@ export async function importMarketUrlAction(formData: FormData) {
   requireSourceImports(workspace)
 
   const inputUrl = text(formData, 'input_url')
-  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=${encodeURIComponent('Enter a valid source URL.')}`)
+  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=MARKET_ACTION_FAILED`)
   const visibility = visibilityValue(formData)
   const sourceId = text(formData, 'source_id')
   const requestedSourceType = sourceTypeValue(formData)
@@ -167,19 +167,19 @@ export async function importMarketUrlAction(formData: FormData) {
   // Provider policy, rolling-hour rate limit and plan quota gates (mirrors
   // analyzeImportUrlAction in app/imports/actions.ts).
   const policy = await importPolicyForSource(supabase, workspace.organization.id, String(sourceType))
-  if (!policy.active) redirect(`/imports?error=${encodeURIComponent(`${policy.label} import is not active. Configure provider policy before live import.`)}`)
-  if (searchImport && !policy.searchImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} search import is not allowed by current provider policy.`)}`)
-  if (!searchImport && !policy.listingImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} listing import is not allowed by current provider policy.`)}`)
+  if (!policy.active) redirect(`/imports?error=MARKET_ACTION_FAILED`)
+  if (searchImport && !policy.searchImportAllowed) redirect(`/imports?error=MARKET_ACTION_FAILED`)
+  if (!searchImport && !policy.listingImportAllowed) redirect(`/imports?error=MARKET_ACTION_FAILED`)
 
   const recent = await countRecentProviderImports(supabase, workspace.organization.id, String(sourceType))
   const remaining = Math.max(0, policy.maxListingsPerHour - recent)
-  if (remaining <= 0) redirect(`/imports?error=${encodeURIComponent(`${policy.label} rate limit reached. Try again after the rolling hour window.`)}`)
+  if (remaining <= 0) redirect(`/imports?error=MARKET_ACTION_FAILED`)
   const maxUrlsThisRun = Math.min(remaining, 10)
 
   try {
     await ensurePlanImportQuota({ supabase, workspace, requested: searchImport ? maxUrlsThisRun : 1 })
-  } catch (quotaError) {
-    redirect(`/imports?error=${encodeURIComponent(quotaError instanceof Error ? quotaError.message : 'Import limit reached')}`)
+  } catch {
+    redirect(`/imports?error=MARKET_ACTION_FAILED`)
   }
 
   const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
@@ -193,7 +193,7 @@ export async function importMarketUrlAction(formData: FormData) {
     started_at: new Date().toISOString(),
   }).select('*').single()
 
-  if (jobError || !job) redirect(`/imports?error=${encodeURIComponent(jobError?.message || 'Could not create import job')}`)
+  if (jobError || !job) redirect(`/imports?error=MARKET_ACTION_FAILED`)
 
   const previewRows: Record<string, unknown>[] = []
   const listingIds: string[] = []
@@ -339,7 +339,7 @@ export async function importMarketUrlAction(formData: FormData) {
       source_summary: { previewRows, topScore, searchImport, sourceType },
       error_message: message,
     }).eq('id', job.id)
-    redirect(`/imports?import_job_id=${job.id}&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?import_job_id=${job.id}&error=MARKET_ACTION_FAILED`)
   }
 
   redirect(`/market?tab=all&import_job_id=${job.id}&saved=imported`)
@@ -352,7 +352,7 @@ export async function importMarketCsvAction(formData: FormData) {
   requireSourceImports(workspace)
 
   const rawCsv = String(formData.get('csv_text') || '').trim()
-  if (!rawCsv) redirect(`/imports?error=${encodeURIComponent('Paste CSV text first.')}`)
+  if (!rawCsv) redirect(`/imports?error=MARKET_ACTION_FAILED`)
   const visibility = visibilityValue(formData)
   const sourceId = text(formData, 'source_id')
   const supabase = await createSupabaseServerClient()
@@ -366,7 +366,7 @@ export async function importMarketCsvAction(formData: FormData) {
     input_payload: { visibility, rowPreview: rawCsv.slice(0, 500) },
     started_at: new Date().toISOString(),
   }).select('*').single()
-  if (jobError || !job) redirect(`/imports?error=${encodeURIComponent(jobError?.message || 'Could not create CSV import job')}`)
+  if (jobError || !job) redirect(`/imports?error=MARKET_ACTION_FAILED`)
 
   try {
     const listings = parseMarketCsvText(rawCsv, 'csv')
@@ -419,7 +419,7 @@ export async function importMarketCsvAction(formData: FormData) {
       finished_at: new Date().toISOString(),
       error_message: message,
     }).eq('id', job.id)
-    redirect(`/imports?error=${encodeURIComponent(message)}`)
+    redirect(`/imports?error=MARKET_ACTION_FAILED`)
   }
 
   redirect('/opportunities?saved=csv_imported')
@@ -482,7 +482,7 @@ export async function createMarketListingAction(formData: FormData) {
       .eq('organization_id', workspace.organization.id)
       .eq('source_url', sourceUrl)
       .maybeSingle()
-    if (existing?.id) redirect(`/market?tab=all&error=${encodeURIComponent('That source URL already exists in Market.')}`)
+    if (existing?.id) redirect(`/market?tab=all&error=MARKET_ACTION_FAILED`)
   }
 
   try {
@@ -504,9 +504,8 @@ export async function createMarketListingAction(formData: FormData) {
     })
 
     revalidatePath('/market')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not create market listing'
-    redirect(`/imports?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/imports?error=MARKET_ACTION_FAILED`)
   }
 
   redirect('/market?tab=all&saved=listing')
@@ -520,8 +519,8 @@ export async function rescoreMarketListingAction(formData: FormData) {
   const supabase = await createSupabaseServerClient()
   try {
     await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
-  } catch (error) {
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Rescore failed')}`)
+  } catch {
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath('/market')
   revalidatePath('/opportunities')
@@ -558,7 +557,7 @@ export async function saveOpportunityAction(formData: FormData) {
         .not('status', 'in', '(ignored,passed)'),
     ])
     if (!existingEntry && Number(savedCount || 0) >= Number(savedDealsLimit)) {
-      redirect(`/saved-deals?error=${encodeURIComponent(`Your plan allows ${savedDealsLimit} saved deals. Upgrade to save more.`)}`)
+      redirect(`/saved-deals?error=MARKET_ACTION_FAILED`)
     }
   }
 
@@ -569,7 +568,7 @@ export async function saveOpportunityAction(formData: FormData) {
     status: safeStatus,
     last_action_at: new Date().toISOString(),
   }, { onConflict: 'organization_id,user_id,listing_id' })
-  if (error) redirect(`/market?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/market?error=MARKET_ACTION_FAILED`)
   await recordMarketListingActivity(supabase, {
     organizationId: workspace.organization.id,
     listingId,
@@ -596,7 +595,7 @@ export async function convertListingToDealAction(formData: FormData) {
     .select('*')
     .eq('id', listingId)
     .maybeSingle()
-  if (listingError || !listing) redirect(`/market?error=${encodeURIComponent(listingError?.message || 'Listing not found')}`)
+  if (listingError || !listing) redirect(`/market?error=MARKET_ACTION_FAILED`)
 
   const row = listing as Row
   // Explicit tenancy check on top of RLS: convert is allowed for listings in
@@ -609,7 +608,7 @@ export async function convertListingToDealAction(formData: FormData) {
   const { data: deal, error: dealError } = await supabase.from('deals').insert(
     listingToDealPayload(row, { organizationId: workspace.organization.id, userId: workspace.user.id })
   ).select('id').single()
-  if (dealError || !deal) redirect(`/market?error=${encodeURIComponent(dealError?.message || 'Could not convert listing')}`)
+  if (dealError || !deal) redirect(`/market?error=MARKET_ACTION_FAILED`)
 
   const { error: propertyError } = await supabase.from('properties').insert({
     organization_id: workspace.organization.id,
@@ -626,7 +625,7 @@ export async function convertListingToDealAction(formData: FormData) {
     year_built: row.year_built,
     number_of_units: row.units || 1,
   })
-  if (propertyError) redirect(`/deals/${deal.id}/edit?error=${encodeURIComponent(propertyError.message)}`)
+  if (propertyError) redirect(`/deals/${deal.id}/edit?error=MARKET_ACTION_FAILED`)
 
   await supabase.from('market_watchlist').upsert({
     organization_id: workspace.organization.id,
@@ -677,7 +676,7 @@ export async function runMarketSourceAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   if (!canUseFeature(workspace.access.features, 'scheduled_market_imports') && !workspace.access.isPlatformAdmin) {
-    redirect(`/imports?error=${encodeURIComponent('Scheduled/source runs are a premium feature.')}`)
+    redirect(`/imports?error=MARKET_ACTION_FAILED`)
   }
 
   const supabase = await createSupabaseServerClient()
@@ -687,13 +686,12 @@ export async function runMarketSourceAction(formData: FormData) {
     .eq('id', sourceId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (error || !source) redirect(`/imports?error=${encodeURIComponent(error?.message || 'Source not found')}`)
+  if (error || !source) redirect(`/imports?error=MARKET_ACTION_FAILED`)
 
   try {
     await runMarketSourceNow(source, { maxUrls: 5 })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not run market source'
-    redirect(`/imports?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/imports?error=MARKET_ACTION_FAILED`)
   }
 
   revalidatePath('/market')
@@ -704,12 +702,12 @@ export async function publishDealToMarketAction(formData: FormData) {
   const dealId = String(formData.get('deal_id') || '').trim()
   if (!dealId) redirect('/deals?error=Missing deal id')
   const visibility = visibilityValue(formData)
-  if (visibility === 'private') redirect(`/deals/${dealId}?error=${encodeURIComponent('Choose Team, Community, or Public to publish a deal.')}`)
+  if (visibility === 'private') redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   assertNotPaymentRequired(workspace)
   if ((visibility === 'community' || visibility === 'public') && !canUseFeature(workspace.access.features, 'public_community_deals')) {
-    redirect(`/deals/${dealId}?error=${encodeURIComponent('Public/community deal posting is a premium feature.')}`)
+    redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
   }
   const supabase = await createSupabaseServerClient()
   const { data: deal, error: dealError } = await supabase
@@ -718,7 +716,7 @@ export async function publishDealToMarketAction(formData: FormData) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (dealError || !deal) redirect(`/deals/${dealId}?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
+  if (dealError || !deal) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
   const dealRow = deal as Row
 
   const publishedAt = new Date().toISOString()
@@ -727,7 +725,7 @@ export async function publishDealToMarketAction(formData: FormData) {
     published_at: publishedAt,
     expires_at: text(formData, 'expires_at'),
   }).eq('id', dealId).eq('organization_id', workspace.organization.id)
-  if (updateError) redirect(`/deals/${dealId}?error=${encodeURIComponent(updateError.message)}`)
+  if (updateError) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
 
   const title = text(formData, 'title') || dealRow.title
   const postPayload = {
@@ -758,7 +756,7 @@ export async function publishDealToMarketAction(formData: FormData) {
   const { error: postError } = existingPost?.id
     ? await supabase.from('public_deal_posts').update(postPayload).eq('id', existingPost.id)
     : await supabase.from('public_deal_posts').insert(postPayload)
-  if (postError) redirect(`/deals/${dealId}?error=${encodeURIComponent(postError.message)}`)
+  if (postError) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
 
   const listingPayload = dealToMarketListingPayload(dealRow, {
     visibility,
@@ -778,9 +776,8 @@ export async function publishDealToMarketAction(formData: FormData) {
       userId: workspace.user.id,
       visibility,
     })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not publish deal listing'
-    redirect(`/deals/${dealId}?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
   }
 
   revalidatePath('/market')
@@ -801,7 +798,7 @@ export async function unpublishDealAction(formData: FormData) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (dealError || !deal) redirect(`/deals/${dealId}?error=${encodeURIComponent(dealError?.message || 'Deal not found')}`)
+  if (dealError || !deal) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
   const dealRow = deal as Row
 
   const { error: updateError } = await supabase
@@ -809,14 +806,14 @@ export async function unpublishDealAction(formData: FormData) {
     .update({ visibility: 'private', published_at: null })
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
-  if (updateError) redirect(`/deals/${dealId}?error=${encodeURIComponent(updateError.message)}`)
+  if (updateError) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
 
   const { error: postError } = await supabase
     .from('public_deal_posts')
     .update({ status: 'archived' })
     .eq('deal_id', dealId)
     .eq('organization_id', workspace.organization.id)
-  if (postError) redirect(`/deals/${dealId}?error=${encodeURIComponent(postError.message)}`)
+  if (postError) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
 
   // Archive the Market listing(s) publishDealToMarketAction created. That
   // action stores the deal id in both raw_payload.dealId and
@@ -828,7 +825,7 @@ export async function unpublishDealAction(formData: FormData) {
     .update(archivePatch)
     .eq('organization_id', workspace.organization.id)
     .eq('raw_payload->>dealId', dealId)
-  if (rawPayloadArchiveError) redirect(`/deals/${dealId}?error=${encodeURIComponent(rawPayloadArchiveError.message)}`)
+  if (rawPayloadArchiveError) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
 
   const { error: sourceLinkArchiveError } = await supabase
     .from('market_listings')
@@ -836,7 +833,7 @@ export async function unpublishDealAction(formData: FormData) {
     .eq('organization_id', workspace.organization.id)
     .eq('external_listing_id', dealId)
     .in('source_type', ['community_deal', 'public_deal'])
-  if (sourceLinkArchiveError) redirect(`/deals/${dealId}?error=${encodeURIComponent(sourceLinkArchiveError.message)}`)
+  if (sourceLinkArchiveError) redirect(`/deals/${dealId}?error=MARKET_ACTION_FAILED`)
 
   await recordAuditEvent({
     organizationId: workspace.organization.id,
@@ -866,21 +863,21 @@ export async function archiveMarketListingAction(formData: FormData) {
     .select('id,organization_id,created_by,visibility')
     .eq('id', listingId)
     .maybeSingle()
-  if (listingError || !listing) redirect(`${returnTo}?error=${encodeURIComponent(listingError?.message || 'Listing not found')}`)
+  if (listingError || !listing) redirect(`${returnTo}?error=MARKET_ACTION_FAILED`)
 
   const row = listing as Row
   const isOwner = row.created_by === workspace.user.id
   const membershipRole = String(workspace.membership?.role || '')
   const isOrgAdmin = workspace.access.isPlatformAdmin || ['owner', 'admin'].includes(membershipRole)
   if (!isOwner && !isOrgAdmin) {
-    redirect(`${returnTo}?error=${encodeURIComponent('Only the listing owner or an admin can remove this listing from Market.')}`)
+    redirect(`${returnTo}?error=MARKET_ACTION_FAILED`)
   }
 
   const { error } = await supabase
     .from('market_listings')
     .update({ status: 'archived', archived_at: new Date().toISOString(), archived_by: workspace.user.id })
     .eq('id', listingId)
-  if (error) redirect(`${returnTo}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`${returnTo}?error=MARKET_ACTION_FAILED`)
 
   revalidatePath('/market')
   revalidatePath('/opportunities')
@@ -896,7 +893,7 @@ export async function addMarketListingNoteAction(formData: FormData) {
   const noteType = String(formData.get('note_type') || 'internal')
   const safeNoteType = ['internal', 'seller_call', 'buyer_feedback', 'underwriting', 'offer', 'risk'].includes(noteType) ? noteType : 'internal'
   if (!listingId) redirect('/market?error=Missing listing id')
-  if (!note) redirect(`/market/${listingId}?error=${encodeURIComponent('Write a note first.')}`)
+  if (!note) redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   const supabase = await createSupabaseServerClient()
@@ -907,7 +904,7 @@ export async function addMarketListingNoteAction(formData: FormData) {
     note,
     note_type: safeNoteType,
   })
-  if (error) redirect(`/market/${listingId}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   await recordMarketListingActivity(supabase, {
     organizationId: workspace.organization.id,
     listingId,
@@ -956,7 +953,7 @@ export async function updateMarketListingReviewStatusAction(formData: FormData) 
     })
     .eq('id', listingId)
     .eq('organization_id', workspace.organization.id)
-  if (error) redirect(`/market/${listingId}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   await recordMarketListingActivity(supabase, {
     organizationId: workspace.organization.id,
     listingId,
@@ -1075,8 +1072,8 @@ export async function updateMarketListingAnalysisInputsAction(formData: FormData
       description: `Inputs saved. Score is now ${Math.round(Number(score.dealScore || 0))}/100 and rent confidence is ${Math.round(Number(score.rentConfidenceScore || 0))}/100.`,
       metadata: { changedFields: Object.keys(patch), score, listingId: listing.id },
     })
-  } catch (error) {
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Analysis inputs failed to save')}`)
+  } catch {
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath('/market')
   revalidatePath('/opportunities')
@@ -1095,8 +1092,8 @@ export async function runListingMarketRentAction(formData: FormData) {
     const result = await applyMarketRentEstimateToListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listing, source: 'manual_button' })
     const score = await rescoreListingAfterIntelligence({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listing: result.listing })
     await supabase.from('market_listings').update({ data_quality_checklist: buildDataQualityChecklist(result.listing, score), confidence_breakdown: buildConfidenceBreakdown(result.listing, score) }).eq('id', listingId).eq('organization_id', workspace.organization.id)
-  } catch (error) {
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Market rent analysis failed')}`)
+  } catch {
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath(`/market/${listingId}`)
   redirect(`/market/${listingId}?saved=market_rent`)
@@ -1115,7 +1112,7 @@ export async function runListingHudLookupAction(formData: FormData) {
     await supabase.from('market_listings').update({ data_quality_checklist: buildDataQualityChecklist(result.listing, score), confidence_breakdown: buildConfidenceBreakdown(result.listing, score) }).eq('id', listingId).eq('organization_id', workspace.organization.id)
   } catch (error) {
     await createInAppNotification(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, actorId: workspace.user.id, type: 'hud_lookup_failed', title: 'HUD/FMR lookup failed', message: error instanceof Error ? error.message : 'HUD lookup failed', relatedEntityType: 'market_listing', relatedEntityId: listingId, actionHref: `/market/${listingId}` })
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'HUD lookup failed')}`)
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath(`/market/${listingId}`)
   redirect(`/market/${listingId}?saved=hud`)
@@ -1130,8 +1127,8 @@ export async function runListingFullIntelligenceAction(formData: FormData) {
   try {
     const listing = await loadOrgListing(supabase, listingId, workspace.organization.id)
     await runListingRentIntelligence({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listing, runHud: true })
-  } catch (error) {
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Rent intelligence failed')}`)
+  } catch {
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath(`/market/${listingId}`)
   redirect(`/market/${listingId}?saved=intelligence`)
@@ -1143,9 +1140,9 @@ export async function addListingManualOverrideAction(formData: FormData) {
   const newValue = String(formData.get('new_value') || '').trim()
   const reason = text(formData, 'reason') || 'Manual underwriting override.'
   const applyToScore = String(formData.get('apply_to_score') || 'on') === 'on'
-  if (!listingId || !newValue) redirect(`/market/${listingId || ''}?error=${encodeURIComponent('Manual override needs a value.')}`)
+  if (!listingId || !newValue) redirect(`/market/${listingId || ''}?error=MARKET_ACTION_FAILED`)
   const parsedOverrideValue = Number(newValue.replace(/[$,\s]/g, ''))
-  if (!Number.isFinite(parsedOverrideValue) || parsedOverrideValue < 0) redirect(`/market/${listingId}?error=${encodeURIComponent('Manual override value must be a valid positive number.')}`)
+  if (!Number.isFinite(parsedOverrideValue) || parsedOverrideValue < 0) redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   const safeField = ['market_rent', 'hud_rent', 'current_rent', 'estimated_rent', 'target_rent', 'list_price', 'asking_price', 'arv', 'rehab_estimate', 'taxes_annual', 'insurance_annual', 'hoa_monthly', 'utilities_monthly', 'capex_monthly', 'vacancy_percent', 'management_percent', 'down_payment_percent', 'interest_rate_percent', 'loan_term_months', 'dscr_min_threshold'].includes(fieldName) ? fieldName : 'market_rent'
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
@@ -1164,8 +1161,8 @@ export async function addListingManualOverrideAction(formData: FormData) {
     if (applyToScore) {
       await rescoreAndSyncListing({ supabase, organizationId: workspace.organization.id, userId: workspace.user.id, listingId })
     }
-  } catch (error) {
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Manual override failed')}`)
+  } catch {
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath(`/market/${listingId}`)
   redirect(`/market/${listingId}?saved=override`)
@@ -1180,7 +1177,7 @@ export async function updateMarketListingStageAction(formData: FormData) {
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase.from('market_listings').update({ deal_stage: safeStage }).eq('id', listingId).eq('organization_id', workspace.organization.id)
-  if (error) redirect(`/market/${listingId}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   await recordMarketListingActivity(supabase, { organizationId: workspace.organization.id, listingId, actorId: workspace.user.id, eventType: 'stage_updated', title: `Stage: ${safeStage.replaceAll('_', ' ')}`, metadata: { dealStage: safeStage } })
   revalidatePath(`/market/${listingId}`)
   redirect(`/market/${listingId}?saved=stage`)
@@ -1200,8 +1197,8 @@ export async function ignoreMarketListingAction(formData: FormData) {
     await supabase.from('market_ignored_listings').upsert({ organization_id: workspace.organization.id, source_type: listing.source_type, source_url: listing.source_url, external_listing_id: listing.external_listing_id, normalized_address: [listing.address, listing.city, listing.state].filter(Boolean).join(', ').toLowerCase(), zip_code: listing.zip_code, reason, notes, ignored_by: workspace.user.id }, { onConflict: 'organization_id,source_url' })
     await supabase.from('market_listings').update({ status: 'archived', deal_status: 'archived', deal_stage: 'archived', archived_at: new Date().toISOString(), archived_by: workspace.user.id }).eq('id', listingId).eq('organization_id', workspace.organization.id)
     await recordMarketListingActivity(supabase, { organizationId: workspace.organization.id, listingId, actorId: workspace.user.id, eventType: 'ignored', title: 'Listing ignored', description: reason.replaceAll('_', ' '), metadata: { reason, notes } })
-  } catch (error) {
-    redirect(`/market/${listingId}?error=${encodeURIComponent(error instanceof Error ? error.message : 'Could not ignore listing')}`)
+  } catch {
+    redirect(`/market/${listingId}?error=MARKET_ACTION_FAILED`)
   }
   revalidatePath('/market')
   revalidatePath(`/market/${listingId}`)

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto'
+import { getCanonicalAppUrl } from '@/lib/config/app-url'
 
 export type StripeBillingInterval = 'month' | 'year'
 
@@ -27,7 +28,6 @@ export type StripeSyncResult = {
 }
 
 const STRIPE_API_BASE = 'https://api.stripe.com/v1'
-const DEFAULT_APP_URL = 'http://localhost:3000'
 
 function stripeSecretKey() {
   return process.env.STRIPE_SECRET_KEY || ''
@@ -46,9 +46,7 @@ export function stripeMode() {
 }
 
 export function appBaseUrl() {
-  const configured = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || DEFAULT_APP_URL
-  const withProtocol = configured.startsWith('http') ? configured : `https://${configured}`
-  return withProtocol.replace(/\/$/, '')
+  return getCanonicalAppUrl()
 }
 
 function toStripeForm(params: Record<string, string | number | boolean | null | undefined>) {

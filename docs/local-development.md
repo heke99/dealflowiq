@@ -17,14 +17,14 @@ cp .env.example .env.local
 
 ### Database
 
-Apply the migrations in `supabase/migrations/` in filename order. With the Supabase CLI:
+Migration filenames use unique 14-digit versions. Validate them and rebuild the local stack:
 
 ```bash
-supabase link --project-ref <your-ref>
-supabase db push
+npm run db:migrations:check
+./scripts/sync-supabase.sh --local-reset
 ```
 
-Note: several migration numbers are duplicated (`017`, `019`, `025`, `026`). They apply safely in **filename order** (the order `ls` shows). Do not renumber existing files; new migrations continue from `034_`.
+For an existing linked Supabase project, use the backup + history-repair procedure in [database.md](./database.md#migration-reconciliation). Do not run a raw `db push` immediately after upgrading from the old duplicate-number history.
 
 ### First platform admin (bootstrap)
 
@@ -57,6 +57,7 @@ npm run build       # production build (must always pass)
 npm run lint        # eslint
 npm run typecheck   # tsc --noEmit
 npm run test        # vitest run
+npm run verify      # full release gate
 npm run test:watch  # vitest watch mode
 ```
 

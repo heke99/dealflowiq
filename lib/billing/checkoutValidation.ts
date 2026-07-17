@@ -54,6 +54,9 @@ export function validateCheckoutPlan(params: {
   const hasLiveStripeSubscription = Boolean(
     current?.stripe_subscription_id && LIVE_STRIPE_STATUSES.includes(String(current.status || ''))
   )
+  if (hasLiveStripeSubscription && isFree) {
+    return { ok: false, reason: 'Cancel or change the live Stripe subscription in the billing portal before selecting a free plan.' }
+  }
   if (!isFree && hasLiveStripeSubscription && isCurrentPlan) {
     return { ok: false, reason: 'You already have an active subscription on this plan. Use the billing portal to manage it.' }
   }

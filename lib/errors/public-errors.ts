@@ -1,0 +1,47 @@
+const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
+  AUTH_REQUIRED: 'Please sign in and try again.',
+  WORKSPACE_ACCESS_DENIED: 'You do not have permission to perform this action.',
+  WORKSPACE_BOOTSTRAP_FAILED: 'Your workspace could not be prepared. Please try again.',
+  PROFILE_READ_FAILED: 'Your profile could not be loaded.',
+  PROFILE_MISSING: 'Your profile needs to be repaired before you can continue.',
+  MEMBERSHIP_READ_FAILED: 'Your workspace memberships could not be loaded.',
+  IMPORT_ACTION_FAILED: 'The import could not be completed.',
+  BUYER_ACTION_FAILED: 'The buyer action could not be completed.',
+  DEAL_ACTION_FAILED: 'The deal action could not be completed.',
+  RENT_ANALYSIS_FAILED: 'The rent analysis could not be completed.',
+  MARKET_ACTION_FAILED: 'The market action could not be completed.',
+  BUY_BOX_ACTION_FAILED: 'The buy-box action could not be completed.',
+  BILLING_ACTION_FAILED: 'The billing action could not be completed.',
+  SETTINGS_ACTION_FAILED: 'The settings action could not be completed.',
+  ADMIN_ACTION_FAILED: 'The administrative action could not be completed.',
+  DATA_LOAD_FAILED: 'The requested data could not be loaded.',
+  PASSWORD_INVALID: 'Use matching passwords with at least 12 characters.',
+  REAUTH_REQUIRED: 'Your current password could not be verified.',
+  PASSWORD_CHANGE_FAILED: 'The password could not be changed.',
+  PASSWORD_CHANGE_AUDIT_FAILED: 'Your password changed, but the security confirmation could not be recorded. Sign in with the new password and contact support.',
+  OWNERSHIP_TRANSFER_INVALID: 'Choose a valid active member.',
+  OWNERSHIP_TRANSFER_FAILED: 'Ownership could not be transferred.',
+  OWNERSHIP_TRANSFER_REQUIRED: 'Use the ownership transfer flow for an existing workspace.',
+  ACCOUNT_DELETION_CONFIRMATION_REQUIRED: 'Type DELETE to confirm account deletion.',
+  ACCOUNT_DELETION_BLOCKED_OWNER: 'Transfer or close every workspace you own before deleting your account.',
+  ACCOUNT_DELETION_FAILED: 'The account could not be deleted. No ownership data was changed.',
+  MESSAGE_COOLDOWN: 'Free plan messages can be sent once every 48 hours.',
+  MESSAGE_RATE_LIMIT: 'Too many messages were sent. Please try again later.',
+  MESSAGE_REQUIRED: 'Write a message before sending.',
+  LISTING_NOT_FOUND: 'The listing could not be found.',
+  MESSAGING_DISABLED: 'This listing owner has disabled in-app messages.',
+  LISTING_OWNER_MISSING: 'This listing does not have a contact owner yet.',
+  SELF_MESSAGE_NOT_ALLOWED: 'You cannot message yourself on your own listing.',
+  CONVERSATION_NOT_FOUND: 'The conversation could not be found.',
+  CONVERSATION_ACCESS_DENIED: 'You do not have access to this conversation.',
+  CONTACT_SETTINGS_DENIED: 'You cannot manage contact settings for this listing.',
+  SUPPORT_INVALID_EMAIL: 'Enter a valid email address so we can reply to you.',
+  SUPPORT_MESSAGE_REQUIRED: 'Describe your issue so we can help.',
+  SUPPORT_RATE_LIMIT: 'You already sent a request recently. Please wait before sending another.',
+}
+
+export function publicErrorMessage(value: unknown, fallback = 'The action could not be completed. Please try again.') {
+  const raw = Array.isArray(value) ? value[0] : value
+  const code = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
+  return PUBLIC_ERROR_MESSAGES[code] || fallback
+}

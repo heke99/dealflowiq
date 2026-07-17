@@ -57,8 +57,7 @@ async function enforceFreeMessageLimit(params: {
   if (!lastMessageAt) return
   const nextUnlock = new Date(new Date(String(lastMessageAt)).getTime() + FREE_MESSAGE_COOLDOWN_HOURS * 60 * 60 * 1000)
   if (nextUnlock.getTime() > Date.now()) {
-    const message = `Free users can send 1 message every 48 hours. Your next message unlocks ${nextUnlock.toLocaleString()}. Upgrade to Pro for full listing conversations.`
-    redirect(`${params.returnTo}${params.returnTo.includes('?') ? '&' : '?'}error=${encodeURIComponent(message)}`)
+    redirect(`${params.returnTo}${params.returnTo.includes('?') ? '&' : '?'}error=MESSAGE_COOLDOWN`)
   }
 }
 
@@ -84,8 +83,7 @@ async function enforceMessageFloodCap(params: {
     .gte('created_at', oneHourAgo)
 
   if ((count || 0) >= MESSAGE_FLOOD_LIMIT_PER_HOUR) {
-    const message = `You reached the limit of ${MESSAGE_FLOOD_LIMIT_PER_HOUR} messages per conversation per hour. Please wait before sending more.`
-    redirect(`${params.returnTo}${params.returnTo.includes('?') ? '&' : '?'}error=${encodeURIComponent(message)}`)
+    redirect(`${params.returnTo}${params.returnTo.includes('?') ? '&' : '?'}error=MESSAGE_RATE_LIMIT`)
   }
 }
 
@@ -177,12 +175,12 @@ export async function startListingConversationAction(formData: FormData) {
   const listingId = cleanText(formData.get('listing_id'), 100)
   const body = cleanText(formData.get('body'))
   const returnTo = listingId ? `/market/${listingId}#contact-owner` : '/market'
-  if (!listingId || !body) redirect(`${returnTo}?error=${encodeURIComponent('Write a message before sending.')}`)
+  if (!listingId || !body) redirect(`${returnTo}?error=MESSAGE_REQUIRED`)
 
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
   const { data: listing } = await supabase.from('market_listings').select('*').eq('id', listingId).maybeSingle()
-  if (!listing) redirect(`/market?error=${encodeURIComponent('Listing was not found.')}`)
+  if (!listing) redirect('/market?error=LISTING_NOT_FOUND')
 
   const { data: settings } = await supabase
     .from('listing_contact_settings')
@@ -191,12 +189,12 @@ export async function startListingConversationAction(formData: FormData) {
     .maybeSingle()
 
   if ((settings as Row | null)?.allow_in_app_messages === false) {
-    redirect(`${returnTo}?error=${encodeURIComponent('This listing owner has disabled in-app messages.')}`)
+    redirect(`${returnTo}?error=MESSAGING_DISABLED`)
   }
 
   const ownerUserId = await getListingOwner({ supabase, listing: listing as Row })
-  if (!ownerUserId) redirect(`${returnTo}?error=${encodeURIComponent('This listing does not have a contact owner yet.')}`)
-  if (ownerUserId === workspace.user.id) redirect(`${returnTo}?error=${encodeURIComponent('You cannot start a conversation with yourself on your own listing.')}`)
+  if (!ownerUserId) redirect(`${returnTo}?error=LISTING_OWNER_MISSING`)
+  if (ownerUserId === workspace.user.id) redirect(`${returnTo}?error=SELF_MESSAGE_NOT_ALLOWED`)
 
   await enforceFreeMessageLimit({ supabase, userId: workspace.user.id, hasFullMessagingAccess: hasFullOpportunityAccess(workspace.access), returnTo })
 
@@ -213,7 +211,7 @@ export async function replyListingConversationAction(formData: FormData) {
   const conversationId = cleanText(formData.get('conversation_id'), 100)
   const body = cleanText(formData.get('body'))
   const returnTo = conversationId ? `/messages/${conversationId}` : '/messages'
-  if (!conversationId || !body) redirect(`${returnTo}?error=${encodeURIComponent('Write a message before sending.')}`)
+  if (!conversationId || !body) redirect(`${returnTo}?error=MESSAGE_REQUIRED`)
 
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
@@ -223,10 +221,10 @@ export async function replyListingConversationAction(formData: FormData) {
     .eq('id', conversationId)
     .maybeSingle()
 
-  if (!conversation) redirect('/messages?error=Conversation not found')
+  if (!conversation) redirect('/messages?error=CONVERSATION_NOT_FOUND')
   const row = conversation as Row
   if (![row.buyer_user_id, row.owner_user_id].includes(workspace.user.id) && !workspace.access.isPlatformAdmin) {
-    redirect('/messages?error=You do not have access to this conversation')
+    redirect('/messages?error=CONVERSATION_ACCESS_DENIED')
   }
 
   await enforceFreeMessageLimit({ supabase, userId: workspace.user.id, hasFullMessagingAccess: hasFullOpportunityAccess(workspace.access), returnTo })
@@ -263,7 +261,7 @@ export async function updateListingContactSettingsAction(formData: FormData) {
   const workspace = await getCurrentWorkspace()
   const supabase = await createSupabaseServerClient()
   const { data: listing } = await supabase.from('market_listings').select('*').eq('id', listingId).maybeSingle()
-  if (!listing || !canManageListingContact(workspace, listing as Row)) redirect(`/market/${listingId}?error=${encodeURIComponent('You cannot manage contact settings for this listing.')}`)
+  if (!listing || !canManageListingContact(workspace, listing as Row)) redirect(`/market/${listingId}?error=CONTACT_SETTINGS_DENIED`)
 
   const payload = {
     listing_id: listingId,

@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { ArrowRight, BadgeCheck, BarChart3, Building2, LockKeyhole, Search, ShieldCheck, Target } from 'lucide-react'
 import { resendConfirmationEmailAction, signInAction } from '@/lib/auth/actions'
+import { authErrorMessage } from '@/lib/errors/auth-errors'
+import { Turnstile } from '@/components/auth/Turnstile'
 
 type LoginPageProps = {
   searchParams?: Promise<{ error?: string; message?: string; next?: string }> | { error?: string; message?: string; next?: string }
@@ -82,9 +84,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
               {params.error ? (
                 <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-medium text-red-100">
-                  {decodeURIComponent(params.error)}
-                  {/(confirm|not confirmed|verification)/i.test(decodeURIComponent(params.error)) ? (
-                    <form action={resendConfirmationEmailAction} className="mt-3 flex flex-wrap items-center gap-2">
+                  {authErrorMessage(params.error)}
+                  {params.error === 'EMAIL_NOT_CONFIRMED' ? (
+                    <form action={resendConfirmationEmailAction} className="mt-3 space-y-2">
+                      <input type="hidden" name="next" value={params.next || '/onboarding'} />
+                      <div className="flex flex-wrap items-center gap-2">
                       <input
                         name="email"
                         type="email"
@@ -95,6 +99,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                       <button className="rounded-xl border border-red-300/30 px-4 py-2 text-xs font-black uppercase tracking-wide text-red-100 hover:bg-red-500/20">
                         Resend confirmation
                       </button>
+                      </div>
+                      <Turnstile action="resend_confirmation" />
                     </form>
                   ) : null}
                 </div>
@@ -102,7 +108,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
               {params.message ? (
                 <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm font-medium text-emerald-100">
-                  {decodeURIComponent(params.message)}
+                  {authErrorMessage(params.message)}
                 </div>
               ) : null}
 
@@ -136,6 +142,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                   />
                 </label>
 
+                <Turnstile action="login" />
+
                 <button className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-4 font-black text-slate-950 transition hover:bg-slate-200">
                   Log in
                   <ArrowRight className="h-4 w-4" />
@@ -144,7 +152,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
               <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/50 p-4 text-sm text-slate-400">
                 New to DealFlowIQ?{' '}
-                <Link href="/signup" className="font-black text-white hover:underline">
+                <Link href={params.next ? `/signup?next=${encodeURIComponent(params.next)}` : '/signup'} className="font-black text-white hover:underline">
                   Create your workspace
                 </Link>
               </div>

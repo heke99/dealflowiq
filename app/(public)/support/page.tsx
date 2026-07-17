@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { submitSupportRequestAction } from './actions'
 import { SUPPORT_EMAIL } from '../legal'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 export const metadata: Metadata = {
   title: 'Support',
@@ -46,7 +47,7 @@ export default async function SupportPage({ searchParams }: { searchParams?: Pro
             </div>
           ) : null}
           {errorMessage ? (
-            <div className="mb-5 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">{errorMessage}</div>
+            <div className="mb-5 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">{publicErrorMessage(errorMessage)}</div>
           ) : null}
 
           <form action={submitSupportRequestAction} className="grid gap-4">

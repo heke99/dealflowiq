@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
 import { createBuyBoxAction, runBuyBoxNowAction, archiveBuyBoxAction } from '@/app/buy-boxes/actions'
 import { rowNumber, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -46,7 +47,7 @@ function BuyBoxCard({ buyBox }: { buyBox: Row }) {
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3"><div className="text-xs text-slate-500">Opportunities</div><div className="font-bold text-emerald-300">{rowNumber(buyBox.last_opportunities_count) || 0}</div></div>
       </div>
       <div className="mt-4 text-xs text-slate-500">Next run: {dateText(buyBox.next_run_at)}</div>
-      {buyBox.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{String(buyBox.last_error)}</div> : null}
+      {buyBox.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">The latest background operation failed. Retry after reviewing the inputs.</div> : null}
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <form action={runBuyBoxNowAction}><input type="hidden" name="buy_box_id" value={String(buyBox.id)} /><button className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">Run now</button></form>
         <Link href={`/buy-boxes/${buyBox.id}`} className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-slate-100">Details</Link>
@@ -87,7 +88,7 @@ export default async function BuyBoxesPage({ searchParams }: { searchParams?: Pr
             </div>
           </div>
           {savedMessage ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{savedMessage}</div> : null}
-          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{one(params.error)}</div> : null}
+          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(one(params.error))}</div> : null}
           {!buyBoxesEnabled ? <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">Buy Boxes and scheduled market discovery are locked on this workspace. Enable Scheduled Market Imports in the plan/admin settings to create and run Buy Boxes.</div> : null}
         </section>
 

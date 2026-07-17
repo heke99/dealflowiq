@@ -58,7 +58,7 @@ function nextRunFor(frequency: string) {
 
 function requireBuyBoxAccess(workspace: Awaited<ReturnType<typeof getCurrentWorkspace>>) {
   if (!canUseFeature(workspace.access.features, 'scheduled_market_imports') && !workspace.access.isPlatformAdmin) {
-    redirect(`/buy-boxes?error=${encodeURIComponent('Buy Boxes and scheduled market discovery are a premium feature.')}`)
+    redirect(`/buy-boxes?error=BUY_BOX_ACTION_FAILED`)
   }
 }
 
@@ -109,7 +109,7 @@ export async function createBuyBoxAction(formData: FormData) {
     settings: { createdFrom: 'buy_box_ui' },
   }).select('*').single()
 
-  if (error || !buyBox) redirect(`/buy-boxes?error=${encodeURIComponent(error?.message || 'Could not create buy box')}`)
+  if (error || !buyBox) redirect(`/buy-boxes?error=BUY_BOX_ACTION_FAILED`)
 
   if (sourceUrls.length) {
     const { data: source } = await supabase.from('market_sources').insert({
@@ -188,7 +188,7 @@ export async function updateBuyBoxAction(formData: FormData) {
     source_urls: sourceUrls,
     schedule_frequency: schedule,
   }).eq('id', buyBoxId).eq('organization_id', workspace.organization.id)
-  if (error) redirect(`/buy-boxes/${buyBoxId}?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/buy-boxes/${buyBoxId}?error=BUY_BOX_ACTION_FAILED`)
 
   const { data: linkedSources } = await supabase
     .from('market_sources')
@@ -237,7 +237,7 @@ export async function runBuyBoxNowAction(formData: FormData) {
   const supabase = await createSupabaseServerClient()
 
   const { data: buyBox, error: buyBoxError } = await supabase.from('market_buy_boxes').select('*').eq('id', buyBoxId).eq('organization_id', workspace.organization.id).maybeSingle()
-  if (buyBoxError || !buyBox) redirect(`/buy-boxes?error=${encodeURIComponent(buyBoxError?.message || 'Buy box not found')}`)
+  if (buyBoxError || !buyBox) redirect(`/buy-boxes?error=BUY_BOX_ACTION_FAILED`)
 
   const { data: sources } = await supabase.from('market_sources').select('*').eq('organization_id', workspace.organization.id).eq('buy_box_id', buyBoxId).eq('status', 'active')
 

@@ -1,175 +1,71 @@
 'use server'
 
-import { randomBytes } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
-import { sendCommunityInviteEmail } from '@/lib/community/inviteEmail'
 
-type InviteRole = 'member' | 'viewer' | 'buyer' | 'acquisition_manager' | 'disposition_manager' | 'admin'
-
-function toMessage(value: string) {
-  return encodeURIComponent(value)
-}
-
-function getBaseUrl() {
-  const explicit = process.env.NEXT_PUBLIC_APP_URL
-  if (explicit) return explicit.replace(/\/$/, '')
-  const vercel = process.env.VERCEL_URL
-  if (vercel) return `https://${vercel}`
-  return 'http://localhost:3000'
-}
-
-function generateInviteCode() {
-  return randomBytes(6).toString('hex').toUpperCase()
+function integerField(formData: FormData, key: string, min: number, max: number) {
+  const parsed = Number(String(formData.get(key) || '').trim())
+  return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : null
 }
 
 async function requireCommunityAdmin() {
   const workspace = await getCurrentWorkspace()
-  const role = workspace.membership?.role
-  if (!workspace.organization?.id) redirect('/dashboard?error=Missing workspace')
-  if (!['owner', 'admin'].includes(role || '') && !workspace.access.isPlatformAdmin) {
-    redirect('/community?error=Only community owners and admins can manage invites')
-  }
+  if (!workspace.organization?.id) redirect('/onboarding?error=WORKSPACE_BOOTSTRAP_FAILED')
+  if (!['owner','admin'].includes(workspace.membership?.role || '') && !workspace.access.isPlatformAdmin) redirect('/community?error=WORKSPACE_ACCESS_DENIED')
   return workspace
 }
 
 export async function createCommunityTeamAction(formData: FormData) {
   const workspace = await requireCommunityAdmin()
-  const supabase = await createSupabaseServerClient()
   const name = String(formData.get('name') || '').trim()
   const description = String(formData.get('description') || '').trim()
-
-  if (name.length < 2) {
-    redirect(`/community?error=${toMessage('Team name is required.')}`)
-  }
-
-  const { error } = await supabase.from('community_teams').insert({
-    organization_id: workspace.organization!.id,
-    name,
-    description: description || null,
-    created_by: workspace.user.id,
-  })
-
-  if (error) redirect(`/community?error=${toMessage(error.message)}`)
+  if (name.length < 2 || name.length > 120) redirect('/community?error=INVITE_INVALID')
+  const supabase = await createSupabaseServerClient()
+  const { error } = await supabase.from('community_teams').insert({ organization_id: workspace.organization!.id, name, description: description || null, created_by: workspace.user.id })
+  if (error) redirect('/community?error=INTERNAL_ERROR')
   revalidatePath('/community')
-  redirect('/community?message=Team created')
+  redirect('/community?message=TEAM_CREATED')
 }
 
-const INVITE_CREATION_LIMIT_PER_DAY = 20
-
 export async function createCommunityInviteAction(formData: FormData) {
-  const workspace = await requireCommunityAdmin()
-  const supabase = await createSupabaseServerClient()
-
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const { count: recentInvites } = await supabase
-    .from('community_invites')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', workspace.organization!.id)
-    .gte('created_at', dayAgo)
-  if ((recentInvites || 0) >= INVITE_CREATION_LIMIT_PER_DAY) {
-    redirect(`/community?error=${toMessage(`Invite limit reached: your community can create at most ${INVITE_CREATION_LIMIT_PER_DAY} invites per 24 hours. Try again later.`)}`)
-  }
-
+  await requireCommunityAdmin()
   const email = String(formData.get('email') || '').trim().toLowerCase()
   const fullName = String(formData.get('full_name') || '').trim()
   const teamId = String(formData.get('team_id') || '').trim() || null
-  const VALID_INVITE_ROLES: InviteRole[] = ['member', 'viewer', 'buyer', 'acquisition_manager', 'disposition_manager', 'admin']
-  const rawRole = String(formData.get('role') || 'member')
-  // Validate against the allowed set — 'owner' is a valid enum value but must
-  // never be grantable through an invite.
-  const roleValue: InviteRole = (VALID_INVITE_ROLES as string[]).includes(rawRole) ? (rawRole as InviteRole) : 'member'
-  const maxUses = Math.max(1, Math.min(500, Number(formData.get('max_uses') || 1)))
-  const sendEmail = String(formData.get('send_email') || '') === 'on'
-  const expiresInDays = Math.max(1, Math.min(365, Number(formData.get('expires_in_days') || 14)))
-  const inviteCode = generateInviteCode()
-  const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+  const role = String(formData.get('role') || 'member')
+  const maxUses = integerField(formData, 'max_uses', 1, 500)
+  const expiresInDays = integerField(formData, 'expires_in_days', 1, 365)
+  const sendEmail = formData.get('send_email') === 'on'
+  if (maxUses === null || expiresInDays === null || (sendEmail && !email)) redirect('/community?error=INVITE_INVALID')
 
-  if (sendEmail && !email) {
-    redirect(`/community?error=${toMessage('Email is required when sending an email invite.')}`)
-  }
-
-  const { data: team } = teamId
-    ? await supabase.from('community_teams').select('id,name').eq('organization_id', workspace.organization!.id).eq('id', teamId).maybeSingle()
-    : { data: null }
-
-  const inviteUrl = `${getBaseUrl()}/signup?invite=${encodeURIComponent(inviteCode)}`
-
-  const { data: invite, error } = await supabase
-    .from('community_invites')
-    .insert({
-      organization_id: workspace.organization!.id,
-      team_id: teamId,
-      created_by: workspace.user.id,
-      invite_code: inviteCode,
-      email: email || null,
-      full_name: fullName || null,
-      role: roleValue,
-      max_uses: maxUses,
-      expires_at: expiresAt,
-      metadata: { invite_url: inviteUrl, created_from: 'community_page' },
-    })
-    .select('id')
-    .single()
-
-  if (error) redirect(`/community?error=${toMessage(error.message)}`)
-
-  let deliveryStatus = 'code_created'
-  let deliveryError: string | null = null
-
-  if (sendEmail && email) {
-    const result = await sendCommunityInviteEmail({
-      to: email,
-      inviteCode,
-      inviteUrl,
-      organizationName: workspace.organization!.name,
-      teamName: team?.name || null,
-      inviterEmail: workspace.user.email,
-    })
-    deliveryStatus = result.sent ? 'email_sent' : 'email_failed'
-    deliveryError = result.error || null
-
-    await supabase
-      .from('community_invites')
-      .update({ delivery_status: deliveryStatus, delivery_error: deliveryError })
-      .eq('id', invite!.id)
-      .eq('organization_id', workspace.organization!.id)
-  }
-
-  await supabase.from('audit_logs').insert({
-    organization_id: workspace.organization!.id,
-    actor_id: workspace.user.id,
-    event_type: 'community_invite.created',
-    entity_type: 'community_invite',
-    entity_id: invite!.id,
-    metadata: { invite_code: inviteCode, email: email || null, team_id: teamId, delivery_status: deliveryStatus },
+  const supabase = await createSupabaseServerClient()
+  const { data, error } = await supabase.rpc('create_community_invite', {
+    _email: email || null,
+    _full_name: fullName || null,
+    _team_id: teamId,
+    _role: role,
+    _max_uses: maxUses,
+    _expires_in_days: expiresInDays,
+    _queue_email: sendEmail,
   })
+  if (error || !data) redirect('/community?error=INVITE_ACCEPTANCE_FAILED')
+
+  const result = data as { id: string; invite_code: string; organization_id: string }
+  const deliveryStatus = sendEmail ? 'EMAIL_QUEUED' : 'CODE_CREATED'
 
   revalidatePath('/community')
-  const message = deliveryStatus === 'email_failed'
-    ? `Invite code created, but email was not sent: ${deliveryError || 'email provider not configured'}`
-    : deliveryStatus === 'email_sent'
-      ? 'Invite email sent and invite code created'
-      : 'Invite code created'
-  redirect(`/community?message=${toMessage(message)}&code=${encodeURIComponent(inviteCode)}`)
+  redirect(`/community?message=${deliveryStatus}&code=${encodeURIComponent(result.invite_code)}`)
 }
 
 export async function revokeCommunityInviteAction(formData: FormData) {
-  const workspace = await requireCommunityAdmin()
+  await requireCommunityAdmin()
+  const inviteId = String(formData.get('invite_id') || '').trim()
+  if (!inviteId) redirect('/community?error=INVITE_INVALID')
   const supabase = await createSupabaseServerClient()
-  const inviteId = String(formData.get('invite_id') || '')
-
-  if (!inviteId) redirect('/community?error=Missing invite id')
-
-  const { error } = await supabase
-    .from('community_invites')
-    .update({ status: 'revoked' })
-    .eq('id', inviteId)
-    .eq('organization_id', workspace.organization!.id)
-
-  if (error) redirect(`/community?error=${toMessage(error.message)}`)
+  const { error } = await supabase.rpc('revoke_community_invite', { _invite_id: inviteId })
+  if (error) redirect('/community?error=INTERNAL_ERROR')
   revalidatePath('/community')
-  redirect('/community?message=Invite revoked')
+  redirect('/community?message=INVITE_REVOKED')
 }

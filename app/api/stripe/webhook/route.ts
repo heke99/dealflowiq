@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     // Signature failures never reach the events table (no trusted event id),
     // so log them for operators watching for misconfiguration or abuse.
     logWarn('stripe.webhook.signature_failed', { detail: error instanceof Error ? error.message : String(error) })
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid Stripe signature' }, { status: 400 })
+    return NextResponse.json({ error: 'INVALID_STRIPE_SIGNATURE' }, { status: 400 })
   }
 
   let event: StripeEvent
@@ -121,6 +121,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true })
   } catch (error) {
     await markEvent({ id: event.id, type: event.type, status: 'failed', payload: event, error: error instanceof Error ? error.message : 'Stripe webhook processing failed' })
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Stripe webhook processing failed' }, { status: 500 })
+    return NextResponse.json({ error: 'STRIPE_WEBHOOK_PROCESSING_FAILED' }, { status: 500 })
   }
 }

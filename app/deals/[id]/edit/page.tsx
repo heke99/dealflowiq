@@ -7,6 +7,7 @@ import { getOrganizationUnderwritingDefaults } from '@/lib/underwriting/defaults
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { formatFileSize } from '@/lib/deals/files'
 import { asRows, firstRow, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 function ExistingDealFiles({ dealId, files }: { dealId: string; files: Row[] }) {
   if (!files.length) return null
@@ -90,7 +91,7 @@ export default async function EditDealPage({ params, searchParams }: { params: P
         </section>
         {query?.saved === 'file_deleted' ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">File deleted.</div> : null}
         <ExistingDealFiles dealId={id} files={asRows(dealFiles)} />
-        <DealForm action={updateDealAction} submitLabel="Save Changes" deal={deal} property={property} error={query?.error ? String(query.error) : null} assumptionDefaults={assumptionDefaults} />
+        <DealForm action={updateDealAction} submitLabel="Save Changes" deal={deal} property={property} error={query?.error ? publicErrorMessage(query.error) : null} assumptionDefaults={assumptionDefaults} />
       </div>
     </AppShell>
   )

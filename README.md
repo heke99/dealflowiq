@@ -15,7 +15,7 @@ DealFlowIQ is a SaaS platform for real-estate investors: import and score listin
 
 | Area | Routes |
 |---|---|
-| Auth & onboarding | `/signup`, `/login`, `/forgot-password`, `/reset-password`, `/onboarding` |
+| Auth & onboarding | `/signup`, `/login`, `/forgot-password`, `/reset-password`, `/invites/accept`, `/onboarding` |
 | Deals & underwriting | `/deals`, `/deals/[id]/analyzer`, `/deals/[id]/rent-intelligence`, `/calculators` |
 | Market & imports | `/market`, `/imports`, `/opportunities`, `/saved-deals` |
 | Matching | `/buy-boxes`, `/buyers` |
@@ -35,7 +35,7 @@ Full guide: [docs/local-development.md](docs/local-development.md) · Environmen
 
 ### Supabase setup
 
-Apply migrations in `supabase/migrations/` in filename order (`supabase db push`). Migrations are forward-only; new changes go in new files starting at `034_`.
+All migrations use unique 14-digit timestamps. Run `npm run db:migrations:check` before a push. For a fresh local database use `./scripts/sync-supabase.sh --local-reset`; for an existing linked project follow [docs/database.md](docs/database.md#migration-reconciliation).
 
 ### Admin bootstrap
 
@@ -57,9 +57,12 @@ npm run build       # production build
 npm run lint        # eslint
 npm run typecheck   # tsc --noEmit
 npm run test        # vitest run
+npm run verify      # migrations + lint + typecheck + tests + build
 npm run test:watch  # vitest watch
 ```
 
 ## Deployment
 
-Checklist and rollback plan: [docs/deployment.md](docs/deployment.md) · Operational posture: [docs/production-readiness.md](docs/production-readiness.md) · Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
+Checklist and rollback plan: [docs/deployment.md](docs/deployment.md) · Operational posture: [docs/production-readiness.md](docs/production-readiness.md) · Auth/tenant model: [docs/auth-tenant-architecture.md](docs/auth-tenant-architecture.md) · Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
+
+- Auth/deployment configuration: [`docs/deployment-auth.md`](docs/deployment-auth.md)

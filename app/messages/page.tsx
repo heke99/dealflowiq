@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { firstRow, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 type Search = Record<string, string | string[] | undefined>
 
@@ -75,7 +76,7 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
       isPlatformAdmin={workspace.access.isPlatformAdmin}
     >
       <div className="space-y-6">
-        {loadError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Could not load conversations: {loadError.message}</div> : null}
+        {loadError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage('DATA_LOAD_FAILED')}</div> : null}
         <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-black p-6 sm:p-8">
           <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
             <div>

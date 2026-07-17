@@ -28,8 +28,8 @@ function rentValue(formData: FormData, key: string) {
   return value !== null && isReasonableMonthlyRent(value) ? value : null
 }
 
-function invalidRentRedirect(dealId: string, label: string) {
-  redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(`${label} must be a realistic monthly rent between $${MIN_REASONABLE_MONTHLY_RENT.toLocaleString()} and $${MAX_REASONABLE_MONTHLY_RENT.toLocaleString()}. If this is a sale price, do not use it as monthly rent.`)}`)
+function invalidRentRedirect(dealId: string) {
+  redirect(`/deals/${dealId}/rent-intelligence?error=RENT_ANALYSIS_FAILED`)
 }
 
 function intValue(formData: FormData, key: string) {
@@ -65,7 +65,7 @@ async function requireDeal(dealId: string) {
     .eq('id', dealId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (error || !deal) redirect(`/deals?error=${encodeURIComponent(error?.message || 'Deal not found')}`)
+  if (error || !deal) redirect(`/deals?error=RENT_ANALYSIS_FAILED`)
   const dealRow = deal as Row
   return { workspace, supabase, deal: dealRow, property: firstRow(dealRow.properties) }
 }
@@ -147,7 +147,7 @@ export async function addMarketRentCompAction(formData: FormData) {
   const rawMonthlyRent = numberValue(formData, 'monthly_rent')
   const monthlyRent = rentValue(formData, 'monthly_rent')
   if (rawMonthlyRent === null) redirect(`/deals/${dealId}/rent-intelligence?error=Monthly rent is required`)
-  if (monthlyRent === null) invalidRentRedirect(dealId, 'Monthly rent')
+  if (monthlyRent === null) invalidRentRedirect(dealId)
 
   const { error } = await supabase.from('market_rent_comps').insert({
     organization_id: workspace.organization!.id,
@@ -170,7 +170,7 @@ export async function addMarketRentCompAction(formData: FormData) {
     confidence_score: intValue(formData, 'confidence_score'),
   })
 
-  if (error) redirect(`/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/deals/${dealId}/rent-intelligence?error=RENT_ANALYSIS_FAILED`)
 
   if (formData.get('apply_to_deal') === 'on') await refreshMarketRentFromComps(supabase, workspace.organization!.id, dealId)
 
@@ -196,7 +196,7 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
   const sourceUrl = text(formData, 'zillow_url') || ''
   const rawManualRentOverride = numberValue(formData, 'monthly_rent_override')
   const manualRentOverride = rawManualRentOverride === null ? null : rentValue(formData, 'monthly_rent_override')
-  if (rawManualRentOverride !== null && manualRentOverride === null) invalidRentRedirect(dealId, 'Manual rent override')
+  if (rawManualRentOverride !== null && manualRentOverride === null) invalidRentRedirect(dealId)
 
   let redirectUrl = `/deals/${dealId}/rent-intelligence?saved=zillow`
 
@@ -252,7 +252,7 @@ export async function importZillowMarketRentCompAction(formData: FormData) {
       entity_id: dealId,
       metadata: { source_url: sourceUrl, error: message },
     })
-    redirectUrl = `/deals/${dealId}/rent-intelligence?error=${encodeURIComponent(message)}`
+    redirectUrl = `/deals/${dealId}/rent-intelligence?error=RENT_ANALYSIS_FAILED`
   }
 
   redirect(redirectUrl)
@@ -295,7 +295,7 @@ export async function lookupHudRentAction(formData: FormData) {
       status: 'failed',
       message: error instanceof Error ? error.message : 'HUD lookup failed',
     })
-    redirect(`${redirectTo}?error=${encodeURIComponent(error instanceof Error ? error.message : 'HUD lookup failed')}`)
+    redirect(`${redirectTo}?error=RENT_ANALYSIS_FAILED`)
   }
 }
 

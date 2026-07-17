@@ -4,11 +4,11 @@
 
 **"Your Supabase environment variables are missing"** — set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local` and restart the dev server.
 
-**User lands on the dashboard without a workspace** — the `create_default_organization` RPC failed on first load. The dashboard shows a recovery banner with a retry action; check Supabase logs for the RPC error. Common cause: migrations not fully applied (the function is redefined in `026_trial_access_member_overrides.sql`).
+**User has no workspace** — normal page reads never create one. The verified auth callback calls `bootstrap_current_user`; the onboarding recovery button can retry it safely. Check the structured server error and confirm `20260717000100_auth_tenant_reconciliation.sql` is applied.
 
-**Signup succeeded but no trial subscription** — verify the `(uuid, text)` overload of `ensure_organization_subscription` exists and that `billing_plans` contains the seeded `free` / `premium` / `community_owner` plans from migration `033`.
+**Signup succeeded but no trial subscription** — `restore_organization_subscription` can be invoked only by an owner or platform admin. Verify plan seeds and the reconciliation migration; do not grant clients access to the internal ensure function.
 
-**Invite code rejected** — invites expire (`expires_at`) and have `max_uses`. Check `community_invites.status`; revoked/expired invites must be re-issued from `/community`.
+**Invite code rejected** — open the canonical `/invites/accept?code=...` route. Check the stable result code, `community_invites`, and `community_invite_acceptances`; repeated acceptance by the same user is intentionally idempotent.
 
 ## Billing
 

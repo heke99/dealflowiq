@@ -16,7 +16,7 @@ function fmtDate(value?: unknown) {
 }
 
 function inviteLink(code: string) {
-  return `/signup?invite=${encodeURIComponent(code)}`
+  return `/invites/accept?code=${encodeURIComponent(code)}`
 }
 
 function StatusPill({ value }: { value: string }) {
@@ -116,8 +116,8 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
           </div>
         </section>
 
-        {params.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{decodeURIComponent(params.error)}</div> : null}
-        {params.message ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{decodeURIComponent(params.message)}{params.code ? <span className="ml-2 font-mono font-bold">{params.code}</span> : null}</div> : null}
+        {params.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">The community action could not be completed.</div> : null}
+        {params.message ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{params.message === 'EMAIL_QUEUED' ? 'Invite email queued.' : params.message === 'CODE_CREATED' ? 'Invite code created.' : 'Saved.'}{params.code ? <span className="ml-2 font-mono font-bold">{params.code}</span> : null}</div> : null}
 
         <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
           <div className="space-y-6">
@@ -182,7 +182,7 @@ export default async function CommunityPage({ searchParams }: CommunityPageProps
                         <Link href={inviteLink(code)} className="rounded-xl border border-white/10 px-3 py-2 font-semibold text-slate-100 hover:bg-white/10">Open signup link</Link>
                         {invite.status === 'active' && canManage ? <form action={revokeCommunityInviteAction}><input type="hidden" name="invite_id" value={String(invite.id)} /><button className="rounded-xl border border-red-400/20 px-3 py-2 font-semibold text-red-100 hover:bg-red-400/10">Revoke</button></form> : null}
                       </div>
-                      {invite.delivery_error ? <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-100">Email note: {String(invite.delivery_error)}</div> : null}
+                      {invite.delivery_status === 'email_failed' ? <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-100">Email delivery is being retried.</div> : null}
                     </div>
                   )
                 })}

@@ -4,6 +4,7 @@ import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { hasOrganizationRole, MANAGEMENT_ROLES } from '@/lib/auth/access'
 import { getOrganizationUnderwritingDefaults } from '@/lib/underwriting/defaults'
 import { saveUnderwritingDefaultsAction } from '@/app/settings/underwriting/actions'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 function Field({ label, name, defaultValue, hint, step = '0.01' }: { label: string; name: string; defaultValue: number; hint?: string; step?: string }) {
   return (
@@ -48,7 +49,7 @@ export default async function UnderwritingDefaultsPage({ searchParams }: { searc
         </section>
 
         {query?.saved ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Defaults saved.</div> : null}
-        {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {query?.error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(query.error)}</div> : null}
         {!canEdit ? (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
             You can view these defaults, but only workspace owners and admins can change them.

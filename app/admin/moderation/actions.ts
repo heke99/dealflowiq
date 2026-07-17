@@ -27,7 +27,7 @@ export async function resolveReportAction(formData: FormData) {
     .from('conversation_reports')
     .update({ status: resolution, reviewed_by: actor.id, reviewed_at: new Date().toISOString() })
     .eq('id', reportId)
-  if (error) redirect(`/admin/moderation?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/moderation?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     actorId: actor.id,
@@ -54,7 +54,7 @@ export async function archiveReportedConversationAction(formData: FormData) {
     .from('listing_conversations')
     .update({ status: 'archived' })
     .eq('id', conversationId)
-  if (error) redirect(`/admin/moderation?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/admin/moderation?error=ADMIN_ACTION_FAILED`)
 
   await recordAuditEvent({
     actorId: actor.id,

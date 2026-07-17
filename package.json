@@ -9,7 +9,12 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:migrations:check": "node scripts/check-migrations.mjs",
+    "verify": "npm run db:migrations:check && npm run lint && npm run typecheck && npm run test && npm run build",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "verify:release": "npm run verify && npm run test:integration && npm audit --audit-level=moderate",
+    "db:security:audit": "bash scripts/audit-supabase-security.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -17,7 +22,7 @@
     "@supabase/supabase-js": "^2.105.4",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
-    "next": "16.2.6",
+    "next": "^16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.75.0",
@@ -31,9 +36,14 @@
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.9"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.10"
+    }
   }
 }

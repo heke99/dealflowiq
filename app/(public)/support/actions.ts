@@ -27,10 +27,10 @@ export async function submitSupportRequestAction(formData: FormData) {
   const message = String(formData.get('message') || '').trim().slice(0, MAX_MESSAGE_LENGTH)
 
   if (!isValidEmail(email)) {
-    redirect(`/support?error=${encodeURIComponent('Enter a valid email address so we can reply to you.')}`)
+    redirect('/support?error=SUPPORT_INVALID_EMAIL')
   }
   if (!message) {
-    redirect(`/support?error=${encodeURIComponent('Describe your issue so we can help.')}`)
+    redirect('/support?error=SUPPORT_MESSAGE_REQUIRED')
   }
 
   // Light rate limit: one request per email per 10 minutes. A failed check
@@ -51,7 +51,7 @@ export async function submitSupportRequestAction(formData: FormData) {
     console.warn('[support] rate limit check failed:', error instanceof Error ? error.message : error)
   }
   if (recentlySubmitted) {
-    redirect(`/support?error=${encodeURIComponent('You already sent a request in the last 10 minutes. Please wait a bit before sending another, or email support@dealflowiq.com.')}`)
+    redirect('/support?error=SUPPORT_RATE_LIMIT')
   }
 
   await recordAuditEvent({

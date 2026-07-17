@@ -8,6 +8,7 @@ import { quickUpdateDealAssumptionsAction, restoreCalculationSnapshotAction } fr
 import { lookupHudRentAction, smartAnalyzeDealAction } from '@/app/deals/[id]/rent-intelligence/actions'
 import { calculateDealUnderwriting, formatMoney, formatPercent } from '@/lib/calculations/underwriting'
 import { asRows, firstRow, rowNumber, rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 
 function QuickField({ label, name, defaultValue }: { label: string; name: string; defaultValue?: unknown }) {
@@ -195,7 +196,7 @@ export default async function DealAnalyzerPage({ params, searchParams }: { param
           showSnapshotTools
           snapshots={snapshotRows}
           message={query?.notice ? String(query.notice) : query?.snapshot === 'saved' ? 'Calculation snapshot saved. Future assumption changes will not alter that saved analysis.' : query?.saved === 'assumptions' ? 'Inputs saved. The analyzer has been recalculated.' : query?.saved === 'hud' ? 'HUD rent updated and analysis refreshed.' : query?.saved === 'smart' ? 'Smart analysis refreshed.' : null}
-          error={query?.error ? String(query.error) : null}
+          error={query?.error ? publicErrorMessage(query.error) : null}
         />
       </div>
     </AppShell>

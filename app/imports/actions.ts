@@ -261,11 +261,11 @@ export async function analyzeImportUrlAction(formData: FormData) {
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   assertNotPaymentRequired(workspace, '/imports')
   if (!canUseFeature(workspace.access.features, 'market_source_imports') && !workspace.access.isPlatformAdmin) {
-    redirect(`/imports?error=${encodeURIComponent('URL imports are included with Source Imports. Upgrade to import and score listings.')}`)
+    redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   }
 
   const inputUrl = text(formData, 'input_url')
-  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=${encodeURIComponent('Paste a valid http(s) listing or provider URL first.')}`)
+  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   const visibility = visibilityValue(formData)
   const sourceName = text(formData, 'source_name')
@@ -274,25 +274,24 @@ export async function analyzeImportUrlAction(formData: FormData) {
   let analysis
   try {
     analysis = analyzeMarketUrl(inputUrl)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not analyze URL'
-    redirect(`/imports?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   }
 
   const sourceType = String(analysis.sourceType || 'manual_url')
   const policy = await importPolicyForSource(supabase, workspace.organization.id, sourceType)
-  if (!policy.active) redirect(`/imports?error=${encodeURIComponent(`${policy.label} import is not active. Configure provider policy before live import.`)}`)
-  if (analysis.isSearchUrl && !policy.searchImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} search import is not allowed by current provider policy.`)}`)
-  if (!analysis.isSearchUrl && !policy.listingImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} listing import is not allowed by current provider policy.`)}`)
+  if (!policy.active) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
+  if (analysis.isSearchUrl && !policy.searchImportAllowed) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
+  if (!analysis.isSearchUrl && !policy.listingImportAllowed) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   const recent = await countRecentProviderImports(supabase, workspace.organization.id, sourceType)
   const remaining = Math.max(0, policy.maxListingsPerHour - recent)
-  if (remaining <= 0) redirect(`/imports?error=${encodeURIComponent(`${policy.label} rate limit reached. Try again after the rolling hour window.`)}`)
+  if (remaining <= 0) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   try {
     await ensurePlanImportQuota({ supabase, workspace, requested: 1 })
-  } catch (error) {
-    redirect(`/imports?error=${encodeURIComponent(error instanceof Error ? error.message : 'Import limit reached')}`)
+  } catch {
+    redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   }
 
   const { data: job, error: jobError } = await supabase.from('market_import_jobs').insert({
@@ -313,7 +312,7 @@ export async function analyzeImportUrlAction(formData: FormData) {
     started_at: new Date().toISOString(),
   }).select('*').single()
 
-  if (jobError || !job) redirect(`/imports?error=${encodeURIComponent(jobError?.message || 'Could not create import job')}`)
+  if (jobError || !job) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   let targetUrl = analysis.normalizedUrl
   let discoveredCount = 1
@@ -432,11 +431,11 @@ export async function analyzeImportUrlAction(formData: FormData) {
       error_message: message,
     }).eq('id', job.id)
     await recordImportAuditEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, eventType: 'import_failed', message, metadata: { sourceType, inputUrl: analysis.normalizedUrl, targetUrl, jobId: job.id } })
-    redirect(`/imports?import_job_id=${job.id}&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?import_job_id=${job.id}&error=IMPORT_ACTION_FAILED`)
   }
 
   if (importedListingId) redirect(`/market/${importedListingId}?saved=imported`)
-  redirect(`/imports?import_job_id=${job.id}&error=${encodeURIComponent('Import finished but no listing id was returned.')}`)
+  redirect(`/imports?import_job_id=${job.id}&error=IMPORT_ACTION_FAILED`)
 }
 
 export async function createImportBatchAction(formData: FormData) {
@@ -444,11 +443,11 @@ export async function createImportBatchAction(formData: FormData) {
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   assertNotPaymentRequired(workspace, '/imports')
   if (!canUseFeature(workspace.access.features, 'market_source_imports') && !workspace.access.isPlatformAdmin) {
-    redirect(`/imports?error=${encodeURIComponent('URL imports are included with Source Imports. Upgrade to import and score listings.')}`)
+    redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   }
 
   const inputUrl = text(formData, 'input_url')
-  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=${encodeURIComponent('Paste a valid http(s) listing or provider URL first.')}`)
+  if (!inputUrl || !inputUrl.startsWith('http')) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   const visibility = visibilityValue(formData)
   const sourceName = text(formData, 'source_name')
@@ -457,21 +456,20 @@ export async function createImportBatchAction(formData: FormData) {
   let analysis
   try {
     analysis = analyzeMarketUrl(inputUrl)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not analyze URL'
-    redirect(`/imports?error=${encodeURIComponent(message)}`)
+  } catch {
+    redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   }
 
   const sourceType = String(analysis.sourceType || 'manual_url')
   const policy = await importPolicyForSource(supabase, workspace.organization.id, sourceType)
-  if (!policy.active) redirect(`/imports?error=${encodeURIComponent(`${policy.label} import is not active. Configure provider policy before live import.`)}`)
-  if (analysis.isSearchUrl && !policy.searchImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} search import is not allowed by current provider policy.`)}`)
-  if (!analysis.isSearchUrl && !policy.listingImportAllowed) redirect(`/imports?error=${encodeURIComponent(`${policy.label} listing import is not allowed by current provider policy.`)}`)
+  if (!policy.active) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
+  if (analysis.isSearchUrl && !policy.searchImportAllowed) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
+  if (!analysis.isSearchUrl && !policy.listingImportAllowed) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   try {
     await ensurePlanImportQuota({ supabase, workspace, requested: 1 })
-  } catch (error) {
-    redirect(`/imports?error=${encodeURIComponent(error instanceof Error ? error.message : 'Import limit reached')}`)
+  } catch {
+    redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   }
 
   const expiresAt = new Date(Date.now() + policy.storageDays * 24 * 60 * 60 * 1000).toISOString()
@@ -497,7 +495,7 @@ export async function createImportBatchAction(formData: FormData) {
     policy_snapshot: providerPolicySnapshot(policy),
     provider_data_expires_at: expiresAt,
   }).select('*').single()
-  if (batchError || !batch) redirect(`/imports?error=${encodeURIComponent(batchError?.message || 'Could not create import batch')}`)
+  if (batchError || !batch) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   const batchId = String(batch.id)
   await recordImportAuditEvent(supabase, {
@@ -515,7 +513,7 @@ export async function createImportBatchAction(formData: FormData) {
     const message = error instanceof Error ? error.message : 'Could not generate preview'
     await supabase.from('market_url_import_batches').update({ status: 'failed', last_error: message }).eq('id', batchId).eq('organization_id', workspace.organization.id)
     await recordImportAuditEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, importBatchId: batchId, eventType: 'import_failed', message, metadata: { sourceType } })
-    redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
   }
 
   revalidatePath('/imports')
@@ -538,7 +536,7 @@ export async function updateImportBatchStatusAction(formData: FormData) {
     .update(updates)
     .eq('id', batchId)
     .eq('organization_id', workspace.organization.id)
-  if (error) redirect(`/imports?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   revalidatePath('/imports')
   redirect(`/imports?batch=${batchId}&saved=status`)
 }
@@ -556,7 +554,7 @@ export async function generateImportPreviewAction(formData: FormData) {
     .eq('id', batchId)
     .eq('organization_id', workspace.organization.id)
     .maybeSingle()
-  if (batchError || !batch) redirect(`/imports?error=${encodeURIComponent(batchError?.message || 'Import batch not found')}`)
+  if (batchError || !batch) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
 
   try {
     await createPreviewForBatch({ supabase, workspace, batch })
@@ -564,7 +562,7 @@ export async function generateImportPreviewAction(formData: FormData) {
     const message = error instanceof Error ? error.message : 'Could not generate preview'
     await supabase.from('market_url_import_batches').update({ status: 'failed', last_error: message }).eq('id', batchId).eq('organization_id', workspace.organization.id)
     await recordImportAuditEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, importBatchId: batchId, eventType: 'import_failed', message, metadata: { sourceType: String(batch.source_type || 'generic') } })
-    redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(message)}`)
+    redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
   }
 
   revalidatePath('/imports')
@@ -586,21 +584,21 @@ export async function importPreviewItemsAction(formData: FormData) {
   const policy = await importPolicyForSource(supabase, workspace.organization.id, sourceType)
   const recent = await countRecentProviderImports(supabase, workspace.organization.id, sourceType)
   const remaining = Math.max(0, policy.maxListingsPerHour - recent)
-  if (remaining <= 0) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(`${policy.label} rate limit reached.`)}`)
+  if (remaining <= 0) redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
 
   let query = supabase.from('market_import_preview_items').select('*').eq('organization_id', workspace.organization.id).eq('import_batch_id', batchId).in('status', ['new', 'duplicate', 'existing'])
   if (!importFirst10) {
-    if (!ids.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('Select at least one preview item to import.')}`)
+    if (!ids.length) redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
     query = query.in('id', ids)
   }
   const { data: items, error } = await query.order('created_at', { ascending: true }).limit(Math.min(remaining, 10))
-  if (error) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(error.message)}`)
-  if (!items?.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('No importable preview items found. Generate preview first, or select rows with status new/duplicate/existing.')}`)
+  if (error) redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
+  if (!items?.length) redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
 
   try {
     await ensurePlanImportQuota({ supabase, workspace, requested: items.length })
-  } catch (quotaError) {
-    redirect(`/imports?batch=${batchId}&error=${encodeURIComponent(quotaError instanceof Error ? quotaError.message : 'Import limit reached')}`)
+  } catch {
+    redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
   }
 
   let created = 0
@@ -678,7 +676,7 @@ export async function importPreviewItemsAction(formData: FormData) {
 export async function skipPreviewItemsAction(formData: FormData) {
   const batchId = String(formData.get('batch_id') || '').trim()
   const ids = selectedPreviewIds(formData)
-  if (!batchId || !ids.length) redirect(`/imports?batch=${batchId}&error=${encodeURIComponent('Select preview items to skip.')}`)
+  if (!batchId || !ids.length) redirect(`/imports?batch=${batchId}&error=IMPORT_ACTION_FAILED`)
   const workspace = await getCurrentWorkspace()
   if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
   const supabase = await createSupabaseServerClient()
@@ -690,10 +688,11 @@ export async function skipPreviewItemsAction(formData: FormData) {
 
 export async function runProviderCleanupAction() {
   const workspace = await getCurrentWorkspace()
-  if (!workspace.organization?.id) redirect('/dashboard?error=Missing organization')
+  if (!workspace.organization?.id) redirect('/dashboard?error=WORKSPACE_ACCESS_DENIED')
+  if (!workspace.access.isPlatformAdmin) redirect('/imports?error=WORKSPACE_ACCESS_DENIED')
   const supabase = await createSupabaseServerClient()
   const { data, error } = await supabase.rpc('cleanup_expired_market_source_data')
-  if (error) redirect(`/imports?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect(`/imports?error=IMPORT_ACTION_FAILED`)
   const cleaned = Array.isArray(data) ? Number(asRow(data[0])?.cleaned_count || 0) : Number(data || 0)
   await recordImportAuditEvent(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, eventType: 'cleanup_completed', message: `Provider retention cleanup completed. ${cleaned} listing(s) cleaned.`, metadata: { cleaned } })
   await createInAppNotification(supabase, { organizationId: workspace.organization.id, userId: workspace.user.id, actorId: workspace.user.id, type: 'cleanup_completed', title: 'Provider cleanup completed', message: `${cleaned} expired provider record(s) cleaned.`, actionHref: '/imports', metadata: { cleaned } })

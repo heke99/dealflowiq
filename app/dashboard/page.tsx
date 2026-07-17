@@ -7,6 +7,7 @@ import { getAccountTypeConfig } from '@/lib/product/accountTypes'
 import { retrySubscriptionSetupAction, retryWorkspaceSetupAction } from '@/app/onboarding/actions'
 import { OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, OPPORTUNITY_SCORE_THRESHOLD, STRONG_OPPORTUNITY_RENT_CONFIDENCE_THRESHOLD, STRONG_OPPORTUNITY_SCORE_THRESHOLD } from '@/lib/market/opportunityRules'
 import { rowString, type Row } from '@/lib/types/rows'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 
 function money(value: unknown, compact = false) {
   const parsed = Number(value || 0)
@@ -118,7 +119,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
   return (
     <AppShell organizationName={workspace.organization?.name} userEmail={workspace.user.email} accountType={accountType} features={workspace.access.features} subscriptionStatus={workspace.access.status} planName={workspace.access.plan?.name} trialEndsAt={workspace.access.trialEndsAt} isPlatformAdmin={workspace.access.isPlatformAdmin}>
       <div className="space-y-8">
-        {query?.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(query.error)}</div> : null}
+        {query?.error ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(query.error)}</div> : null}
         {query?.message ? <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">{String(query.message)}</div> : null}
 
         {!orgId ? (
@@ -156,7 +157,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
               <div className="text-sm font-black uppercase tracking-wide text-emerald-300">DealFlowIQ command center</div>
               <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Good to see you. Your {config.shortTitle.toLowerCase()} pipeline is ready.</h1>
               <p className="mt-4 max-w-3xl text-slate-300">Import authorized URLs, review Market, push qualified listings into Opportunities and keep your underwriting assumptions synced across the whole workspace.</p>
-              {workspace.error ? <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">Supabase setup issue: {workspace.error}</div> : null}
+              {workspace.error ? <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(workspace.error)}</div> : null}
               <div className="mt-7 flex flex-wrap gap-3">
                 <Link href="/imports" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 hover:bg-slate-200">Import listings</Link>
                 <Link href="/opportunities" className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">Review opportunities</Link>

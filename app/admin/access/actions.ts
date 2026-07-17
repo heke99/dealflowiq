@@ -46,6 +46,8 @@ export async function createAdminAccessInviteAction(formData: FormData) {
 
   const email = String(formData.get('email') || '').trim().toLowerCase()
   const organizationName = String(formData.get('organization_name') || '').trim()
+  const targetMode = String(formData.get('target_mode') || 'new')
+  const organizationId = targetMode === 'existing' ? String(formData.get('organization_id') || '').trim() : null
   const accountType = getAccountType(formData.get('account_type'))
   const role = getRole(formData.get('role'))
   const planId = String(formData.get('plan_id') || '').trim() || null
@@ -55,8 +57,13 @@ export async function createAdminAccessInviteAction(formData: FormData) {
   const featuresOverride = parseFeatures(formData)
   const limitsOverride = parseLimits(formData)
 
-  if (!email || !email.includes('@')) {
-    redirect('/admin/access?error=Valid email is required')
+  if (!email || !email.includes('@')) redirect('/admin/access?error=INVALID_EMAIL')
+  if (!['new', 'existing'].includes(targetMode)) redirect('/admin/access?error=INVALID_TARGET')
+  if (targetMode === 'existing' && !organizationId) redirect('/admin/access?error=TARGET_REQUIRED')
+  if (targetMode === 'new' && role !== 'owner') redirect('/admin/access?error=NEW_WORKSPACE_REQUIRES_OWNER')
+  if (targetMode === 'existing' && role === 'owner') redirect('/admin/access?error=OWNERSHIP_TRANSFER_REQUIRED')
+  if (trialDays < 0 || trialDays > 3650 || expiresInDays < 1 || expiresInDays > 365) {
+    redirect('/admin/access?error=INVALID_NUMERIC_RANGE')
   }
 
   const supabase = await createSupabaseServerClient()
@@ -66,6 +73,7 @@ export async function createAdminAccessInviteAction(formData: FormData) {
   const { error } = await supabase.from('admin_access_invites').insert({
     email,
     organization_name: organizationName || null,
+    organization_id: organizationId,
     account_type: accountType,
     role,
     plan_id: planId,
@@ -77,13 +85,13 @@ export async function createAdminAccessInviteAction(formData: FormData) {
     created_by: createdBy,
   })
 
-  if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect('/admin/access?error=ADMIN_ACTION_FAILED')
 
   await recordAuditEvent({
     actorId: createdBy,
     eventType: 'admin_access_invite.created',
     entityType: 'admin_access_invite',
-    metadata: { email, account_type: accountType, role, plan_id: planId, trial_days: trialDays },
+    metadata: { email, account_type: accountType, role, plan_id: planId, trial_days: trialDays, target_mode: targetMode, organization_id: organizationId },
   })
 
   revalidatePath('/admin/access')
@@ -93,12 +101,12 @@ export async function createAdminAccessInviteAction(formData: FormData) {
 export async function revokeAdminAccessInviteAction(formData: FormData) {
   await requirePlatformAdmin()
   const id = String(formData.get('id') || '').trim()
-  if (!id) redirect('/admin/access?error=Invite ID is required')
+  if (!id) redirect('/admin/access?error=INVITE_INVALID')
 
   const supabase = await createSupabaseServerClient()
   const { data: userData } = await supabase.auth.getUser()
   const { error } = await supabase.from('admin_access_invites').update({ status: 'revoked' }).eq('id', id)
-  if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect('/admin/access?error=ADMIN_ACTION_FAILED')
 
   await recordAuditEvent({
     actorId: userData.user?.id || null,
@@ -142,7 +150,7 @@ export async function grantMemberFullAccessOverrideAction(formData: FormData) {
     updated_at: now,
   }, { onConflict: 'organization_id,user_id' })
 
-  if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect('/admin/access?error=ADMIN_ACTION_FAILED')
 
   await recordAuditEvent({
     organizationId,
@@ -172,7 +180,7 @@ export async function revokeMemberAccessOverrideAction(formData: FormData) {
     .update({ status: 'revoked', updated_at: new Date().toISOString() })
     .eq('id', id)
 
-  if (error) redirect(`/admin/access?error=${encodeURIComponent(error.message)}`)
+  if (error) redirect('/admin/access?error=ADMIN_ACTION_FAILED')
 
   await recordAuditEvent({
     actorId: userData.user?.id || null,

@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { getCurrentWorkspace } from '@/lib/auth/workspace'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { canUseFeature } from '@/lib/billing/features'
+import { publicErrorMessage } from '@/lib/errors/public-errors'
 import {
   convertListingToDealAction,
   createMarketSourceAction,
@@ -365,8 +366,8 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
             </div>
           </div>
           {params?.saved ? <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">Saved successfully.</div> : null}
-          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{String(params.error)}</div> : null}
-          {listingsResult.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{listingsResult.error.message}</div> : null}
+          {params?.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage(params.error)}</div> : null}
+          {listingsResult.error ? <div className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{publicErrorMessage('DATA_LOAD_FAILED')}</div> : null}
         </section>
 
         <nav className="flex gap-2 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03] p-2">
@@ -500,7 +501,7 @@ export default async function MarketPage({ searchParams }: { searchParams?: Prom
                           <div>Queued: {sourceQueue.filter((row) => row.status === 'queued').length}</div>
                           <div>Last: {dateText(source.last_run_at)}</div>
                         </div>
-                        {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">{String(source.last_error)}</div> : null}
+                        {source.last_error ? <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">The latest source run failed. Review the source configuration and retry.</div> : null}
                         <form action={runMarketSourceAction} className="mt-3">
                           <input type="hidden" name="source_id" value={String(source.id)} />
                           <SubmitButton disabled={!canRunSources} pendingText="Running source..." className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">Run now</SubmitButton>
